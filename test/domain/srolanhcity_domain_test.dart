@@ -256,50 +256,57 @@ void main() {
   });
 
   group('SpatialClusteringService & ReportRepository', () {
-    test(
-      'merges same-category report within 15 meters into Master Incident',
-      () {
-        final repo = ReportRepository();
-        final beforeCount = repo.reports.length;
-        final existing = repo.findById('#SC-20481')!;
-        final previousAffected = existing.affectedCitizens;
-
-        const nearbyPoint = LatLng(11.55649, 104.9282);
-        expect(
-          SpatialClusteringService.distanceMeters(
-            existing.coordinates,
-            nearbyPoint,
-          ),
-          lessThan(15.0),
-        );
-
-        final result = repo.submitReport(
-          category: IssueCategory.pothole,
-          description: 'Deep pothole here too',
-          severity: 5,
-          coordinates: nearbyPoint,
-          isAnonymous: true,
-        );
-
-        expect(result.mergedIntoExisting, isTrue);
-        expect(result.report.id, equals('#SC-20481'));
-        expect(repo.reports.length, equals(beforeCount));
-        expect(
-          repo.findById('#SC-20481')!.affectedCitizens,
-          equals(previousAffected + 1),
-        );
-      },
-    );
-
-    test('forceCreateNew creates a separate ticket even within 15m', () {
+    test('merges same-category report within 15 meters into neighbor Master Incident', () {
       final repo = ReportRepository();
       final beforeCount = repo.reports.length;
+      // #SC-20519 is a neighbor's community report (not owned by current user)
+      final existing = repo.findById('#SC-20519')!;
+      expect(existing.isContributedByCurrentUser, isFalse);
+      final previousAffected = existing.affectedCitizens;
+
+      final nearbyPoint = LatLng(
+        existing.coordinates.latitude + 0.00008,
+        existing.coordinates.longitude,
+      );
+      expect(
+        SpatialClusteringService.distanceMeters(
+          existing.coordinates,
+          nearbyPoint,
+        ),
+        lessThan(15.0),
+      );
 
       final result = repo.submitReport(
-        category: IssueCategory.pothole,
-        description: 'Separate pothole across the lane',
+        category: existing.category,
+        description: 'Same neighbor issue here too',
+        severity: 5,
+        coordinates: nearbyPoint,
+        isAnonymous: true,
+      );
+
+      expect(result.mergedIntoExisting, isTrue);
+      expect(result.alreadyReportedByUser, isFalse);
+      expect(result.report.id, equals('#SC-20519'));
+      expect(repo.reports.length, equals(beforeCount));
+      expect(
+        repo.findById('#SC-20519')!.affectedCitizens,
+        equals(previousAffected + 1),
+      );
+    });
+
+    test('forceCreateNew creates a separate ticket even within 15m of neighbor report', () {
+      final repo = ReportRepository();
+      final beforeCount = repo.reports.length;
+      final neighbor = repo.findById('#SC-20519')!;
+
+      final result = repo.submitReport(
+        category: neighbor.category,
+        description: 'Separate issue across the lane',
         severity: 4,
-        coordinates: const LatLng(11.55645, 104.9282),
+        coordinates: LatLng(
+          neighbor.coordinates.latitude + 0.00005,
+          neighbor.coordinates.longitude,
+        ),
         isAnonymous: false,
         forceCreateNew: true,
       );
@@ -527,11 +534,12 @@ void main() {
       expect(restoredSettings.newsKhanEnglish, equals('Toul Kork'));
       expect(restoredSettings.newsSangkatEnglish, equals('Boeung Kak 1'));
 
-      // Every issue category has a real bundled photo asset (including Illegal Waste)
-      for (final category in IssueCategory.values) {
+      // Every primary issue category has a real bundled photo asset (including Illegal Waste)
+      for (final category in IssueCategory.primaryCategories) {
         expect(category.defaultAssetPath, isNotNull);
         expect(category.defaultAssetPath, isNotEmpty);
       }
+      expect(IssueCategory.other.defaultAssetPath, isNull);
 
       // Area News includes uploaded My Reports + multi-district community reports
       final repo = ReportRepository();
@@ -939,9 +947,16 @@ void main() {
   group('Distance-Aware "Affects me" Eligibility & Anti-Abuse Guardrails', () {
     test('classifies <= 500 m as Verified Nearby, <= 15 km as City Commuter, and > 15 km outside Home Khan as Too Far', () {
       final repo = ReportRepository();
-      // Default profile Home Khan is Daun Penh; pick Sen Sok report (#SC-20524)
+      // Resident with saved Home Khan = Daun Penh; pick Sen Sok report (#SC-20524)
       final senSokReport = repo.findById('#SC-20524')!;
-      final profile = repo.profile;
+      const profile = UserProfile(
+        khmerName: 'តារា',
+        englishName: 'Dara',
+        phoneNumber: '+855 12 345 881',
+        khmerHomeArea: 'សង្កាត់ផ្សារថ្មី, ខណ្ឌដូនពេញ',
+        englishHomeArea: 'Phsar Thmei, Daun Penh',
+        homeProvinceCode: 'phnom_penh',
+      );
 
       // 1. ~110 m away -> Verified Nearby
       final nearby = SupportEligibilityService.evaluateWithLocation(
@@ -1282,6 +1297,201 @@ void main() {
       final restoredReport = CivicReport.fromJson(siemReapReport.toJson());
       expect(restoredReport.provinceCode, equals('siem_reap'));
       expect(restoredReport.englishProvince, equals('Siem Reap'));
+    });
+  });
+
+  group('QA Fixes: Descriptions, Guest Defaults, Priority Tiers, Different Problem & Self-Duplicate', () {
+    test('preserves empty description without injecting sample text and allows clearing via quickEdit', () {
+      final repo = ReportRepository();
+      final emptyResult = repo.submitReport(
+        category: IssueCategory.pothole,
+        description: '   ',
+        severity: 3,
+        coordinates: const LatLng(11.5310, 104.9090),
+        isAnonymous: false,
+      );
+      expect(emptyResult.report.description, isEmpty);
+      expect(emptyResult.report.hasDescription, isFalse);
+
+      final commented = repo.submitReport(
+        category: IssueCategory.drain,
+        description: 'Flooded outside market gate',
+        severity: 4,
+        coordinates: const LatLng(11.5320, 104.9095),
+        isAnonymous: false,
+      );
+      expect(commented.report.hasDescription, isTrue);
+      expect(
+        commented.report.description,
+        equals('Flooded outside market gate'),
+      );
+
+      final cleared = repo.quickEditUserReport(
+        commented.report.id,
+        description: '',
+        severity: 4,
+      );
+      expect(cleared?.hasDescription, isFalse);
+    });
+
+    test('defaults profile to Guest with blank fields, migrates untouched Sovannarith cache, and blocks Home Resident bypass', () {
+      const guest = UserProfile();
+      expect(guest.khmerName, equals('ភ្ញៀវ'));
+      expect(guest.englishName, equals('Guest'));
+      expect(guest.phoneNumber, isEmpty);
+      expect(guest.maskedPhone, isEmpty);
+      expect(guest.khmerHomeArea, isEmpty);
+      expect(guest.englishHomeArea, isEmpty);
+      expect(guest.homeProvinceCode, isNull);
+      expect(guest.hasHomeArea, isFalse);
+      expect(guest.initials, equals('G'));
+
+      // Legacy untouched Sovannarith JSON auto-migrates to Guest
+      final migrated = UserProfile.fromJson(const {
+        'khmerName': 'សុវណ្ណារិទ្ធ',
+        'englishName': 'Sovannarith',
+        'phoneNumber': '+855 12 345 881',
+        'khmerHomeArea': 'សង្កាត់ផ្សារថ្មី, ខណ្ឌដូនពេញ',
+        'englishHomeArea': 'Phsar Thmei, Daun Penh',
+      });
+      expect(migrated.englishName, equals('Guest'));
+      expect(migrated.phoneNumber, isEmpty);
+      expect(migrated.hasHomeArea, isFalse);
+
+      // Customized user profile is preserved untouched
+      final custom = UserProfile.fromJson(const {
+        'khmerName': 'សុខា',
+        'englishName': 'Sokha',
+        'phoneNumber': '+855 12 999 000',
+        'khmerHomeArea': 'សង្កាត់ផ្សារថ្មី, ខណ្ឌដូនពេញ',
+        'englishHomeArea': 'Phsar Thmei, Daun Penh',
+        'homeProvinceCode': 'phnom_penh',
+      });
+      expect(custom.englishName, equals('Sokha'));
+      expect(custom.hasHomeArea, isTrue);
+
+      // Guest with no home area does NOT get automatic Daun Penh Home Resident bypass
+      final repo = ReportRepository();
+      final daunPenhReport = repo.findById('#SC-20519')!;
+      final guestGpsOff = SupportEligibilityService.evaluateWithLocation(
+        report: daunPenhReport,
+        profile: guest,
+        locationResult: const LocationServiceDisabled(),
+        supportsInLast24Hours: 0,
+      );
+      expect(guestGpsOff, isA<SupportDeniedLocationRequired>());
+    });
+
+    test('PriorityCalculator.tierTable aligns with P5 -> P1 thresholds', () {
+      expect(PriorityCalculator.tierTable.length, equals(5));
+      expect(
+        PriorityCalculator.tierTable.map((r) => r.level).toList(),
+        equals([5, 4, 3, 2, 1]),
+      );
+      expect(
+        PriorityCalculator.tierTable.first.scoreRange,
+        equals('4.5 – 5.0'),
+      );
+      expect(PriorityCalculator.tierTable.last.scoreRange, equals('1.0 – 1.4'));
+    });
+
+    test('Different problem submission uses IssueCategory.other and customTitle without copying master incident', () {
+      final repo = ReportRepository();
+      final master = repo.findById('#SC-20481')!;
+      final beforeCount = repo.reports.length;
+
+      final result = repo.submitReport(
+        category: IssueCategory.other,
+        customTitle: 'Fallen tree blocking lane',
+        description: 'Large branch fell across road after storm',
+        severity: 4,
+        coordinates: master.coordinates,
+        isAnonymous: false,
+        forceCreateNew: true,
+      );
+
+      expect(result.mergedIntoExisting, isFalse);
+      expect(result.alreadyReportedByUser, isFalse);
+      expect(repo.reports.length, equals(beforeCount + 1));
+      expect(result.report.category, equals(IssueCategory.other));
+      expect(result.report.englishTitle, equals('Fallen tree blocking lane'));
+      expect(result.report.khmerTitle, equals('Fallen tree blocking lane'));
+      expect(
+        result.report.description,
+        equals('Large branch fell across road after storm'),
+      );
+    });
+
+    test('seeded My Reports block self-duplicate merging and self-voting via isContributedByCurrentUser', () {
+      final repo = ReportRepository();
+      final seededMine = repo.findById('#SC-20481')!;
+      expect(seededMine.isMine, isTrue);
+      expect(seededMine.isContributedByCurrentUser, isTrue);
+      final beforeAffected = seededMine.affectedCitizens;
+
+      // Re-reporting same issue at seeded My Report's location -> alreadyReportedByUser
+      final res = repo.submitReport(
+        category: seededMine.category,
+        description: 'Trying to report my own seeded pothole again',
+        severity: 4,
+        coordinates: seededMine.coordinates,
+        isAnonymous: false,
+      );
+      expect(res.mergedIntoExisting, isTrue);
+      expect(res.alreadyReportedByUser, isTrue);
+      expect(res.report.id, equals('#SC-20481'));
+      expect(
+        repo.findById('#SC-20481')!.affectedCitizens,
+        equals(beforeAffected),
+      );
+
+      // supportReport & SupportEligibilityService pre-check also guard seeded My Reports
+      repo.supportReport('#SC-20481');
+      expect(
+        repo.findById('#SC-20481')!.affectedCitizens,
+        equals(beforeAffected),
+      );
+      expect(
+        SupportEligibilityService.evaluatePreCheck(
+          report: seededMine,
+          supportsInLast24Hours: 0,
+        ),
+        isA<SupportDeniedAlreadyContributed>(),
+      );
+    });
+
+    test('MapClusterService.reportsInViewport order is stable regardless of camera center', () {
+      final repo = ReportRepository();
+      final ppBounds = LatLngBounds(
+        const LatLng(11.48, 104.84),
+        const LatLng(11.63, 104.98),
+      );
+      final orderA = MapClusterService.reportsInViewport(
+        reports: repo.reports,
+        bounds: ppBounds,
+        center: const LatLng(11.5564, 104.9282),
+      ).map((r) => r.id).toList();
+      final orderB = MapClusterService.reportsInViewport(
+        reports: repo.reports,
+        bounds: ppBounds,
+        center: const LatLng(11.5800, 104.8900),
+      ).map((r) => r.id).toList();
+      expect(orderA, equals(orderB));
+      expect(orderA.length, greaterThanOrEqualTo(5));
+    });
+
+    test('PWA web/manifest.json and web/index.html are branded SrolanhCity with no my_app leftovers', () {
+      final manifest = File('web/manifest.json').readAsStringSync();
+      final indexHtml = File('web/index.html').readAsStringSync();
+
+      expect(manifest, contains('"name": "SrolanhCity"'));
+      expect(manifest, contains('"short_name": "SrolanhCity"'));
+      expect(manifest, contains('"theme_color": "#006657"'));
+      expect(manifest, isNot(contains('my_app')));
+
+      expect(indexHtml, contains('SrolanhCity'));
+      expect(indexHtml, contains('apple-touch-icon.png'));
+      expect(indexHtml, isNot(contains('my_app')));
     });
   });
 }

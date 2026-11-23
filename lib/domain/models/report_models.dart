@@ -80,7 +80,25 @@ enum IssueCategory {
     sampleKhmerDescription:
         'មានគំនរសំរាមចោលក្បែរផ្លូវ មានក្លិនស្អុយ និងប៉ះពាល់សុខភាព',
     sampleEnglishDescription: 'Illegal garbage pile dumped roadside with strong odor affecting residents.',
+  ),
+  other(
+    khmerName: 'បញ្ហាផ្សេងៗ',
+    englishName: 'Other Issue',
+    defaultAssetPath: null,
+    defaultKhmerTitle: 'បញ្ហាហេដ្ឋារចនាសម្ព័ន្ធផ្សេងៗ',
+    defaultEnglishTitle: 'Other Street Issue',
+    sampleKhmerDescription: 'មានបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈត្រូវការជួសជុល',
+    sampleEnglishDescription:
+        'Public street infrastructure issue requiring attention.',
   );
+
+  /// The 4 core categories shown in HomePage's 4-column quick-report bar.
+  static const List<IssueCategory> primaryCategories = [
+    pothole,
+    streetlight,
+    drain,
+    trash,
+  ];
 
   const IssueCategory({
     required this.khmerName,
@@ -125,6 +143,12 @@ enum IssueCategory {
       ('ក្លិនស្អុយ', 'Bad odor'),
       ('បិទផ្លូវដើរ', 'Blocking sidewalk'),
       ('ជិតលំនៅឋាន', 'Near homes'),
+    ],
+    IssueCategory.other => const [
+      ('ផ្លូវដើរខូច', 'Broken sidewalk'),
+      ('ដើមឈើដួល', 'Fallen tree'),
+      ('ផ្លាកសញ្ញាខូច', 'Damaged sign'),
+      ('បញ្ហាសុវត្ថិភាព', 'Safety hazard'),
     ],
   };
 
@@ -274,11 +298,11 @@ class PriorityBreakdown {
 /// Editable citizen profile stored locally on-device.
 class UserProfile {
   const UserProfile({
-    this.khmerName = 'សុវណ្ណារិទ្ធ',
-    this.englishName = 'Sovannarith',
-    this.phoneNumber = '+855 12 345 881',
-    this.khmerHomeArea = 'សង្កាត់ផ្សារថ្មី, ខណ្ឌដូនពេញ',
-    this.englishHomeArea = 'Phsar Thmei, Daun Penh',
+    this.khmerName = 'ភ្ញៀវ',
+    this.englishName = 'Guest',
+    this.phoneNumber = '',
+    this.khmerHomeArea = '',
+    this.englishHomeArea = '',
     this.homeProvinceCode,
     this.avatarPhotoPath,
   });
@@ -291,6 +315,12 @@ class UserProfile {
   final String? homeProvinceCode;
   final String? avatarPhotoPath;
 
+  /// Whether the citizen has configured a home province or neighborhood.
+  bool get hasHomeArea =>
+      (homeProvinceCode != null && homeProvinceCode!.trim().isNotEmpty) ||
+      khmerHomeArea.trim().isNotEmpty ||
+      englishHomeArea.trim().isNotEmpty;
+
   /// Computes 1–2 uppercase initials from the English name (or fallback).
   String get initials {
     final parts = englishName
@@ -298,9 +328,10 @@ class UserProfile {
         .split(RegExp(r'\s+'))
         .where((p) => p.isNotEmpty)
         .toList();
-    if (parts.isEmpty) return 'SC';
+    if (parts.isEmpty) return 'G';
     if (parts.length == 1) {
       final word = parts.first;
+      if (word.toLowerCase() == 'guest') return 'G';
       return word.length >= 2
           ? word.substring(0, 2).toUpperCase()
           : word.toUpperCase();
@@ -308,9 +339,10 @@ class UserProfile {
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
 
-  /// Privacy-friendly masked phone display (e.g., `+855 *** 881`).
+  /// Privacy-friendly masked phone display (e.g., `+855 *** 881`), or empty.
   String get maskedPhone {
     final trimmed = phoneNumber.trim();
+    if (trimmed.isEmpty) return '';
     if (trimmed.length <= 6) return trimmed;
     final prefix = trimmed.startsWith('+')
         ? trimmed.substring(0, trimmed.length >= 4 ? 4 : 2)
@@ -326,6 +358,7 @@ class UserProfile {
     String? khmerHomeArea,
     String? englishHomeArea,
     String? homeProvinceCode,
+    bool clearHomeProvince = false,
     String? avatarPhotoPath,
     bool clearAvatar = false,
   }) {
@@ -335,7 +368,9 @@ class UserProfile {
       phoneNumber: phoneNumber ?? this.phoneNumber,
       khmerHomeArea: khmerHomeArea ?? this.khmerHomeArea,
       englishHomeArea: englishHomeArea ?? this.englishHomeArea,
-      homeProvinceCode: homeProvinceCode ?? this.homeProvinceCode,
+      homeProvinceCode: clearHomeProvince
+          ? null
+          : (homeProvinceCode ?? this.homeProvinceCode),
       avatarPhotoPath: clearAvatar
           ? null
           : (avatarPhotoPath ?? this.avatarPhotoPath),
@@ -353,16 +388,29 @@ class UserProfile {
   };
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
+    final khName = (json['khmerName'] as String?) ?? 'ភ្ញៀវ';
+    final enName = (json['englishName'] as String?) ?? 'Guest';
+    final phone = (json['phoneNumber'] as String?) ?? '';
+    final khArea = (json['khmerHomeArea'] as String?) ?? '';
+    final enArea = (json['englishHomeArea'] as String?) ?? '';
+    final avatar = json['avatarPhotoPath'] as String?;
+
+    // Migrate untouched legacy seeded persona cleanly to Guest defaults.
+    if (enName == 'Sovannarith' &&
+        phone == '+855 12 345 881' &&
+        enArea == 'Phsar Thmei, Daun Penh' &&
+        avatar == null) {
+      return const UserProfile();
+    }
+
     return UserProfile(
-      khmerName: (json['khmerName'] as String?) ?? 'សុវណ្ណារិទ្ធ',
-      englishName: (json['englishName'] as String?) ?? 'Sovannarith',
-      phoneNumber: (json['phoneNumber'] as String?) ?? '+855 12 345 881',
-      khmerHomeArea:
-          (json['khmerHomeArea'] as String?) ?? 'សង្កាត់ផ្សារថ្មី, ខណ្ឌដូនពេញ',
-      englishHomeArea:
-          (json['englishHomeArea'] as String?) ?? 'Phsar Thmei, Daun Penh',
+      khmerName: khName,
+      englishName: enName,
+      phoneNumber: phone,
+      khmerHomeArea: khArea,
+      englishHomeArea: enArea,
       homeProvinceCode: json['homeProvinceCode'] as String?,
-      avatarPhotoPath: json['avatarPhotoPath'] as String?,
+      avatarPhotoPath: avatar,
     );
   }
 }
@@ -597,6 +645,12 @@ class CivicReport {
   /// Whether the citizen can currently remove or quick-edit this report.
   bool canWithdraw({DateTime? now, Duration window = withdrawalWindow}) =>
       remainingWithdrawalTime(now: now, window: window) > Duration.zero;
+
+  bool get hasDescription => description.trim().isNotEmpty;
+
+  /// True if this report already belongs to the citizen (seeded/created/joined).
+  bool get isContributedByCurrentUser =>
+      isMine || createdByCurrentUser || joinedByCurrentUser;
 
   /// Whether this report was joined/supported by the citizen rather than
   /// created by them, and can still have its support undone.

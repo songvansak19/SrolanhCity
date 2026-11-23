@@ -213,7 +213,9 @@ class ProfilePage extends StatelessWidget {
                 child: BilingualText(
                   bilingual: tr,
                   khmer: profile.khmerName,
-                  english: '${profile.englishName} · ${profile.maskedPhone}',
+                  english: profile.maskedPhone.isEmpty
+                      ? profile.englishName
+                      : '${profile.englishName} · ${profile.maskedPhone}',
                   fontSize: 20,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   textAlign: TextAlign.center,
@@ -222,9 +224,26 @@ class ProfilePage extends StatelessWidget {
               const SizedBox(height: 4),
               Center(
                 child: Text(
-                  tr.primary(profile.khmerHomeArea, profile.englishHomeArea),
+                  profile.hasHomeArea
+                      ? tr.primary(
+                          profile.khmerHomeArea,
+                          profile.englishHomeArea,
+                        )
+                      : tr.primary(
+                          'មិនទាន់កំណត់តំបន់រស់នៅ',
+                          'Home area not set',
+                        ),
+                  key: profile.hasHomeArea
+                      ? null
+                      : const Key('profile-empty-area-hint'),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                  style: TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 12,
+                    fontStyle: profile.hasHomeArea
+                        ? FontStyle.normal
+                        : FontStyle.italic,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),

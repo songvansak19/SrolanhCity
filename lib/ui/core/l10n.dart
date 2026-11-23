@@ -43,5 +43,6 @@ class Bilingual {
     IssueCategory.streetlight => Icons.lightbulb_outline_rounded,
     IssueCategory.drain => Icons.water_drop_outlined,
     IssueCategory.trash => Icons.delete_outline_rounded,
+    IssueCategory.other => Icons.report_problem_outlined,
   };
 }

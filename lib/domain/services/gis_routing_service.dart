@@ -332,6 +332,10 @@ abstract final class GisRoutingService {
               'រដ្ឋបាល$khmerKhan និងសេវាប្រមូលសំរាម',
               '$englishKhan Admin & Waste Management',
             ),
+            (IssueCategory.other, _) => (
+              'រដ្ឋបាលរាជធានីភ្នំពេញ · $khmerKhan',
+              'Phnom Penh Capital Hall · $englishKhan',
+            ),
           }
         : switch ((category, inferredRoadClass)) {
             (IssueCategory.pothole, RoadClass.majorArtery) => (
@@ -353,6 +357,10 @@ abstract final class GisRoutingService {
             (IssueCategory.trash, _) => (
               'រដ្ឋបាល$khmerKhan និងសេវាប្រមូលសំរាម (${resolvedProvince.shortKhmer})',
               '$englishKhan Admin & Waste Management (${resolvedProvince.english})',
+            ),
+            (IssueCategory.other, _) => (
+              'រដ្ឋបាល$khmerKhan · ${resolvedProvince.khmer}',
+              '$englishKhan Admin · ${resolvedProvince.english}',
             ),
           };
 

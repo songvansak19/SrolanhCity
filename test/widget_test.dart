@@ -168,7 +168,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(BeforeAfterSlider), findsOneWidget);
 
-      await tester.ensureVisible(find.byKey(const Key('emoji-rating-5')));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('emoji-rating-5')),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('emoji-rating-5')));
       await tester.pumpAndSettle();
@@ -338,32 +342,32 @@ void main() {
       await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
       await tester.pumpAndSettle();
 
-      // Switch to News preview on HomePage — shows both My Reports & neighbor reports
+      // Switch to News preview on HomePage — Guest defaults to All Districts · Phnom Penh
       await tester.ensureVisible(find.byKey(const Key('home-tab-area-news')));
       await tester.tap(find.byKey(const Key('home-tab-area-news')));
       await tester.pumpAndSettle();
-      expect(find.text('Mine'), findsOneWidget);
-      expect(find.textContaining('Illegal Waste Dumping'), findsOneWidget);
+      expect(find.text('All Districts · Phnom Penh'), findsOneWidget);
 
-      // Open full AreaNewsPage
+      // Open full AreaNewsPage (Guest defaults to All Districts · Phnom Penh)
       await tester.ensureVisible(find.byKey(const Key('open-area-news-btn')));
       await tester.tap(find.byKey(const Key('open-area-news-btn')));
       await tester.pumpAndSettle();
       expect(find.byType(AreaNewsPage), findsOneWidget);
-      expect(find.textContaining('Phsar Thmei, Daun Penh'), findsWidgets);
-      expect(find.text('Deep pothole'), findsOneWidget);
-      expect(find.text('Illegal Waste Dumping'), findsOneWidget);
+      expect(find.textContaining('All Districts · Phnom Penh'), findsWidgets);
+      expect(find.text('Illegal Waste Dumping'), findsWidgets);
 
       // Switch Khan & Sangkat to Toul Kork -> Boeung Kak 1 (shows Clogged drain)
       await tester.tap(find.byKey(const Key('news-area-picker-btn')));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.textContaining('Toul Kork'));
+      final toulKorkChip = find.textContaining('Toul Kork').last;
+      await tester.ensureVisible(toulKorkChip);
       await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('Toul Kork'));
+      await tester.tap(toulKorkChip);
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Boeung Kak 1'));
+      final boeungKakChip = find.text('Boeung Kak 1').last;
+      await tester.ensureVisible(boeungKakChip);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Boeung Kak 1'));
+      await tester.tap(boeungKakChip);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('confirm-news-area-btn')));
       await tester.pumpAndSettle();
@@ -391,7 +395,7 @@ void main() {
   );
 
   testWidgets(
-    'TrackingPage renders understandable Priority Score breakdown formula',
+    'TrackingPage renders P5->P1 Priority Threshold Table without raw calculation equation',
     (tester) async {
       final repo = ReportRepository(
         initialSettings: const AppSettings(englishFirst: true),
@@ -401,12 +405,14 @@ void main() {
       );
 
       expect(find.byKey(const Key('priority-breakdown-card')), findsOneWidget);
+      expect(find.byKey(const Key('priority-threshold-table')), findsOneWidget);
+      expect(find.byKey(const Key('priority-tier-active-p4')), findsOneWidget);
       expect(find.textContaining('How priority is scored'), findsOneWidget);
       expect(find.textContaining('Major Artery'), findsOneWidget);
-      expect(
-        find.textContaining('Total: 2.0 + 1.2 + 1.2 = 4.4 / 5.0'),
-        findsOneWidget,
-      );
+      expect(find.text('4.5 – 5.0'), findsOneWidget);
+      expect(find.text('3.5 – 4.4'), findsOneWidget);
+      expect(find.text('1.0 – 1.4'), findsOneWidget);
+      expect(find.textContaining('Total: 2.0'), findsNothing);
     },
   );
 
@@ -729,6 +735,165 @@ void main() {
 
       expect(repo.profile.homeProvinceCode, equals('siem_reap'));
       expect(repo.profile.englishHomeArea, contains('Siem Reap'));
+    },
+  );
+
+  testWidgets(
+    'TrackingPage displays citizen description or "No comment" when empty',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      final withNote = repo.submitReport(
+        category: IssueCategory.pothole,
+        description: 'Huge sinkhole right outside school gate',
+        severity: 4,
+        coordinates: const LatLng(11.5315, 104.9085),
+        isAnonymous: false,
+      );
+      final withoutNote = repo.submitReport(
+        category: IssueCategory.drain,
+        description: '',
+        severity: 3,
+        coordinates: const LatLng(11.5335, 104.9085),
+        isAnonymous: false,
+      );
+
+      await tester.pumpWidget(
+        _wrapWithScope(repo, TrackingPage(reportId: withNote.report.id)),
+      );
+      expect(find.byKey(const Key('report-description-card')), findsOneWidget);
+      expect(
+        find.text('Huge sinkhole right outside school gate'),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(
+        _wrapWithScope(repo, TrackingPage(reportId: withoutNote.report.id)),
+      );
+      expect(find.byKey(const Key('report-description-card')), findsOneWidget);
+      expect(find.text('No comment'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'ProfilePage defaults to Guest with empty info and allows saving without phone',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
+
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Guest'), findsOneWidget);
+      expect(find.byKey(const Key('profile-empty-area-hint')), findsOneWidget);
+      expect(find.textContaining('Sovannarith'), findsNothing);
+      expect(find.textContaining('+855'), findsNothing);
+
+      // EditProfilePage saves cleanly without forcing phone or home area
+      await tester.tap(find.byKey(const Key('edit-profile-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save-profile-btn')));
+      await tester.pumpAndSettle();
+      expect(find.byType(EditProfilePage), findsNothing);
+      expect(repo.profile.englishName, equals('Guest'));
+      expect(repo.profile.phoneNumber, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'MapPage bottom carousel scrolls cleanly past 3+ cards without snapping back',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrapWithScope(repo, const MapPage()));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final carouselFinder = find.byKey(const Key('map-nearby-carousel'));
+      expect(carouselFinder, findsOneWidget);
+
+      // Swipe left 3 times (0 -> 1 -> 2 -> 3)
+      for (var step = 0; step < 3; step++) {
+        await tester.drag(carouselFinder, const Offset(-320, 0));
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 250));
+      }
+
+      final pageView = tester.widget<PageView>(carouselFinder);
+      expect(pageView.controller?.page?.round(), greaterThanOrEqualTo(3));
+    },
+  );
+
+  testWidgets(
+    'ReportWizard shows "View your existing report" for seeded My Reports and lets user submit a different problem',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      final seededMine = repo.findById('#SC-20481')!;
+      final beforeCount = repo.reports.length;
+
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          ReportWizardPage(
+            initialCategory: seededMine.category,
+            initialCoordinates: seededMine.coordinates,
+            voiceInputService: _UnavailableTestVoiceService(),
+            civicAiService: _UnconfiguredTestAiService(),
+          ),
+        ),
+      );
+
+      // Step 1 -> Step 2 -> Step 3
+      await tester.tap(find.text('Next'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.tap(find.textContaining('Confirm location'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Seeded #SC-20481 is in "My Reports" -> shows "already reported" instead of "Join"
+      expect(find.textContaining('already reported'), findsOneWidget);
+      expect(find.textContaining('View your existing report'), findsOneWidget);
+      expect(find.textContaining('Join this report'), findsNothing);
+
+      // Tap "It's a different problem" -> opens sheet defaulting to Other Issue
+      final diffBtn = find.byKey(const Key('different-problem-btn'));
+      await tester.ensureVisible(diffBtn);
+      await tester.tap(diffBtn);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect(find.byKey(const Key('different-problem-sheet')), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('different-problem-title-field')),
+        'Fallen tree across road',
+      );
+      await tester.enterText(
+        find.byKey(const Key('different-problem-desc-field')),
+        'Large tree branch fell after heavy wind',
+      );
+      await tester.tap(find.byKey(const Key('submit-different-problem-btn')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect(repo.reports.length, equals(beforeCount + 1));
+      final created = repo.reports.first;
+      expect(created.category, equals(IssueCategory.other));
+      expect(created.englishTitle, equals('Fallen tree across road'));
+      expect(
+        created.description,
+        equals('Large tree branch fell after heavy wind'),
+      );
     },
   );
 }

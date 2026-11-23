@@ -223,17 +223,11 @@ abstract final class MapClusterService {
     }
 
     visible.sort((a, b) {
-      final distA = SpatialClusteringService.distanceMeters(
-        a.coordinates,
-        center,
-      );
-      final distB = SpatialClusteringService.distanceMeters(
-        b.coordinates,
-        center,
-      );
-      final distCmp = distA.compareTo(distB);
-      if (distCmp != 0) return distCmp;
-      return b.priority.rawScore.compareTo(a.priority.rawScore);
+      final scoreCmp = b.priority.rawScore.compareTo(a.priority.rawScore);
+      if (scoreCmp != 0) return scoreCmp;
+      final timeCmp = b.createdAt.compareTo(a.createdAt);
+      if (timeCmp != 0) return timeCmp;
+      return a.id.compareTo(b.id);
     });
     return visible;
   }

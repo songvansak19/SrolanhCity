@@ -434,6 +434,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
     ReportWizardViewModel vm,
     Bilingual tr, {
     bool forceCreateNew = false,
+    String? customTitle,
   }) {
     HapticFeedback.mediumImpact();
     if (_dragDebounce?.isActive ?? false) {
@@ -445,12 +446,47 @@ class _ReportWizardPageState extends State<ReportWizardPage>
     if (!vm.locationVerified) {
       vm.confirmCurrentPin();
     }
-    final result = vm.submit(forceCreateNew: forceCreateNew);
+    final result = vm.submit(
+      forceCreateNew: forceCreateNew,
+      customTitle: customTitle,
+    );
     Navigator.pushReplacement<void, void>(
       context,
       MaterialPageRoute<void>(
         builder: (_) => ReportSubmittedPage(result: result),
       ),
+    );
+  }
+
+  Future<void> _openDifferentProblemSheet(
+    ReportWizardViewModel vm,
+    CivicReport masterReport,
+    Bilingual tr,
+  ) async {
+    HapticFeedback.selectionClick();
+    final submitted =
+        await showModalBottomSheet<
+          ({IssueCategory category, String title, String description})
+        >(
+          context: context,
+          isScrollControlled: true,
+          showDragHandle: true,
+          backgroundColor: AppColors.paper,
+          builder: (_) => _DifferentProblemSheet(
+            masterReport: masterReport,
+            initialDescription: vm.description,
+            tr: tr,
+          ),
+        );
+
+    if (submitted == null || !mounted) return;
+    vm.selectCategory(submitted.category);
+    vm.updateDescription(submitted.description);
+    _completeSubmission(
+      vm,
+      tr,
+      forceCreateNew: true,
+      customTitle: submitted.title.isNotEmpty ? submitted.title : null,
     );
   }
 
@@ -2336,9 +2372,9 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                   child: duplicate != null
                       ? Builder(
                           builder: (context) {
-                            final alreadyMine =
-                                duplicate.masterReport.createdByCurrentUser ||
-                                duplicate.masterReport.joinedByCurrentUser;
+                            final alreadyMine = duplicate
+                                .masterReport
+                                .isContributedByCurrentUser;
                             final hardBlocked =
                                 alreadyMine &&
                                 duplicate.distanceMeters <=
@@ -2477,32 +2513,58 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                     ),
                                   ),
                                   const SizedBox(height: 8),
-                                  if (hardBlocked)
+                                  if (hardBlocked) ...[
                                     Text(
                                       tr.primary(
-                                        'មិនអាចដាក់ស្នើបញ្ហាដូចគ្នាពីរដងនៅទីតាំងតែមួយបានទេ — អូសផែនទីទៅទីតាំងថ្មី ឬកែប្រែរបាយការណ៍ចាស់របស់អ្នក។',
-                                        'You cannot submit the same issue twice at the same spot. Move the pin to a new spot or edit your existing report.',
+                                        'មិនអាចដាក់ស្នើបញ្ហាដូចគ្នាពីរដងនៅទីតាំងតែមួយបានទេ — អូសផែនទីទៅទីតាំងថ្មី ឬរាយការណ៍ជាបញ្ហាប្រភេទផ្សេង។',
+                                        'You cannot submit the same issue twice at the same spot. Move the pin or report a different problem type.',
                                       ),
                                       textAlign: TextAlign.center,
                                       style: const TextStyle(
                                         fontSize: 11.5,
                                         color: AppColors.muted,
                                       ),
-                                    )
-                                  else
+                                    ),
+                                    const SizedBox(height: 6),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 40,
+                                      child: TextButton(
+                                        key: const Key('different-problem-btn'),
+                                        onPressed: () =>
+                                            _openDifferentProblemSheet(
+                                              vm,
+                                              duplicate.masterReport,
+                                              tr,
+                                            ),
+                                        child: Text(
+                                          tr.paired(
+                                            'ជាបញ្ហាផ្សេង',
+                                            "It's a different problem",
+                                          ),
+                                          style: const TextStyle(
+                                            color: AppColors.teal,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ] else
                                     SizedBox(
                                       width: double.infinity,
                                       height: 44,
                                       child: TextButton(
-                                        onPressed: () => _completeSubmission(
-                                          vm,
-                                          tr,
-                                          forceCreateNew: true,
-                                        ),
+                                        key: const Key('different-problem-btn'),
+                                        onPressed: () =>
+                                            _openDifferentProblemSheet(
+                                              vm,
+                                              duplicate.masterReport,
+                                              tr,
+                                            ),
                                         child: Text(
                                           tr.paired(
-                                            'នេះជាទីតាំងផ្សេង',
-                                            'Report as a separate location',
+                                            'ជាបញ្ហាផ្សេង',
+                                            "It's a different problem",
                                           ),
                                           style: const TextStyle(
                                             color: AppColors.muted,
@@ -2534,11 +2596,13 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                     width: double.infinity,
                                     height: 44,
                                     child: TextButton(
-                                      onPressed: () => _completeSubmission(
-                                        vm,
-                                        tr,
-                                        forceCreateNew: true,
-                                      ),
+                                      key: const Key('different-problem-btn'),
+                                      onPressed: () =>
+                                          _openDifferentProblemSheet(
+                                            vm,
+                                            duplicate.masterReport,
+                                            tr,
+                                          ),
                                       child: Text(
                                         tr.paired(
                                           'ជាបញ្ហាផ្សេង',
@@ -2721,6 +2785,176 @@ class _SeverityCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 10, color: AppColors.muted),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DifferentProblemSheet extends StatefulWidget {
+  const _DifferentProblemSheet({
+    required this.masterReport,
+    required this.initialDescription,
+    required this.tr,
+  });
+
+  final CivicReport masterReport;
+  final String initialDescription;
+  final Bilingual tr;
+
+  @override
+  State<_DifferentProblemSheet> createState() => _DifferentProblemSheetState();
+}
+
+class _DifferentProblemSheetState extends State<_DifferentProblemSheet> {
+  late IssueCategory _selectedCategory;
+  late final TextEditingController _titleController;
+  late final TextEditingController _descController;
+
+  @override
+  void initState() {
+    super.initState();
+    // Default to "Other Issue" (never the master incident's category) so the
+    // citizen genuinely files a different problem rather than another copy.
+    _selectedCategory = widget.masterReport.category == IssueCategory.other
+        ? IssueCategory.pothole
+        : IssueCategory.other;
+    _titleController = TextEditingController();
+    _descController = TextEditingController(text: widget.initialDescription);
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tr = widget.tr;
+    final masterReport = widget.masterReport;
+    final orderedCategories = [
+      IssueCategory.other,
+      ...IssueCategory.primaryCategories.where(
+        (c) => c != masterReport.category,
+      ),
+      if (masterReport.category != IssueCategory.other) masterReport.category,
+    ];
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          MediaQuery.viewInsetsOf(context).bottom + 18,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            key: const Key('different-problem-sheet'),
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              BilingualText(
+                bilingual: tr,
+                khmer: 'រាយការណ៍ជាបញ្ហាផ្សេង',
+                english: 'Report a different problem',
+                fontSize: 17,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                tr.primary(
+                  'ជ្រើសប្រភេទបញ្ហាផ្សេងពី ${masterReport.id} (${tr.categoryPrimary(masterReport.category)}) ឬបញ្ជាក់ចំណងជើងថ្មី។',
+                  'Choose a different category from ${masterReport.id} (${tr.categoryPrimary(masterReport.category)}) or specify a custom issue title.',
+                ),
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final cat in orderedCategories)
+                    ChoiceChip(
+                      key: Key('diff-cat-${cat.name}'),
+                      avatar: Icon(
+                        Bilingual.categoryIcon(cat),
+                        size: 16,
+                        color: _selectedCategory == cat
+                            ? AppColors.tealDark
+                            : AppColors.muted,
+                      ),
+                      label: Text(
+                        cat == masterReport.category
+                            ? tr.primary(
+                                '${cat.khmerName} (ទីតាំងផ្សេង)',
+                                'Separate ${cat.englishName}',
+                              )
+                            : tr.categoryPrimary(cat),
+                      ),
+                      selected: _selectedCategory == cat,
+                      onSelected: (_) {
+                        HapticFeedback.selectionClick();
+                        setState(() => _selectedCategory = cat);
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                key: const Key('different-problem-title-field'),
+                controller: _titleController,
+                decoration: InputDecoration(
+                  labelText: tr.paired(
+                    'ចំណងជើងបញ្ហា (ជាជម្រើស)',
+                    'Problem title (optional)',
+                  ),
+                  hintText: tr.primary(
+                    'ឧ. ផ្លូវដើរខូច ឬ ដើមឈើដួល',
+                    'e.g., Broken sidewalk or fallen tree',
+                  ),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                key: const Key('different-problem-desc-field'),
+                controller: _descController,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  labelText: tr.paired(
+                    'ពិពណ៌នាបន្ថែម (ជាជម្រើស)',
+                    'Description (optional)',
+                  ),
+                  hintText: tr.primary(
+                    'បញ្ជាក់ព័ត៌មានលម្អិតអំពីបញ្ហាផ្សេងនេះ...',
+                    'Describe this separate issue...',
+                  ),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton(
+                  key: const Key('submit-different-problem-btn'),
+                  onPressed: () => Navigator.pop(context, (
+                    category: _selectedCategory,
+                    title: _titleController.text.trim(),
+                    description: _descController.text.trim(),
+                  )),
+                  child: Text(
+                    tr.paired(
+                      'ដាក់ស្នើរបាយការណ៍ផ្សេងនេះ',
+                      'Submit separate report',
+                    ),
+                  ),
+                ),
               ),
             ],
           ),

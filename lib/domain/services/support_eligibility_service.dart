@@ -74,6 +74,7 @@ abstract final class SupportEligibilityService {
     required CivicReport report,
     required UserProfile profile,
   }) {
+    if (!profile.hasHomeArea) return false;
     final home = CambodiaLocationCatalog.matchFromProfileArea(
       khmerArea: profile.khmerHomeArea,
       englishArea: profile.englishHomeArea,
@@ -102,7 +103,7 @@ abstract final class SupportEligibilityService {
     if (report.status == ReportStatus.resolved) {
       return const SupportDeniedResolved();
     }
-    if (report.createdByCurrentUser || report.joinedByCurrentUser) {
+    if (report.isContributedByCurrentUser) {
       return const SupportDeniedAlreadyContributed();
     }
     if (supportsInLast24Hours >= maxSupportsPer24Hours) {

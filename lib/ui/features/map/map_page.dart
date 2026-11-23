@@ -54,6 +54,7 @@ class _MapPageState extends State<MapPage> {
 
   LatLng _center = _phnomPenh;
   LatLngBounds? _visibleBounds;
+  LatLngBounds? _carouselBounds;
   LatLng? _customPin;
   String? _customPinLabel;
   double? _lastAccuracyMeters;
@@ -91,7 +92,7 @@ class _MapPageState extends State<MapPage> {
           _zoom = 16.0;
           _clusterTier = MapClusterService.tierForZoom(_zoom);
         }
-      } else {
+      } else if (repo.profile.hasHomeArea) {
         final homeProvince = CambodiaLocationCatalog.matchFromProfileArea(
           khmerArea: repo.profile.khmerHomeArea,
           englishArea: repo.profile.englishHomeArea,
@@ -99,6 +100,10 @@ class _MapPageState extends State<MapPage> {
         ).province;
         _center = homeProvince.center;
         _zoom = homeProvince.isCapital ? 13.8 : 13.6;
+        _clusterTier = MapClusterService.tierForZoom(_zoom);
+      } else {
+        _center = _phnomPenh;
+        _zoom = 13.8;
         _clusterTier = MapClusterService.tierForZoom(_zoom);
       }
       _didApplyInitialFocus = true;
@@ -152,6 +157,7 @@ class _MapPageState extends State<MapPage> {
     if (_mapReady) {
       _mapController.move(target, clampedZoom);
       _visibleBounds = _mapController.camera.visibleBounds;
+      _carouselBounds = _visibleBounds;
     }
     if (_carouselController.hasClients) {
       _carouselController.jumpToPage(0);
@@ -166,7 +172,10 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  void _handleCameraPositionChanged(MapCamera camera) {
+  void _handleCameraPositionChanged(
+    MapCamera camera, {
+    required bool hasGesture,
+  }) {
     _center = camera.center;
     _zoom = camera.zoom;
     _visibleBounds = camera.visibleBounds;
@@ -183,15 +192,25 @@ class _MapPageState extends State<MapPage> {
         setState(() {
           _clusterTier = nextTier;
           _areaGridZoomBucket = nextBucket;
+          if (hasGesture) {
+            _carouselBounds = camera.visibleBounds;
+          }
         });
       }
       return;
     }
 
+    // Only rebuild the bottom viewport carousel when the user explicitly
+    // drags/pinches the map — never on programmatic pans triggered by swiping
+    // carousel cards (which previously caused a 2-card ping-pong loop).
+    if (!hasGesture) return;
+
     _viewportDebounce?.cancel();
     _viewportDebounce = Timer(const Duration(milliseconds: 150), () {
       if (!mounted) return;
-      setState(() {});
+      setState(() {
+        _carouselBounds = camera.visibleBounds;
+      });
     });
   }
 
@@ -540,7 +559,11 @@ class _MapPageState extends State<MapPage> {
               _lastAccuracyMeters = accuracyMeters;
               _zoom = 16.5;
             });
-            if (_mapReady) _mapController.move(point, 16.5);
+            if (_mapReady) {
+              _mapController.move(point, 16.5);
+              _visibleBounds = _mapController.camera.visibleBounds;
+              _carouselBounds = _visibleBounds;
+            }
             await _updatePinLabel(point);
           }
         case LocationMockDetected():
@@ -599,7 +622,11 @@ class _MapPageState extends State<MapPage> {
       _customPin = _phnomPenh;
       _zoom = 15.5;
     });
-    if (_mapReady) _mapController.move(_phnomPenh, 15.5);
+    if (_mapReady) {
+      _mapController.move(_phnomPenh, 15.5);
+      _visibleBounds = _mapController.camera.visibleBounds;
+      _carouselBounds = _visibleBounds;
+    }
     _updatePinLabel(_phnomPenh);
   }
 
@@ -618,6 +645,7 @@ class _MapPageState extends State<MapPage> {
     if (_mapReady) {
       _mapController.move(currentCenter, clamped);
       _visibleBounds = _mapController.camera.visibleBounds;
+      _carouselBounds = _visibleBounds;
     }
   }
 
@@ -639,8 +667,10 @@ class _MapPageState extends State<MapPage> {
               builder: (context, _) {
                 final live = repo.findById(report.id) ?? report;
                 final priority = live.priority;
-                final alreadyContributed =
-                    live.createdByCurrentUser || live.joinedByCurrentUser;
+                final alreadyContributed = live.isContributedByCurrentUser;
+                final isOwnReport =
+                    live.createdByCurrentUser ||
+                    (live.isMine && !live.joinedByCurrentUser);
 
                 Future<void> handleMapSupport() async {
                   if (isCheckingSupport || alreadyContributed) return;
@@ -741,7 +771,57 @@ class _MapPageState extends State<MapPage> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
+                        Container(
+                          key: const Key('map-sheet-description'),
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 9,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(top: 1),
+                                child: Icon(
+                                  Icons.notes_rounded,
+                                  size: 15,
+                                  color: AppColors.teal,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  live.hasDescription
+                                      ? live.description.trim()
+                                      : tr.primary(
+                                          'គ្មានមតិបន្ថែម',
+                                          'No comment',
+                                        ),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    height: 1.4,
+                                    color: live.hasDescription
+                                        ? AppColors.ink
+                                        : AppColors.muted,
+                                    fontStyle: live.hasDescription
+                                        ? FontStyle.normal
+                                        : FontStyle.italic,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
                         Wrap(
                           spacing: 8,
                           runSpacing: 6,
@@ -906,7 +986,7 @@ class _MapPageState extends State<MapPage> {
                                             'កំពុងផ្ទៀងផ្ទាត់...',
                                             'Verifying...',
                                           )
-                                        : live.createdByCurrentUser
+                                        : isOwnReport
                                         ? tr.primary(
                                             'របាយការណ៍របស់អ្នក',
                                             'Your report',
@@ -975,7 +1055,7 @@ class _MapPageState extends State<MapPage> {
         ? filteredReports
         : MapClusterService.reportsInViewport(
             reports: filteredReports,
-            bounds: _visibleBounds,
+            bounds: _carouselBounds ?? _visibleBounds,
             center: _center,
           );
     final isOverviewZoom = _zoom < MapClusterService.provinceClusterMaxZoom;
@@ -1002,10 +1082,11 @@ class _MapPageState extends State<MapPage> {
               onMapReady: () {
                 _mapReady = true;
                 _visibleBounds = _mapController.camera.visibleBounds;
+                _carouselBounds = _visibleBounds;
                 if (mounted) setState(() {});
               },
-              onPositionChanged: (camera, _) =>
-                  _handleCameraPositionChanged(camera),
+              onPositionChanged: (camera, hasGesture) =>
+                  _handleCameraPositionChanged(camera, hasGesture: hasGesture),
               onTap: (_, point) {
                 HapticFeedback.selectionClick();
                 setState(() {
@@ -1265,8 +1346,12 @@ class _MapPageState extends State<MapPage> {
                           ),
                           selected: _selectedCategory == null,
                           backgroundColor: Colors.white,
-                          onSelected: (_) =>
-                              setState(() => _selectedCategory = null),
+                          onSelected: (_) {
+                            setState(() => _selectedCategory = null);
+                            if (_carouselController.hasClients) {
+                              _carouselController.jumpToPage(0);
+                            }
+                          },
                         ),
                         const SizedBox(width: 6),
                         for (final cat in IssueCategory.values) ...[
@@ -1274,9 +1359,14 @@ class _MapPageState extends State<MapPage> {
                             label: Text(tr.categoryPrimary(cat)),
                             selected: _selectedCategory == cat,
                             backgroundColor: Colors.white,
-                            onSelected: (selected) => setState(
-                              () => _selectedCategory = selected ? cat : null,
-                            ),
+                            onSelected: (selected) {
+                              setState(
+                                () => _selectedCategory = selected ? cat : null,
+                              );
+                              if (_carouselController.hasClients) {
+                                _carouselController.jumpToPage(0);
+                              }
+                            },
                           ),
                           const SizedBox(width: 6),
                         ],
@@ -1554,9 +1644,7 @@ class _MapPageState extends State<MapPage> {
                     SizedBox(
                       height: 102,
                       child: PageView.builder(
-                        key: ValueKey<String>(
-                          'map-carousel-${viewportReports.length}-${viewportReports.first.id}',
-                        ),
+                        key: const Key('map-nearby-carousel'),
                         controller: _carouselController,
                         itemCount: viewportReports.length,
                         onPageChanged: (index) {
@@ -1567,7 +1655,11 @@ class _MapPageState extends State<MapPage> {
                           final report = viewportReports[index];
                           setState(() => _activeReportId = report.id);
                           if (_mapReady) {
-                            _mapController.move(report.coordinates, 15.6);
+                            final targetZoom =
+                                _zoom < MapClusterService.provinceClusterMaxZoom
+                                ? _zoom
+                                : (_zoom >= 13.4 ? _zoom : 15.6);
+                            _mapController.move(report.coordinates, targetZoom);
                           }
                         },
                         itemBuilder: (context, index) {

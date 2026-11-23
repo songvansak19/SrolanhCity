@@ -157,6 +157,22 @@ class ReportSubmittedPage extends StatelessWidget {
                                     '${report.affectedCitizens} affected citizen report(s)',
                                   ),
                                 ),
+                                const Divider(
+                                  height: 20,
+                                  color: AppColors.border,
+                                ),
+                                _SummaryRow(
+                                  key: const Key('submitted-description-row'),
+                                  icon: Icons.notes_rounded,
+                                  label: tr.paired('ពិពណ៌នា', 'Description'),
+                                  value: report.hasDescription
+                                      ? report.description.trim()
+                                      : tr.primary(
+                                          'គ្មានមតិបន្ថែម',
+                                          'No comment',
+                                        ),
+                                  mutedValue: !report.hasDescription,
+                                ),
                               ],
                             ),
                           ),
@@ -277,16 +293,19 @@ class ReportSubmittedPage extends StatelessWidget {
 
 class _SummaryRow extends StatelessWidget {
   const _SummaryRow({
+    super.key,
     required this.icon,
     required this.label,
     required this.value,
     this.subValue,
+    this.mutedValue = false,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final String? subValue;
+  final bool mutedValue;
 
   @override
   Widget build(BuildContext context) {
@@ -319,10 +338,11 @@ class _SummaryRow extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 value,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
+                  fontWeight: mutedValue ? FontWeight.w500 : FontWeight.w700,
+                  fontStyle: mutedValue ? FontStyle.italic : FontStyle.normal,
+                  color: mutedValue ? AppColors.muted : AppColors.ink,
                 ),
               ),
               if (subValue != null)

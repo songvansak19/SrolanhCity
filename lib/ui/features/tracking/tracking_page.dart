@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../data/repositories/report_repository.dart';
 import '../../../data/services/location_service.dart';
 import '../../../domain/models/report_models.dart';
+import '../../../domain/services/priority_calculator.dart';
 import '../../../domain/services/relative_time_formatter.dart';
 import '../../../domain/services/support_eligibility_service.dart';
 import '../../core/l10n.dart';
@@ -425,7 +426,9 @@ class _TrackingPageState extends State<TrackingPage> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 12),
+                      _ReportDescriptionCard(report: report, tr: tr),
+                      const SizedBox(height: 18),
 
                       // Interactive 5-Emoji Satisfaction Rating (Screen 3.2)
                       Container(
@@ -710,6 +713,8 @@ class _TrackingPageState extends State<TrackingPage> {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      _ReportDescriptionCard(report: report, tr: tr),
                       if (allPhotos.length > 1) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -1117,8 +1122,10 @@ class _TrackingPageState extends State<TrackingPage> {
                         child: Builder(
                           builder: (context) {
                             final alreadyContributed =
+                                report.isContributedByCurrentUser;
+                            final isOwnReport =
                                 report.createdByCurrentUser ||
-                                report.joinedByCurrentUser;
+                                (report.isMine && !report.joinedByCurrentUser);
                             return SizedBox(
                               height: 50,
                               child: FilledButton.icon(
@@ -1191,7 +1198,7 @@ class _TrackingPageState extends State<TrackingPage> {
                                           'កំពុងផ្ទៀងផ្ទាត់...',
                                           'Verifying...',
                                         )
-                                      : report.createdByCurrentUser
+                                      : isOwnReport
                                       ? tr.primary(
                                           'របាយការណ៍របស់អ្នក',
                                           'Your report',
@@ -1349,6 +1356,62 @@ class _EmojiRatingButton extends StatelessWidget {
   }
 }
 
+class _ReportDescriptionCard extends StatelessWidget {
+  const _ReportDescriptionCard({required this.report, required this.tr});
+
+  final CivicReport report;
+  final Bilingual tr;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasComment = report.hasDescription;
+    return Container(
+      key: const Key('report-description-card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppColors.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.notes_rounded, size: 16, color: AppColors.teal),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  tr.paired('ការពិពណ៌នាបញ្ហា', 'Citizen description'),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hasComment
+                ? report.description.trim()
+                : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
+            style: TextStyle(
+              fontSize: 13.5,
+              height: 1.45,
+              color: hasComment ? AppColors.ink : AppColors.muted,
+              fontStyle: hasComment ? FontStyle.normal : FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PriorityBreakdownCard extends StatelessWidget {
   const _PriorityBreakdownCard({
     required this.report,
@@ -1368,11 +1431,6 @@ class _PriorityBreakdownCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final trafficPts = (priority.trafficScore * 0.4).toStringAsFixed(1);
-    final severityPts = (priority.severityScore * 0.3).toStringAsFixed(1);
-    final reportsPts = (priority.reportCountScore * 0.3).toStringAsFixed(1);
-    final totalPts = priority.rawScore.toStringAsFixed(1);
-
     return Container(
       key: const Key('priority-breakdown-card'),
       padding: const EdgeInsets.all(16),
@@ -1393,7 +1451,7 @@ class _PriorityBreakdownCard extends StatelessWidget {
                   children: [
                     Text(
                       tr.paired(
-                        'របៀបគណនាពិន្ទុអាទិភាព',
+                        'របៀបកំណត់កម្រិតអាទិភាព',
                         'How priority is scored',
                       ),
                       style: const TextStyle(
@@ -1440,7 +1498,6 @@ class _PriorityBreakdownCard extends StatelessWidget {
                         report.roadClass.englishLabel,
                       ),
                       scoreOutOfFive: priority.trafficScore,
-                      pointsLabel: '+$trafficPts',
                     ),
                     const SizedBox(height: 10),
                     _PriorityFactorBar(
@@ -1451,7 +1508,6 @@ class _PriorityBreakdownCard extends StatelessWidget {
                       ),
                       reason: _severityLabel(report.severity),
                       scoreOutOfFive: priority.severityScore,
-                      pointsLabel: '+$severityPts',
                     ),
                     const SizedBox(height: 10),
                     _PriorityFactorBar(
@@ -1465,34 +1521,173 @@ class _PriorityBreakdownCard extends StatelessWidget {
                         '${report.affectedCitizens} citizen(s)',
                       ),
                       scoreOutOfFive: priority.reportCountScore,
-                      pointsLabel: '+$reportsPts',
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Container(
+            key: const Key('priority-threshold-table'),
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: AppColors.paper,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(color: AppColors.border),
             ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 5,
+                        child: Text(
+                          tr.primary('កម្រិតអាទិភាព', 'Priority tier'),
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          tr.primary('ពិន្ទុត្រូវការ', 'Score'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          tr.primary('គោលដៅជួសជុល', 'Target fix'),
+                          textAlign: TextAlign.end,
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: AppColors.border),
+                const SizedBox(height: 4),
+                for (final row in PriorityCalculator.tierTable)
+                  _PriorityThresholdRow(
+                    rule: row,
+                    isActive: row.level == priority.level,
+                    tr: tr,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PriorityThresholdRow extends StatelessWidget {
+  const _PriorityThresholdRow({
+    required this.rule,
+    required this.isActive,
+    required this.tr,
+  });
+
+  final PriorityTierRule rule;
+  final bool isActive;
+  final Bilingual tr;
+
+  @override
+  Widget build(BuildContext context) {
+    final badgeColor = AppColors.priorityColor(rule.level);
+    final badgeFg = AppColors.priorityForeground(rule.level);
+
+    return Container(
+      key: isActive ? Key('priority-tier-active-p${rule.level}') : null,
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      decoration: BoxDecoration(
+        color: isActive ? AppColors.tealSoft : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: isActive
+            ? Border.all(color: AppColors.teal.withValues(alpha: 0.45))
+            : null,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: Row(
+              children: [
+                Container(
+                  width: 28,
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: badgeColor,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'P${rule.level}',
+                    style: AppFonts.displayStyle(
+                      fontSize: 10.5,
+                      color: badgeFg,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    tr.primary(rule.khmerName, rule.englishName),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                      color: isActive ? AppColors.tealDark : AppColors.ink,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 3,
             child: Text(
-              tr.primary(
-                'សរុប៖ $trafficPts + $severityPts + $reportsPts = $totalPts / 5.0 → កម្រិត P${priority.level} (${priority.khmerLevelName})',
-                'Total: $trafficPts + $severityPts + $reportsPts = $totalPts / 5.0 → P${priority.level} (${priority.englishLevelName})',
-              ),
+              rule.scoreRange,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: AppFonts.display,
-                fontFamilyFallback: [AppFonts.body],
+              style: AppFonts.displayStyle(
+                fontSize: 11.5,
+                fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+                color: isActive ? AppColors.tealDark : AppColors.ink,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              tr.primary(rule.khmerSla, rule.englishSla),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: TextStyle(
                 fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: AppColors.ink,
+                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                color: isActive ? AppColors.tealDark : AppColors.muted,
               ),
             ),
           ),
@@ -1508,14 +1703,12 @@ class _PriorityFactorBar extends StatelessWidget {
     required this.title,
     required this.reason,
     required this.scoreOutOfFive,
-    required this.pointsLabel,
   });
 
   final Color color;
   final String title;
   final String reason;
   final int scoreOutOfFive;
-  final String pointsLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -1543,10 +1736,10 @@ class _PriorityFactorBar extends StatelessWidget {
               ),
             ),
             Text(
-              pointsLabel,
+              '$scoreOutOfFive/5',
               style: AppFonts.displayStyle(
-                fontSize: 11.5,
-                color: AppColors.tealDark,
+                fontSize: 11,
+                color: AppColors.muted,
               ),
             ),
           ],

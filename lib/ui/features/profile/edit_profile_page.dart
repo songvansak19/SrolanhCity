@@ -27,7 +27,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late final TextEditingController _khmerAreaController;
   late final TextEditingController _englishAreaController;
 
-  ProvinceOption _selectedProvince = CambodiaLocationCatalog.phnomPenh;
+  ProvinceOption? _selectedProvince;
   String? _avatarPhotoPath;
   bool _initialized = false;
 
@@ -51,11 +51,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
       _phoneController.text = profile.phoneNumber;
       _khmerAreaController.text = profile.khmerHomeArea;
       _englishAreaController.text = profile.englishHomeArea;
-      _selectedProvince = CambodiaLocationCatalog.matchFromProfileArea(
-        khmerArea: profile.khmerHomeArea,
-        englishArea: profile.englishHomeArea,
-        provinceCode: profile.homeProvinceCode,
-      ).province;
+      _selectedProvince = profile.hasHomeArea
+          ? CambodiaLocationCatalog.matchFromProfileArea(
+              khmerArea: profile.khmerHomeArea,
+              englishArea: profile.englishHomeArea,
+              provinceCode: profile.homeProvinceCode,
+            ).province
+          : null;
       _avatarPhotoPath = profile.avatarPhotoPath;
       _initialized = true;
     }
@@ -73,15 +75,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   UserProfile _buildDraftProfile() => UserProfile(
     khmerName: _khmerNameController.text.trim().isEmpty
-        ? 'សុវណ្ណារិទ្ធ'
+        ? 'ភ្ញៀវ'
         : _khmerNameController.text.trim(),
     englishName: _englishNameController.text.trim().isEmpty
-        ? 'Sovannarith'
+        ? 'Guest'
         : _englishNameController.text.trim(),
     phoneNumber: _phoneController.text.trim(),
     khmerHomeArea: _khmerAreaController.text.trim(),
     englishHomeArea: _englishAreaController.text.trim(),
-    homeProvinceCode: _selectedProvince.code,
+    homeProvinceCode: _selectedProvince?.code,
     avatarPhotoPath: _avatarPhotoPath,
   );
 
@@ -142,7 +144,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         itemBuilder: (_, index) {
                           final province = matches[index];
                           final selected =
-                              province.code == _selectedProvince.code;
+                              province.code == _selectedProvince?.code;
                           return ListTile(
                             key: Key('edit-province-option-${province.code}'),
                             dense: true,
@@ -458,7 +460,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                               helperMaxLines: 2,
                             ),
                             validator: (value) {
-                              if (value == null || value.trim().length < 6) {
+                              final trimmed = value?.trim() ?? '';
+                              if (trimmed.isNotEmpty && trimmed.length < 6) {
                                 return tr.primary(
                                   'សូមបញ្ចូលលេខទូរស័ព្ទត្រឹមត្រូវ',
                                   'Please enter a valid phone number',
@@ -514,14 +517,24 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                           ),
                                         ),
                                         Text(
-                                          tr.primary(
-                                            _selectedProvince.khmer,
-                                            _selectedProvince.english,
-                                          ),
-                                          style: const TextStyle(
+                                          _selectedProvince == null
+                                              ? tr.primary(
+                                                  'មិនទាន់ជ្រើសរើស (ស្រេចចិត្ត)',
+                                                  'Not selected (optional)',
+                                                )
+                                              : tr.primary(
+                                                  _selectedProvince!.khmer,
+                                                  _selectedProvince!.english,
+                                                ),
+                                          style: TextStyle(
                                             fontSize: 14,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.ink,
+                                            fontWeight:
+                                                _selectedProvince == null
+                                                ? FontWeight.w500
+                                                : FontWeight.w700,
+                                            color: _selectedProvince == null
+                                                ? AppColors.muted
+                                                : AppColors.ink,
                                           ),
                                         ),
                                       ],
@@ -535,28 +548,30 @@ class _EditProfilePageState extends State<EditProfilePage> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final (kh, en)
-                                  in CambodiaLocationCatalog.presetsForProvince(
-                                    _selectedProvince,
-                                  ))
-                                ChoiceChip(
-                                  label: Text(tr.primary(kh, en)),
-                                  selected: _englishAreaController.text == en,
-                                  onSelected: (_) {
-                                    HapticFeedback.selectionClick();
-                                    setState(() {
-                                      _khmerAreaController.text = kh;
-                                      _englishAreaController.text = en;
-                                    });
-                                  },
-                                ),
-                            ],
-                          ),
+                          if (_selectedProvince != null) ...[
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final (kh, en)
+                                    in CambodiaLocationCatalog.presetsForProvince(
+                                      _selectedProvince!,
+                                    ))
+                                  ChoiceChip(
+                                    label: Text(tr.primary(kh, en)),
+                                    selected: _englishAreaController.text == en,
+                                    onSelected: (_) {
+                                      HapticFeedback.selectionClick();
+                                      setState(() {
+                                        _khmerAreaController.text = kh;
+                                        _englishAreaController.text = en;
+                                      });
+                                    },
+                                  ),
+                              ],
+                            ),
+                          ],
                           const SizedBox(height: 14),
                           TextFormField(
                             key: const Key('edit-khmer-area'),

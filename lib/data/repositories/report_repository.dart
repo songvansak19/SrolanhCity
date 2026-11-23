@@ -101,11 +101,18 @@ class ReportRepository extends ChangeNotifier {
       return (province: null, khan: null, sangkat: null);
     }
 
-    final home = CambodiaLocationCatalog.matchFromProfileArea(
-      khmerArea: _profile.khmerHomeArea,
-      englishArea: _profile.englishHomeArea,
-      provinceCode: _profile.homeProvinceCode,
-    );
+    final hasHome = _profile.hasHomeArea;
+    final home = hasHome
+        ? CambodiaLocationCatalog.matchFromProfileArea(
+            khmerArea: _profile.khmerHomeArea,
+            englishArea: _profile.englishHomeArea,
+            provinceCode: _profile.homeProvinceCode,
+          )
+        : (
+            province: CambodiaLocationCatalog.phnomPenh,
+            khan: null,
+            sangkat: null,
+          );
 
     final activeProvince =
         CambodiaLocationCatalog.findProvinceByCode(
@@ -514,6 +521,7 @@ class ReportRepository extends ChangeNotifier {
     required int severity,
     required LatLng coordinates,
     required bool isAnonymous,
+    String? customTitle,
     String? localPhotoPath,
     List<String> additionalLocalPhotoPaths = const [],
     String? voiceTranscript,
@@ -530,11 +538,10 @@ class ReportRepository extends ChangeNotifier {
     );
 
     // Block the same user from duplicating or self-inflating a report they
-    // already created or joined at the same spot.
+    // already own, created, or joined at the same spot.
     if (duplicate != null) {
       final existing = duplicate.masterReport;
-      final alreadyContributedByUser =
-          existing.createdByCurrentUser || existing.joinedByCurrentUser;
+      final alreadyContributedByUser = existing.isContributedByCurrentUser;
 
       if (alreadyContributedByUser &&
           (!forceCreateNew ||
@@ -610,14 +617,17 @@ class ReportRepository extends ChangeNotifier {
       reportCount: 1,
     );
 
+    final trimmedTitle = customTitle?.trim() ?? '';
     final created = CivicReport(
       id: ticketId,
       category: category,
-      khmerTitle: category.defaultKhmerTitle,
-      englishTitle: category.defaultEnglishTitle,
-      description: description.trim().isEmpty
-          ? category.sampleKhmerDescription
-          : description.trim(),
+      khmerTitle: trimmedTitle.isNotEmpty
+          ? trimmedTitle
+          : category.defaultKhmerTitle,
+      englishTitle: trimmedTitle.isNotEmpty
+          ? trimmedTitle
+          : category.defaultEnglishTitle,
+      description: description.trim(),
       khmerLocation: routing.fullKhmerLocation,
       englishLocation: routing.fullEnglishLocation,
       coordinates: coordinates,
@@ -722,9 +732,7 @@ class ReportRepository extends ChangeNotifier {
       reportCount: existing.affectedCitizens,
     );
     final updated = existing.copyWith(
-      description: description.trim().isEmpty
-          ? existing.description
-          : description.trim(),
+      description: description.trim(),
       severity: nextSeverity,
       timeline: _buildTimeline(
         status: existing.status,
@@ -782,8 +790,7 @@ class ReportRepository extends ChangeNotifier {
     final existing = _reports[index];
     final eventTime = now ?? DateTime.now();
     if (existing.status == ReportStatus.resolved ||
-        existing.createdByCurrentUser ||
-        existing.joinedByCurrentUser) {
+        existing.isContributedByCurrentUser) {
       return existing;
     }
     if (supportsUsedInLast24Hours(now: eventTime) >=

@@ -686,7 +686,24 @@ class _AreaNewsReportCard extends StatelessWidget {
                       color: AppColors.muted,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 3),
+                  Text(
+                    report.hasDescription
+                        ? report.description.trim()
+                        : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontStyle: report.hasDescription
+                          ? FontStyle.normal
+                          : FontStyle.italic,
+                      color: report.hasDescription
+                          ? AppColors.ink.withValues(alpha: 0.78)
+                          : AppColors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
                       for (var i = 1; i <= 4; i++) ...[

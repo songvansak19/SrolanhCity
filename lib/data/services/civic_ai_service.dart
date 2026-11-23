@@ -352,6 +352,7 @@ class BackendCivicAiService implements CivicAiService {
       'streetlight' => IssueCategory.streetlight,
       'drain' => IssueCategory.drain,
       'trash' => IssueCategory.trash,
+      'other' => IssueCategory.other,
       _ => null,
     };
   }

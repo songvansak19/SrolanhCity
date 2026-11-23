@@ -44,11 +44,13 @@ class ReportWizardViewModel extends ChangeNotifier {
        _voicePreferEnglish = repository.settings.englishFirst,
        _pinLocation =
            initialCoordinates ??
-           CambodiaLocationCatalog.matchFromProfileArea(
-             khmerArea: repository.profile.khmerHomeArea,
-             englishArea: repository.profile.englishHomeArea,
-             provinceCode: repository.profile.homeProvinceCode,
-           ).province.center,
+           (repository.profile.hasHomeArea
+               ? CambodiaLocationCatalog.matchFromProfileArea(
+                   khmerArea: repository.profile.khmerHomeArea,
+                   englishArea: repository.profile.englishHomeArea,
+                   provinceCode: repository.profile.homeProvinceCode,
+                 ).province.center
+               : LocationService.phnomPenhCenter),
        _locationVerified = initialCoordinates != null;
 
   static const int maxPhotos = 3;
@@ -786,6 +788,8 @@ class ReportWizardViewModel extends ChangeNotifier {
       (IssueCategory.trash, false) =>
         'មានសំរាមចោលគរច្រើនតាមដងផ្លូវ សូមអាជ្ញាធរជួយប្រមូលផង',
       (IssueCategory.trash, true) => 'Large illegal garbage pile dumped beside the sidewalk blocking pedestrians.',
+      (IssueCategory.other, false) => 'មានបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈខូចខាតនៅតាមដងផ្លូវ សូមជួយពិនិត្យ និងជួសជុលផង',
+      (IssueCategory.other, true) => 'Damaged street infrastructure along the roadside creating a hazard for passersby.',
     };
 
     _voiceTranscript = transcript;
@@ -860,19 +864,17 @@ class ReportWizardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  ReportSubmissionResult submit({bool forceCreateNew = false}) {
-    final effectiveDescription = _description.trim().isNotEmpty
-        ? _description.trim()
-        : (repository.settings.englishFirst
-              ? _category.sampleEnglishDescription
-              : _category.sampleKhmerDescription);
-
+  ReportSubmissionResult submit({
+    bool forceCreateNew = false,
+    String? customTitle,
+  }) {
     return repository.submitReport(
       category: _category,
-      description: effectiveDescription,
+      description: _description.trim(),
       severity: _severity,
       coordinates: _pinLocation,
       isAnonymous: _isAnonymous,
+      customTitle: customTitle,
       localPhotoPath: localPhotoPath,
       additionalLocalPhotoPaths: additionalLocalPhotoPaths,
       voiceTranscript: _voiceTranscript,

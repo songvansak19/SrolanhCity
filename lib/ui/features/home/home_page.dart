@@ -105,7 +105,14 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 10),
                   InkWell(
-                    onTap: widget.onOpenMap,
+                    onTap: profile.hasHomeArea
+                        ? widget.onOpenMap
+                        : () => Navigator.push<void>(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => const EditProfilePage(),
+                            ),
+                          ),
                     borderRadius: BorderRadius.circular(10),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -119,16 +126,24 @@ class _HomePageState extends State<HomePage> {
                           const SizedBox(width: 5),
                           Expanded(
                             child: Text(
-                              tr.paired(
-                                profile.khmerHomeArea,
-                                profile.englishHomeArea,
-                              ),
+                              profile.hasHomeArea
+                                  ? tr.paired(
+                                      profile.khmerHomeArea,
+                                      profile.englishHomeArea,
+                                    )
+                                  : tr.paired(
+                                      'កំណត់តំបន់រស់នៅ',
+                                      'Set your home area',
+                                    ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppColors.muted,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w500,
+                                fontStyle: profile.hasHomeArea
+                                    ? FontStyle.normal
+                                    : FontStyle.italic,
                               ),
                             ),
                           ),
@@ -284,7 +299,8 @@ class _HomePageState extends State<HomePage> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          for (final category in IssueCategory.values)
+                          for (final category
+                              in IssueCategory.primaryCategories)
                             SizedBox(
                               width: tileWidth,
                               child: _CategoryTile(
