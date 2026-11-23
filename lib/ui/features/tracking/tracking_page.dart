@@ -427,7 +427,11 @@ class _TrackingPageState extends State<TrackingPage> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      _ReportDescriptionCard(report: report, tr: tr),
+                      _CitizenCommentsCard(
+                        report: report,
+                        tr: tr,
+                        allowAddNote: false,
+                      ),
                       const SizedBox(height: 18),
 
                       // Interactive 5-Emoji Satisfaction Rating (Screen 3.2)
@@ -714,7 +718,11 @@ class _TrackingPageState extends State<TrackingPage> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      _ReportDescriptionCard(report: report, tr: tr),
+                      _CitizenCommentsCard(
+                        report: report,
+                        tr: tr,
+                        allowAddNote: true,
+                      ),
                       if (allPhotos.length > 1) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -1356,15 +1364,108 @@ class _EmojiRatingButton extends StatelessWidget {
   }
 }
 
-class _ReportDescriptionCard extends StatelessWidget {
-  const _ReportDescriptionCard({required this.report, required this.tr});
+class _CitizenCommentsCard extends StatefulWidget {
+  const _CitizenCommentsCard({
+    required this.report,
+    required this.tr,
+    required this.allowAddNote,
+  });
 
   final CivicReport report;
   final Bilingual tr;
+  final bool allowAddNote;
+
+  @override
+  State<_CitizenCommentsCard> createState() => _CitizenCommentsCardState();
+}
+
+class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
+  bool _showAll = false;
+
+  String _authorLabel(CitizenComment comment, int index, Bilingual tr) {
+    if (comment.isOriginalReporter) {
+      if (comment.isCurrentUser) {
+        return comment.isAnonymous
+            ? tr.primary(
+                'អ្នក (អនាមិក) · អ្នករាយការណ៍ដើម',
+                'You (Anonymous) · Original reporter',
+              )
+            : tr.primary('អ្នក · អ្នករាយការណ៍ដើម', 'You · Original reporter');
+      }
+      return tr.primary('អ្នករាយការណ៍ដើម', 'Original reporter');
+    }
+    if (comment.isCurrentUser) {
+      return comment.isAnonymous
+          ? tr.primary('អ្នក (អនាមិក)', 'You (Anonymous)')
+          : tr.primary('អ្នក', 'You');
+    }
+    final num = index + 1;
+    return comment.isAnonymous
+        ? tr.primary('ប្រជាពលរដ្ឋអនាមិក #$num', 'Anonymous citizen #$num')
+        : tr.primary('ប្រជាពលរដ្ឋ #$num', 'Citizen #$num');
+  }
+
+  Future<void> _openAddCommentSheet() async {
+    final repo = ReportScope.read(context);
+    final tr = widget.tr;
+    HapticFeedback.selectionClick();
+
+    final submitted =
+        await showModalBottomSheet<({String text, bool anonymous})>(
+          context: context,
+          isScrollControlled: true,
+          showDragHandle: true,
+          backgroundColor: AppColors.paper,
+          builder: (_) => _AddCommentSheet(
+            tr: tr,
+            initialAnonymous: repo.settings.anonymousByDefault,
+          ),
+        );
+
+    if (submitted == null || !mounted) return;
+    final updated = repo.addCitizenComment(
+      widget.report.id,
+      text: submitted.text,
+      isAnonymous: submitted.anonymous,
+    );
+    if (updated != null && mounted) {
+      setState(() => _showAll = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tr.primary(
+              'បានបន្ថែមមតិលើរបាយការណ៍ ${widget.report.id}',
+              'Added your note to ${widget.report.id}.',
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  void _deleteComment(CitizenComment comment) {
+    final repo = ReportScope.read(context);
+    final tr = widget.tr;
+    HapticFeedback.selectionClick();
+    repo.deleteCitizenComment(widget.report.id, comment.id);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(tr.primary('បានលុបមតិរបស់អ្នក', 'Removed your note.')),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final hasComment = report.hasDescription;
+    final report = widget.report;
+    final tr = widget.tr;
+    final comments = report.effectiveComments;
+    final visibleComments = _showAll || comments.length <= 2
+        ? comments
+        : comments.take(2).toList();
+    final hiddenCount = comments.length - visibleComments.length;
+    final silentCount = report.silentSupporterCount;
+
     return Container(
       key: const Key('report-description-card'),
       width: double.infinity,
@@ -1376,37 +1477,396 @@ class _ReportDescriptionCard extends StatelessWidget {
         boxShadow: AppColors.cardShadow,
       ),
       child: Column(
+        key: const Key('citizen-comments-list'),
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.notes_rounded, size: 16, color: AppColors.teal),
+              const Icon(Icons.forum_outlined, size: 16, color: AppColors.teal),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  tr.paired('ការពិពណ៌នាបញ្ហា', 'Citizen description'),
+                  tr.paired(
+                    'ការពិពណ៌នា និងមតិប្រជាពលរដ្ឋ (${comments.length})',
+                    'Citizen reports & comments (${comments.length})',
+                  ),
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.muted,
+                    color: AppColors.ink,
                   ),
                 ),
               ),
+              if (widget.allowAddNote)
+                TextButton.icon(
+                  key: const Key('add-comment-btn'),
+                  onPressed: _openAddCommentSheet,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(
+                    Icons.add_comment_outlined,
+                    size: 15,
+                    color: AppColors.teal,
+                  ),
+                  label: Text(
+                    tr.primary('បន្ថែមមតិ', 'Add note'),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.teal,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (var i = 0; i < visibleComments.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            _CitizenCommentTile(
+              comment: visibleComments[i],
+              authorLabel: _authorLabel(visibleComments[i], i, tr),
+              tr: tr,
+              onDelete:
+                  (visibleComments[i].isCurrentUser &&
+                      !visibleComments[i].isOriginalReporter &&
+                      !visibleComments[i].id.startsWith('c-join-'))
+                  ? () => _deleteComment(visibleComments[i])
+                  : null,
+            ),
+          ],
+          if (comments.length > 2) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const Key('toggle-all-comments-btn'),
+                onPressed: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _showAll = !_showAll);
+                },
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                icon: Icon(
+                  _showAll
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  size: 17,
+                  color: AppColors.teal,
+                ),
+                label: Text(
+                  _showAll
+                      ? tr.primary('បង្រួមមតិ', 'Show fewer comments')
+                      : tr.primary(
+                          'មើលមតិទាំងអស់ (+$hiddenCount ទៀត)',
+                          'Show all ${comments.length} comments (+$hiddenCount more)',
+                        ),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.teal,
+                  ),
+                ),
+              ),
+            ),
+          ],
+          if (silentCount > 0) ...[
+            const SizedBox(height: 8),
+            Container(
+              key: const Key('silent-supporters-footer'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: AppColors.paper,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.groups_outlined,
+                    size: 14,
+                    color: AppColors.muted,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      tr.primary(
+                        'ប្រជាពលរដ្ឋ $silentCount នាក់ផ្សេងទៀតបានបញ្ជាក់ដោយគ្មានមតិបន្ថែម',
+                        '$silentCount other citizen(s) confirmed without commenting',
+                      ),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CitizenCommentTile extends StatelessWidget {
+  const _CitizenCommentTile({
+    required this.comment,
+    required this.authorLabel,
+    required this.tr,
+    this.onDelete,
+  });
+
+  final CitizenComment comment;
+  final String authorLabel;
+  final Bilingual tr;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final badgeBg = comment.isOriginalReporter
+        ? AppColors.tealSoft
+        : comment.isCurrentUser
+        ? AppColors.saffronSoft
+        : AppColors.mutedSurface;
+    final badgeFg = comment.isOriginalReporter
+        ? AppColors.tealDark
+        : comment.isCurrentUser
+        ? AppColors.saffronInk
+        : AppColors.ink;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: AppColors.paper,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: comment.isCurrentUser && !comment.isOriginalReporter
+              ? AppColors.teal.withValues(alpha: 0.35)
+              : AppColors.border,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: badgeBg,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    authorLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: badgeFg,
+                    ),
+                  ),
+                ),
+              ),
+              if (comment.severity != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Text(
+                    'S${comment.severity}/5',
+                    style: AppFonts.displayStyle(
+                      fontSize: 9.5,
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(width: 6),
+              LiveRelativeTimeText(
+                timestamp: comment.createdAt,
+                englishFirst: tr.englishFirst,
+                style: const TextStyle(fontSize: 10.5, color: AppColors.muted),
+              ),
+              if (onDelete != null) ...[
+                const Spacer(),
+                IconButton(
+                  key: Key('delete-comment-${comment.id}'),
+                  tooltip: tr.primary('លុបមតិ', 'Delete note'),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    size: 16,
+                    color: AppColors.danger,
+                  ),
+                  onPressed: onDelete,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            hasComment
-                ? report.description.trim()
+            comment.hasText
+                ? comment.text.trim()
                 : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
             style: TextStyle(
-              fontSize: 13.5,
-              height: 1.45,
-              color: hasComment ? AppColors.ink : AppColors.muted,
-              fontStyle: hasComment ? FontStyle.normal : FontStyle.italic,
+              fontSize: 13,
+              height: 1.42,
+              color: comment.hasText ? AppColors.ink : AppColors.muted,
+              fontStyle: comment.hasText ? FontStyle.normal : FontStyle.italic,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AddCommentSheet extends StatefulWidget {
+  const _AddCommentSheet({required this.tr, required this.initialAnonymous});
+
+  final Bilingual tr;
+  final bool initialAnonymous;
+
+  @override
+  State<_AddCommentSheet> createState() => _AddCommentSheetState();
+}
+
+class _AddCommentSheetState extends State<_AddCommentSheet> {
+  late final TextEditingController _controller;
+  late bool _anonymous;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _anonymous = widget.initialAnonymous;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tr = widget.tr;
+    final canSubmit = _controller.text.trim().isNotEmpty;
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          MediaQuery.viewInsetsOf(context).bottom + 18,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            key: const Key('add-comment-sheet'),
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              BilingualText(
+                bilingual: tr,
+                khmer: 'បន្ថែមមតិប្រជាពលរដ្ឋ',
+                english: 'Add a citizen note',
+                fontSize: 17,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                tr.primary(
+                  'ចែករំលែកព័ត៌មានបន្ថែមអំពីបញ្ហានេះ — អត្តសញ្ញាណរបស់អ្នកត្រូវបានការពារជាឯកជន។',
+                  'Share a field update on this incident — your identity stays private.',
+                ),
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('add-comment-field'),
+                controller: _controller,
+                autofocus: true,
+                maxLines: 3,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: tr.primary(
+                    'ឧ. ទឹកភ្លៀងលិចបិទបាំងរណ្តៅ ម៉ូតូពិបាកមើលឃើញ...',
+                    'e.g., Rainwater is hiding the crater — hard to spot at night...',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                key: const Key('add-comment-anon-switch'),
+                contentPadding: EdgeInsets.zero,
+                value: _anonymous,
+                onChanged: (value) => setState(() => _anonymous = value),
+                title: Text(
+                  tr.primary('បង្ហាញជាអនាមិក', 'Post as anonymous'),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  tr.primary(
+                    'លាក់ស្លាក "អ្នក" ហើយបង្ហាញថា អនាមិក',
+                    'Labels your note as Anonymous',
+                  ),
+                  style: const TextStyle(fontSize: 11.5),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton(
+                  key: const Key('submit-comment-btn'),
+                  onPressed: canSubmit
+                      ? () => Navigator.pop(context, (
+                          text: _controller.text.trim(),
+                          anonymous: _anonymous,
+                        ))
+                      : null,
+                  child: Text(tr.paired('បញ្ជូនមតិ', 'Post note')),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

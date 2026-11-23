@@ -1491,7 +1491,115 @@ void main() {
 
       expect(indexHtml, contains('SrolanhCity'));
       expect(indexHtml, contains('apple-touch-icon.png'));
+      expect(indexHtml, contains("register('sw.js'"));
       expect(indexHtml, isNot(contains('my_app')));
+
+      // Offline-first PWA service worker & custom bootstrap
+      final swJs = File('web/sw.js').readAsStringSync();
+      final bootstrapJs = File('web/flutter_bootstrap.js').readAsStringSync();
+      expect(swJs, contains('srolanhcity-app-v1'));
+      expect(swJs, contains('canvaskit/canvaskit.wasm'));
+      expect(swJs, contains('tile.openstreetmap.org'));
+      expect(bootstrapJs, contains('_flutter.loader.load()'));
+      expect(bootstrapJs, isNot(contains('serviceWorkerSettings')));
+    });
+
+    test('Multi-citizen comments: merges join comments, supports add/delete, syncs quickEdit/undo, and round-trips JSON', () {
+      final repo = ReportRepository();
+      final master = repo.findById('#SC-20519')!;
+      final initialComments = master.effectiveComments.length;
+      expect(initialComments, equals(3));
+      expect(master.extraCommentCount, equals(2));
+      expect(master.silentSupporterCount, equals(15));
+
+      // 1. Joining a neighbor Master Incident appends the joining citizen's comment
+      final joined = repo.submitReport(
+        category: master.category,
+        description: 'Crater grew wider after tonight rain!',
+        severity: 5,
+        coordinates: LatLng(
+          master.coordinates.latitude + 0.00005,
+          master.coordinates.longitude,
+        ),
+        isAnonymous: false,
+      );
+      expect(joined.mergedIntoExisting, isTrue);
+      expect(
+        joined.submittedDescription,
+        equals('Crater grew wider after tonight rain!'),
+      );
+      expect(
+        joined.report.effectiveComments.length,
+        equals(initialComments + 1),
+      );
+      expect(
+        joined.report.effectiveComments.last.text,
+        equals('Crater grew wider after tonight rain!'),
+      );
+      expect(joined.report.effectiveComments.last.isCurrentUser, isTrue);
+
+      // JSON round-trip preserves all citizenComments
+      final restored = CivicReport.fromJson(joined.report.toJson());
+      expect(restored.effectiveComments.length, equals(initialComments + 1));
+      expect(
+        restored.effectiveComments.last.text,
+        equals('Crater grew wider after tonight rain!'),
+      );
+
+      // 2. Undoing support cleans up the joined comment without deleting original comments
+      final undone = repo.undoSupportReport('#SC-20519')!;
+      expect(undone.effectiveComments.length, equals(initialComments));
+
+      // 3. Adding a direct follow-up note rejects blank input, appends note, and allows deleting it
+      expect(repo.addCitizenComment('#SC-20519', text: '   '), isNull);
+      final withNote = repo.addCitizenComment(
+        '#SC-20519',
+        text: 'Cones placed near the crater this morning',
+        isAnonymous: true,
+      )!;
+      expect(withNote.effectiveComments.length, equals(initialComments + 1));
+      final addedNote = withNote.effectiveComments.last;
+      expect(addedNote.isAnonymous, isTrue);
+      expect(addedNote.isCurrentUser, isTrue);
+
+      // Backend API payload builder
+      final apiPayload = repo.buildCommentApiPayload(
+        reportId: '#SC-20519',
+        text: '  Cones placed  ',
+        isAnonymous: true,
+      );
+      expect(apiPayload['report_id'], equals('#SC-20519'));
+      expect(apiPayload['text'], equals('Cones placed'));
+      expect(apiPayload['is_anonymous'], isTrue);
+
+      // Cannot delete original reporter's comment, CAN delete own follow-up note
+      final origId = withNote.effectiveComments.first.id;
+      final afterBadDelete = repo.deleteCitizenComment('#SC-20519', origId)!;
+      expect(
+        afterBadDelete.effectiveComments.length,
+        equals(initialComments + 1),
+      );
+
+      final afterDelete = repo.deleteCitizenComment('#SC-20519', addedNote.id)!;
+      expect(afterDelete.effectiveComments.length, equals(initialComments));
+
+      // 4. quickEditUserReport syncs both description & original CitizenComment
+      final created = repo.submitReport(
+        category: IssueCategory.trash,
+        description: 'Initial pile',
+        severity: 3,
+        coordinates: const LatLng(11.5318, 104.9044),
+        isAnonymous: false,
+      );
+      final edited = repo.quickEditUserReport(
+        created.report.id,
+        description: 'Expanded trash pile blocking sidewalk',
+        severity: 4,
+      )!;
+      expect(
+        edited.effectiveComments.first.text,
+        equals('Expanded trash pile blocking sidewalk'),
+      );
     });
   });
 }

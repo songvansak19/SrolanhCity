@@ -404,6 +404,13 @@ void main() {
         _wrapWithScope(repo, const TrackingPage(reportId: '#SC-20481')),
       );
 
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('priority-threshold-table')),
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+
       expect(find.byKey(const Key('priority-breakdown-card')), findsOneWidget);
       expect(find.byKey(const Key('priority-threshold-table')), findsOneWidget);
       expect(find.byKey(const Key('priority-tier-active-p4')), findsOneWidget);
@@ -893,6 +900,166 @@ void main() {
       expect(
         created.description,
         equals('Large tree branch fell after heavy wind'),
+      );
+    },
+  );
+
+  testWidgets(
+    'TrackingPage renders multi-citizen comments, silent supporter reconciliation, expand toggle, and Add/Delete note',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      await tester.pumpWidget(
+        _wrapWithScope(repo, const TrackingPage(reportId: '#SC-20481')),
+      );
+
+      // Shows 3 seeded comments collapsed to 2 + toggle + 8 silent supporters footer
+      expect(find.byKey(const Key('citizen-comments-list')), findsOneWidget);
+      expect(find.textContaining('(3)'), findsOneWidget);
+      expect(find.textContaining('Original reporter'), findsOneWidget);
+      expect(find.textContaining('Citizen #2'), findsOneWidget);
+      expect(find.byKey(const Key('toggle-all-comments-btn')), findsOneWidget);
+      expect(find.byKey(const Key('silent-supporters-footer')), findsOneWidget);
+      expect(
+        find.textContaining('8 other citizen(s) confirmed without commenting'),
+        findsOneWidget,
+      );
+
+      // Expand to see 3rd anonymous citizen comment
+      await tester.tap(find.byKey(const Key('toggle-all-comments-btn')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Anonymous citizen #3'), findsOneWidget);
+
+      // Tap "+ Add note" -> opens _AddCommentSheet -> post a new note -> displays immediately
+      await tester.tap(find.byKey(const Key('add-comment-btn')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('add-comment-sheet')), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('add-comment-field')),
+        'Fresh cone placed next to pothole today',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('submit-comment-btn')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Fresh cone placed next to pothole today'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('(4)'), findsOneWidget);
+
+      // Clear snackbar & scroll into center before deleting the user-added note
+      ScaffoldMessenger.of(tester.element(find.byType(TrackingPage)))
+          .clearSnackBars();
+      await tester.pumpAndSettle();
+
+      final addedId = repo.findById('#SC-20481')!.effectiveComments.last.id;
+      final deleteBtn = find.byKey(Key('delete-comment-$addedId'));
+      await tester.scrollUntilVisible(
+        deleteBtn,
+        150,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(deleteBtn);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Fresh cone placed next to pothole today'),
+        findsNothing,
+      );
+      expect(find.textContaining('(3)'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'MapPage bottom sheet shows "+N more comment(s)" pill on multi-comment Master Incidents',
+    (tester) async {
+      final seedRepo = ReportRepository();
+      final multiCommentReport = seedRepo.findById('#SC-20519')!;
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+        initialReports: [multiCommentReport],
+      );
+
+      await tester.pumpWidget(_wrapWithScope(repo, const MapPage()));
+      await tester.pump();
+      await tester.tap(find.text('#SC-20519'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('map-sheet-more-comments-pill')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('+2 more'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Joining a neighbor Master Incident via ReportWizard preserves joined comment on ReportSubmittedPage & TrackingPage',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      final neighbor = repo.findById('#SC-20519')!;
+
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          ReportWizardPage(
+            initialCategory: neighbor.category,
+            initialCoordinates: neighbor.coordinates,
+            voiceInputService: _UnavailableTestVoiceService(),
+            civicAiService: _UnconfiguredTestAiService(),
+          ),
+        ),
+      );
+
+      // Step 1 -> Step 2: enter a citizen description
+      await tester.tap(find.text('Next'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      final descField = find.byType(TextField).first;
+      await tester.enterText(
+        descField,
+        'Dangerous puddle hiding the crater during rush hour',
+      );
+      await tester.pump();
+
+      // Step 2 -> Step 3 -> Join this report
+      await tester.tap(find.textContaining('Confirm location'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      await tester.tap(find.textContaining('Join this report'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      // ReportSubmittedPage shows user's joined description + combined count (4)
+      expect(
+        find.byKey(const Key('submitted-description-row')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Dangerous puddle hiding the crater during rush hour'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Combined 4 citizen report notes'),
+        findsOneWidget,
+      );
+
+      // Tap Track my report -> expands & verifies user's joined comment on TrackingPage
+      await tester.tap(find.textContaining('Track my report'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('toggle-all-comments-btn')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Dangerous puddle hiding the crater during rush hour'),
+        findsOneWidget,
       );
     },
   );

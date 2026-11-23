@@ -74,10 +74,12 @@ class ReportSubmissionResult {
     required this.mergedIntoExisting,
     this.alreadyReportedByUser = false,
     this.mergedDistanceMeters,
+    this.submittedDescription,
   });
 
   final CivicReport report;
   final bool mergedIntoExisting;
   final bool alreadyReportedByUser;
   final double? mergedDistanceMeters;
+  final String? submittedDescription;
 }

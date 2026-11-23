@@ -161,17 +161,39 @@ class ReportSubmittedPage extends StatelessWidget {
                                   height: 20,
                                   color: AppColors.border,
                                 ),
-                                _SummaryRow(
-                                  key: const Key('submitted-description-row'),
-                                  icon: Icons.notes_rounded,
-                                  label: tr.paired('ពិពណ៌នា', 'Description'),
-                                  value: report.hasDescription
-                                      ? report.description.trim()
-                                      : tr.primary(
-                                          'គ្មានមតិបន្ថែម',
-                                          'No comment',
-                                        ),
-                                  mutedValue: !report.hasDescription,
+                                Builder(
+                                  builder: (_) {
+                                    final submittedDesc =
+                                        (result.submittedDescription ??
+                                                report.description)
+                                            .trim();
+                                    final hasComment = submittedDesc.isNotEmpty;
+                                    final totalNotes =
+                                        report.effectiveComments.length;
+                                    return _SummaryRow(
+                                      key: const Key(
+                                        'submitted-description-row',
+                                      ),
+                                      icon: Icons.notes_rounded,
+                                      label: tr.paired(
+                                        'ពិពណ៌នា',
+                                        'Description',
+                                      ),
+                                      value: hasComment
+                                          ? submittedDesc
+                                          : tr.primary(
+                                              'គ្មានមតិបន្ថែម',
+                                              'No comment',
+                                            ),
+                                      subValue: result.mergedIntoExisting
+                                          ? tr.primary(
+                                              'បានរួមបញ្ចូលមតិប្រជាពលរដ្ឋសរុប $totalNotes',
+                                              'Combined $totalNotes citizen report notes on this incident',
+                                            )
+                                          : null,
+                                      mutedValue: !hasComment,
+                                    );
+                                  },
                                 ),
                               ],
                             ),

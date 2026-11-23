@@ -797,25 +797,59 @@ class _MapPageState extends State<MapPage> {
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Text(
-                                  live.hasDescription
-                                      ? live.description.trim()
-                                      : tr.primary(
-                                          'គ្មានមតិបន្ថែម',
-                                          'No comment',
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      live.hasDescription
+                                          ? live.description.trim()
+                                          : tr.primary(
+                                              'គ្មានមតិបន្ថែម',
+                                              'No comment',
+                                            ),
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        height: 1.4,
+                                        color: live.hasDescription
+                                            ? AppColors.ink
+                                            : AppColors.muted,
+                                        fontStyle: live.hasDescription
+                                            ? FontStyle.normal
+                                            : FontStyle.italic,
+                                      ),
+                                    ),
+                                    if (live.extraCommentCount > 0) ...[
+                                      const SizedBox(height: 5),
+                                      Container(
+                                        key: const Key(
+                                          'map-sheet-more-comments-pill',
                                         ),
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    height: 1.4,
-                                    color: live.hasDescription
-                                        ? AppColors.ink
-                                        : AppColors.muted,
-                                    fontStyle: live.hasDescription
-                                        ? FontStyle.normal
-                                        : FontStyle.italic,
-                                  ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 2.5,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.tealSoft,
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          tr.primary(
+                                            '+${live.extraCommentCount} មតិផ្សេងទៀត',
+                                            '+${live.extraCommentCount} more comment(s)',
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.tealDark,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                             ],

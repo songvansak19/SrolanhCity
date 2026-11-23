@@ -529,6 +529,80 @@ enum SupportVerificationTier {
   };
 }
 
+/// One citizen's field description or follow-up note attached to a shared
+/// Master Incident. Displayed with privacy-first badges (never exposing real
+/// names, phone numbers, or user IDs on public reports).
+class CitizenComment {
+  const CitizenComment({
+    required this.id,
+    required this.text,
+    required this.createdAt,
+    this.isOriginalReporter = false,
+    this.isCurrentUser = false,
+    this.isAnonymous = false,
+    this.severity,
+    this.voiceTranscript,
+  });
+
+  final String id;
+  final String text;
+  final DateTime createdAt;
+  final bool isOriginalReporter;
+  final bool isCurrentUser;
+  final bool isAnonymous;
+  final int? severity;
+  final String? voiceTranscript;
+
+  bool get hasText => text.trim().isNotEmpty;
+
+  CitizenComment copyWith({
+    String? text,
+    DateTime? createdAt,
+    bool? isOriginalReporter,
+    bool? isCurrentUser,
+    bool? isAnonymous,
+    int? severity,
+    String? voiceTranscript,
+  }) {
+    return CitizenComment(
+      id: id,
+      text: text ?? this.text,
+      createdAt: createdAt ?? this.createdAt,
+      isOriginalReporter: isOriginalReporter ?? this.isOriginalReporter,
+      isCurrentUser: isCurrentUser ?? this.isCurrentUser,
+      isAnonymous: isAnonymous ?? this.isAnonymous,
+      severity: severity ?? this.severity,
+      voiceTranscript: voiceTranscript ?? this.voiceTranscript,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'text': text,
+    'createdAt': createdAt.toIso8601String(),
+    'isOriginalReporter': isOriginalReporter,
+    'isCurrentUser': isCurrentUser,
+    'isAnonymous': isAnonymous,
+    if (severity != null) 'severity': severity,
+    if (voiceTranscript != null) 'voiceTranscript': voiceTranscript,
+  };
+
+  factory CitizenComment.fromJson(Map<String, dynamic> json) {
+    return CitizenComment(
+      id: (json['id'] as String?) ?? 'c-legacy',
+      text: (json['text'] as String?) ?? '',
+      createdAt:
+          DateTime.tryParse((json['createdAt'] as String?) ?? '') ??
+          DateTime.now(),
+      isOriginalReporter: (json['isOriginalReporter'] as bool?) ?? false,
+      isCurrentUser: (json['isCurrentUser'] as bool?) ?? false,
+      isAnonymous: (json['isAnonymous'] as bool?) ?? false,
+      severity: (json['severity'] as num?)?.toInt(),
+      voiceTranscript: json['voiceTranscript'] as String?,
+    );
+  }
+}
+
 /// Master Incident representing one or more clustered citizen reports.
 class CivicReport {
   /// Citizens may withdraw or quick-edit a report they created within 15 mins
@@ -555,6 +629,7 @@ class CivicReport {
     required this.englishAgency,
     required this.createdAt,
     required this.timeline,
+    this.citizenComments = const [],
     this.photoAssetPath,
     this.localPhotoPath,
     this.additionalLocalPhotoPaths = const [],
@@ -614,6 +689,36 @@ class CivicReport {
   final String fixedDurationEnglish;
   final DateTime createdAt;
   final List<TimelineEntry> timeline;
+  final List<CitizenComment> citizenComments;
+
+  /// All citizen comments/descriptions attached to this Master Incident.
+  /// Synthesizes the original reporter's entry for legacy persisted reports
+  /// that predate [citizenComments].
+  List<CitizenComment> get effectiveComments {
+    if (citizenComments.isNotEmpty) return citizenComments;
+    return [
+      CitizenComment(
+        id: 'c-orig-$id',
+        text: description.trim(),
+        createdAt: createdAt,
+        isOriginalReporter: true,
+        isCurrentUser: createdByCurrentUser || (isMine && !joinedByCurrentUser),
+        isAnonymous: isAnonymous,
+        severity: severity,
+        voiceTranscript: voiceTranscript,
+      ),
+    ];
+  }
+
+  /// Additional citizen comments beyond the primary entry (for "+N more" pills).
+  int get extraCommentCount =>
+      effectiveComments.length > 1 ? effectiveComments.length - 1 : 0;
+
+  /// Citizens who confirmed/upvoted this incident without leaving a comment.
+  int get silentSupporterCount {
+    final diff = affectedCitizens - effectiveComments.length;
+    return diff > 0 ? diff : 0;
+  }
 
   List<String> get allLocalPhotoPaths => [
     if (localPhotoPath != null && localPhotoPath!.isNotEmpty) localPhotoPath!,
@@ -698,6 +803,7 @@ class CivicReport {
     String? fixedDurationEnglish,
     DateTime? createdAt,
     List<TimelineEntry>? timeline,
+    List<CitizenComment>? citizenComments,
   }) {
     return CivicReport(
       id: id,
@@ -744,6 +850,7 @@ class CivicReport {
       fixedDurationEnglish: fixedDurationEnglish ?? this.fixedDurationEnglish,
       createdAt: createdAt ?? this.createdAt,
       timeline: timeline ?? this.timeline,
+      citizenComments: citizenComments ?? this.citizenComments,
     );
   }
 
@@ -787,6 +894,7 @@ class CivicReport {
     'fixedDurationEnglish': fixedDurationEnglish,
     'createdAt': createdAt.toIso8601String(),
     'timeline': timeline.map((e) => e.toJson()).toList(),
+    'citizenComments': citizenComments.map((c) => c.toJson()).toList(),
   };
 
   factory CivicReport.fromJson(Map<String, dynamic> json) {
@@ -797,6 +905,13 @@ class CivicReport {
               .map(TimelineEntry.fromJson)
               .toList()
         : const <TimelineEntry>[];
+    final rawComments = json['citizenComments'];
+    final comments = rawComments is List
+        ? rawComments
+              .whereType<Map<String, dynamic>>()
+              .map(CitizenComment.fromJson)
+              .toList()
+        : const <CitizenComment>[];
     final rawExtras = json['additionalLocalPhotoPaths'];
     final extras = rawExtras is List
         ? rawExtras.whereType<String>().toList()
@@ -865,6 +980,7 @@ class CivicReport {
           DateTime.tryParse((json['createdAt'] as String?) ?? '') ??
           DateTime.now(),
       timeline: entries,
+      citizenComments: comments,
     );
   }
 }

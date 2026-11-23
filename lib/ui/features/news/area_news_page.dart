@@ -687,21 +687,59 @@ class _AreaNewsReportCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  Text(
-                    report.hasDescription
-                        ? report.description.trim()
-                        : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontStyle: report.hasDescription
-                          ? FontStyle.normal
-                          : FontStyle.italic,
-                      color: report.hasDescription
-                          ? AppColors.ink.withValues(alpha: 0.78)
-                          : AppColors.muted,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          report.hasDescription
+                              ? report.description.trim()
+                              : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontStyle: report.hasDescription
+                                ? FontStyle.normal
+                                : FontStyle.italic,
+                            color: report.hasDescription
+                                ? AppColors.ink.withValues(alpha: 0.78)
+                                : AppColors.muted,
+                          ),
+                        ),
+                      ),
+                      if (report.extraCommentCount > 0) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 1.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.tealSoft,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.forum_outlined,
+                                size: 10.5,
+                                color: AppColors.tealDark,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                '+${report.extraCommentCount}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.tealDark,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 6),
                   Row(

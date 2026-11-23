@@ -557,21 +557,52 @@ class ReportRepository extends ChangeNotifier {
 
       if (!forceCreateNew) {
         final index = _reports.indexWhere((r) => r.id == existing.id);
-        final updatedSeverity = math.max(
-          existing.severity,
-          severity.clamp(1, 5),
-        );
+        final trimmedDescription = description.trim();
+        final clampedSeverity = severity.clamp(1, 5);
+        final updatedSeverity = math.max(existing.severity, clampedSeverity);
         final updatedCount = existing.affectedCitizens + 1;
+
+        // Preserve original reporter's photo and append newly attached photos.
+        final mergedLocalPhoto = existing.localPhotoPath ?? localPhotoPath;
+        final mergedExtraPhotos = <String>[
+          ...existing.additionalLocalPhotoPaths,
+          if (existing.localPhotoPath != null &&
+              localPhotoPath != null &&
+              localPhotoPath.isNotEmpty &&
+              localPhotoPath != existing.localPhotoPath &&
+              !existing.additionalLocalPhotoPaths.contains(localPhotoPath))
+            localPhotoPath,
+          for (final extra in additionalLocalPhotoPaths)
+            if (extra.isNotEmpty &&
+                extra != mergedLocalPhoto &&
+                !existing.additionalLocalPhotoPaths.contains(extra))
+              extra,
+        ];
+
+        final joinedComment = CitizenComment(
+          id: 'c-join-${submittedAt.microsecondsSinceEpoch}',
+          text: trimmedDescription,
+          createdAt: submittedAt,
+          isOriginalReporter: false,
+          isCurrentUser: true,
+          isAnonymous: isAnonymous,
+          severity: clampedSeverity,
+          voiceTranscript: voiceTranscript,
+        );
+        final mergedComments = <CitizenComment>[
+          ...existing.effectiveComments,
+          joinedComment,
+        ];
+
         final merged = existing.copyWith(
           severity: updatedSeverity,
           affectedCitizens: updatedCount,
           isMine: true,
           joinedByCurrentUser: true,
-          localPhotoPath: localPhotoPath ?? existing.localPhotoPath,
-          additionalLocalPhotoPaths: additionalLocalPhotoPaths.isNotEmpty
-              ? additionalLocalPhotoPaths
-              : existing.additionalLocalPhotoPaths,
+          localPhotoPath: mergedLocalPhoto,
+          additionalLocalPhotoPaths: mergedExtraPhotos,
           voiceTranscript: voiceTranscript ?? existing.voiceTranscript,
+          citizenComments: mergedComments,
         );
 
         if (index != -1) {
@@ -600,6 +631,7 @@ class ReportRepository extends ChangeNotifier {
           report: merged,
           mergedIntoExisting: true,
           mergedDistanceMeters: duplicate.distanceMeters,
+          submittedDescription: trimmedDescription,
         );
       }
     }
@@ -611,6 +643,7 @@ class ReportRepository extends ChangeNotifier {
     );
     final ticketId = '#SC-${_nextTicketNumber++}';
     final clampedSeverity = severity.clamp(1, 5);
+    final trimmedDescription = description.trim();
     final priority = PriorityCalculator.calculate(
       trafficScore: routing.roadClass.trafficScore,
       severityScore: clampedSeverity,
@@ -627,7 +660,7 @@ class ReportRepository extends ChangeNotifier {
       englishTitle: trimmedTitle.isNotEmpty
           ? trimmedTitle
           : category.defaultEnglishTitle,
-      description: description.trim(),
+      description: trimmedDescription,
       khmerLocation: routing.fullKhmerLocation,
       englishLocation: routing.fullEnglishLocation,
       coordinates: coordinates,
@@ -652,6 +685,18 @@ class ReportRepository extends ChangeNotifier {
       beforeDateLabel: RelativeTimeFormatter.formatShortDate(submittedAt),
       afterDateLabel: 'Pending',
       createdAt: submittedAt,
+      citizenComments: [
+        CitizenComment(
+          id: 'c-orig-${submittedAt.microsecondsSinceEpoch}',
+          text: trimmedDescription,
+          createdAt: submittedAt,
+          isOriginalReporter: true,
+          isCurrentUser: true,
+          isAnonymous: isAnonymous,
+          severity: clampedSeverity,
+          voiceTranscript: voiceTranscript,
+        ),
+      ],
       timeline: _buildTimeline(
         status: ReportStatus.submitted,
         khmerAgency: routing.khmerAgency,
@@ -686,7 +731,11 @@ class ReportRepository extends ChangeNotifier {
 
     _persist();
     notifyListeners();
-    return ReportSubmissionResult(report: created, mergedIntoExisting: false);
+    return ReportSubmissionResult(
+      report: created,
+      mergedIntoExisting: false,
+      submittedDescription: trimmedDescription,
+    );
   }
 
   /// Withdraws a report created by the current citizen if it is still
@@ -726,14 +775,23 @@ class ReportRepository extends ChangeNotifier {
     if (!existing.canWithdraw(now: now)) return null;
 
     final nextSeverity = severity.clamp(1, 5);
+    final trimmedDesc = description.trim();
     final nextPriority = PriorityCalculator.calculate(
       trafficScore: existing.roadClass.trafficScore,
       severityScore: nextSeverity,
       reportCount: existing.affectedCitizens,
     );
+    final updatedComments = existing.effectiveComments
+        .map(
+          (c) => c.isOriginalReporter
+              ? c.copyWith(text: trimmedDesc, severity: nextSeverity)
+              : c,
+        )
+        .toList(growable: false);
     final updated = existing.copyWith(
-      description: description.trim(),
+      description: trimmedDesc,
       severity: nextSeverity,
+      citizenComments: updatedComments,
       timeline: _buildTimeline(
         status: existing.status,
         khmerAgency: existing.khmerAgency,
@@ -748,6 +806,71 @@ class ReportRepository extends ChangeNotifier {
     return updated;
   }
 
+  /// Appends a citizen field comment directly to a shared Master Incident
+  /// (e.g., from TrackingPage "+ Add note"). Rejects blank input.
+  CivicReport? addCitizenComment(
+    String reportId, {
+    required String text,
+    bool? isAnonymous,
+    DateTime? now,
+  }) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+    final index = _reports.indexWhere((r) => r.id == reportId);
+    if (index == -1) return null;
+
+    final existing = _reports[index];
+    final eventTime = now ?? DateTime.now();
+    final note = CitizenComment(
+      id: 'c-note-${eventTime.microsecondsSinceEpoch}',
+      text: trimmed,
+      createdAt: eventTime,
+      isOriginalReporter: false,
+      isCurrentUser: true,
+      isAnonymous: isAnonymous ?? _settings.anonymousByDefault,
+    );
+    final updated = existing.copyWith(
+      citizenComments: [...existing.effectiveComments, note],
+    );
+    _reports[index] = updated;
+    _persist();
+    notifyListeners();
+    return updated;
+  }
+
+  /// Removes a follow-up comment added by the current citizen.
+  /// Never removes the original reporter's primary entry.
+  CivicReport? deleteCitizenComment(String reportId, String commentId) {
+    final index = _reports.indexWhere((r) => r.id == reportId);
+    if (index == -1) return null;
+    final existing = _reports[index];
+    final current = existing.effectiveComments;
+    final next = current
+        .where(
+          (c) =>
+              !(c.id == commentId && c.isCurrentUser && !c.isOriginalReporter),
+        )
+        .toList(growable: false);
+    if (next.length == current.length) return existing;
+
+    final updated = existing.copyWith(citizenComments: next);
+    _reports[index] = updated;
+    _persist();
+    notifyListeners();
+    return updated;
+  }
+
+  /// Builds the backend-ready JSON payload for `POST /api/v1/reports/{id}/comments`.
+  Map<String, dynamic> buildCommentApiPayload({
+    required String reportId,
+    required String text,
+    required bool isAnonymous,
+  }) => <String, dynamic>{
+    'report_id': reportId,
+    'text': text.trim(),
+    'is_anonymous': isAnonymous,
+  };
+
   /// Undoes a citizen's `+1 Support` or duplicate join without deleting
   /// another neighbor's Master Incident, refunding the citizen's daily slot.
   CivicReport? undoSupportReport(String reportId) {
@@ -757,11 +880,18 @@ class ReportRepository extends ChangeNotifier {
     final existing = _reports[index];
     if (!existing.canUndoSupport) return null;
 
+    final cleanedComments = existing.citizenComments.isEmpty
+        ? existing.citizenComments
+        : existing.citizenComments
+              .where((c) => !(c.isCurrentUser && c.id.startsWith('c-join-')))
+              .toList(growable: false);
+
     final updated = existing.copyWith(
       affectedCitizens: math.max(1, existing.affectedCitizens - 1),
       isMine: false,
       joinedByCurrentUser: false,
       clearUserSupportMeta: true,
+      citizenComments: cleanedComments,
     );
     _reports[index] = updated;
     if (_supportVoteTimestamps.isNotEmpty) {
@@ -1052,6 +1182,29 @@ class ReportRepository extends ChangeNotifier {
         beforeDateLabel: RelativeTimeFormatter.formatShortDate(r1Created),
         afterDateLabel: 'In progress',
         createdAt: r1Created,
+        citizenComments: [
+          CitizenComment(
+            id: 'c-20481-1',
+            text: 'រណ្តៅធំ និងដក់ទឹកនៅមហាវិថីព្រះនរោត្តម ម៉ូតូជាច្រើនងាយធ្លាក់ពេលភ្លៀង',
+            createdAt: r1Created,
+            isOriginalReporter: true,
+            isCurrentUser: true,
+            severity: 4,
+          ),
+          CitizenComment(
+            id: 'c-20481-2',
+            text: 'Water completely hides the hole after heavy rain — almost hit it on my motorbike this morning.',
+            createdAt: r1Created.add(const Duration(hours: 3, minutes: 20)),
+            severity: 4,
+          ),
+          CitizenComment(
+            id: 'c-20481-3',
+            text: 'ល្ងាចមិញកកស្ទះចរាចរណ៍ខ្លាំងដោយសាររថយន្តត្រូវគេចរណ្តៅនេះ សូមជួសជុលឆាប់ៗ',
+            createdAt: r1Created.add(const Duration(hours: 7, minutes: 45)),
+            isAnonymous: true,
+            severity: 5,
+          ),
+        ],
         timeline: [
           TimelineEntry(
             stage: ReportStatus.submitted,
@@ -1109,6 +1262,28 @@ class ReportRepository extends ChangeNotifier {
         isMine: false,
         beforeDateLabel: RelativeTimeFormatter.formatShortDate(r2Created),
         createdAt: r2Created,
+        citizenComments: [
+          CitizenComment(
+            id: 'c-20519-1',
+            text: 'រណ្តៅជ្រៅខ្លាំងលើមហាវិថីព្រះមុនីវង្ស បង្កគ្រោះថ្នាក់ដល់អ្នកជិះម៉ូតូ',
+            createdAt: r2Created,
+            isOriginalReporter: true,
+            severity: 5,
+          ),
+          CitizenComment(
+            id: 'c-20519-2',
+            text: 'Crater is nearly 30 cm deep right in the motorbike lane near the intersection.',
+            createdAt: r2Created.add(const Duration(hours: 1, minutes: 40)),
+            severity: 5,
+          ),
+          CitizenComment(
+            id: 'c-20519-3',
+            text: 'ម៉ូតូ ២ គ្រឿងទើបតែដួលពេលយប់មិញ ព្រោះមើលមិនច្បាស់',
+            createdAt: r2Created.add(const Duration(hours: 3, minutes: 15)),
+            isAnonymous: true,
+            severity: 5,
+          ),
+        ],
         timeline: _buildTimeline(
           status: ReportStatus.submitted,
           khmerAgency: 'ក្រសួងសាធារណការ និងដឹកជញ្ជូន (MPWT)',
@@ -1140,6 +1315,22 @@ class ReportRepository extends ChangeNotifier {
         isMine: true,
         beforeDateLabel: RelativeTimeFormatter.formatShortDate(r3Created),
         createdAt: r3Created,
+        citizenComments: [
+          CitizenComment(
+            id: 'c-20377-1',
+            text: 'ភ្លើងផ្លូវមិនភ្លឺ ៣ បង្គោល ងងឹតពេលយប់',
+            createdAt: r3Created,
+            isOriginalReporter: true,
+            isCurrentUser: true,
+            severity: 3,
+          ),
+          CitizenComment(
+            id: 'c-20377-2',
+            text: 'Very dark stretch after 7 PM near the pedestrian crossing.',
+            createdAt: r3Created.add(const Duration(hours: 5)),
+            severity: 3,
+          ),
+        ],
         timeline: _buildTimeline(
           status: ReportStatus.scheduled,
           khmerAgency: 'អគ្គិសនីកម្ពុជា (EDC)',
@@ -1171,6 +1362,22 @@ class ReportRepository extends ChangeNotifier {
         isMine: true,
         beforeDateLabel: RelativeTimeFormatter.formatShortDate(r4Created),
         createdAt: r4Created,
+        citizenComments: [
+          CitizenComment(
+            id: 'c-20512-1',
+            text: 'លូស្ទះសំរាម ធ្វើឲ្យទឹកដក់លិចផ្លូវពេលភ្លៀង',
+            createdAt: r4Created,
+            isOriginalReporter: true,
+            isCurrentUser: true,
+            severity: 3,
+          ),
+          CitizenComment(
+            id: 'c-20512-2',
+            text: 'Drain grate is packed with plastic bags; water stays stagnant for hours.',
+            createdAt: r4Created.add(const Duration(hours: 1, minutes: 30)),
+            severity: 4,
+          ),
+        ],
         timeline: _buildTimeline(
           status: ReportStatus.submitted,
           khmerAgency: 'មន្ទីរសាធារណការ និងប្រព័ន្ធលូ រាជធានីភ្នំពេញ',
@@ -1521,6 +1728,21 @@ class ReportRepository extends ChangeNotifier {
           now.subtract(const Duration(hours: 4)),
         ),
         createdAt: now.subtract(const Duration(hours: 4)),
+        citizenComments: [
+          CitizenComment(
+            id: 'c-20531-1',
+            text: 'រណ្តៅផ្លូវធំនៅលើមហាវិថីស៊ីវុត្ថា ក្រុងសៀមរាប មានទឹកដក់ពេលភ្លៀង និងគ្រោះថ្នាក់ដល់ម៉ូតូ',
+            createdAt: now.subtract(const Duration(hours: 4)),
+            isOriginalReporter: true,
+            severity: 4,
+          ),
+          CitizenComment(
+            id: 'c-20531-2',
+            text: 'Tuk-tuks have to swerve into oncoming traffic to avoid this hole near Pub Street.',
+            createdAt: now.subtract(const Duration(hours: 2, minutes: 10)),
+            severity: 4,
+          ),
+        ],
         timeline: _buildTimeline(
           status: ReportStatus.scheduled,
           khmerAgency: 'មន្ទីរសាធារណការ និងដឹកជញ្ជូន ខេត្តសៀមរាប (DPWT)',
