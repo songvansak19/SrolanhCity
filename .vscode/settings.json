@@ -1,0 +1,11 @@
+{
+    "dart.flutterSdkPath": "/home/songvansak/flutter",
+    "emulator.emulatorPath": "/home/songvansak/.local/share/android-emulator-vscode",
+    "emulator.emulatorPathLinux": "/home/songvansak/.local/share/android-emulator-vscode",
+    "terminal.integrated.env.linux": {
+        "ANDROID_HOME": "/home/songvansak/Android/Sdk",
+        "ANDROID_SDK_ROOT": "/home/songvansak/Android/Sdk",
+        "PATH": "/home/songvansak/flutter/bin:/home/songvansak/Android/Sdk/emulator:/home/songvansak/Android/Sdk/platform-tools:/home/songvansak/Android/Sdk/cmdline-tools/latest/bin:${env:PATH}"
+    },
+    "java.compile.nullAnalysis.mode": "automatic"
+}

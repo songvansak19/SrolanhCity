@@ -1,0 +1,794 @@
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:my_app/data/repositories/report_repository.dart';
+import 'package:my_app/data/services/civic_ai_service.dart';
+import 'package:my_app/data/services/location_service.dart';
+import 'package:my_app/data/services/voice_input_service.dart';
+import 'package:my_app/domain/models/report_models.dart';
+import 'package:my_app/main.dart';
+import 'package:my_app/ui/core/report_scope.dart';
+import 'package:my_app/ui/core/theme.dart';
+import 'package:my_app/ui/core/widgets/before_after_slider.dart';
+import 'package:my_app/ui/core/widgets/voice_waveform.dart';
+import 'package:my_app/ui/features/alerts/alerts_page.dart';
+import 'package:my_app/ui/features/map/map_page.dart';
+import 'package:my_app/ui/features/news/area_news_page.dart';
+import 'package:my_app/ui/features/profile/edit_profile_page.dart';
+import 'package:my_app/ui/features/profile/my_reports_page.dart';
+import 'package:my_app/ui/features/report/views/fake_gps_page.dart';
+import 'package:my_app/ui/features/report/views/report_wizard_page.dart';
+import 'package:my_app/ui/features/shell/main_shell.dart';
+import 'package:my_app/ui/features/tracking/tracking_page.dart';
+
+Widget _wrapWithScope(ReportRepository repo, Widget child) {
+  return ReportScope(
+    repository: repo,
+    child: MaterialApp(theme: buildSrolanhCityTheme(), home: child),
+  );
+}
+
+void main() {
+  testWidgets('WelcomePage toggles language and enters MainShell', (
+    tester,
+  ) async {
+    final repo = ReportRepository();
+    await tester.pumpWidget(SrolanhCityApp(repository: repo));
+
+    expect(find.text('ចាប់ផ្តើម'), findsOneWidget);
+
+    await tester.tap(find.text('ខ្មែរ · EN'));
+    await tester.pump();
+    expect(find.text('Get started'), findsOneWidget);
+    expect(repo.settings.englishFirst, isTrue);
+
+    await tester.ensureVisible(find.text('Get started'));
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
+    expect(find.text('Spotted a problem?'), findsOneWidget);
+    expect(find.text('Tracking'), findsOneWidget);
+  });
+
+  testWidgets(
+    'MainShell renders 5-slot center FAB on phone and NavigationRail on wide screens',
+    (tester) async {
+      final repo = ReportRepository();
+
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
+      expect(find.byKey(const Key('center-report-fab')), findsOneWidget);
+      expect(find.byType(NavigationRail), findsNothing);
+
+      tester.view.physicalSize = const Size(900, 720);
+      await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
+      await tester.pumpAndSettle();
+      expect(find.byType(NavigationRail), findsOneWidget);
+      expect(find.byKey(const Key('center-report-fab')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'ProfilePage hides Demo Mode and edits profile live across HomePage',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
+
+      // Navigate to Profile tab
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+
+      // Confirm Hackathon Demo Mode section is NOT shown
+      expect(find.textContaining('Hackathon Demo Mode'), findsNothing);
+      expect(find.text('Staff Review Console'), findsNothing);
+      expect(find.text('Preview Fake GPS Guard'), findsNothing);
+
+      // Open EditProfilePage
+      await tester.tap(find.byKey(const Key('edit-profile-btn')));
+      await tester.pumpAndSettle();
+      expect(find.byType(EditProfilePage), findsOneWidget);
+
+      // Update English name & neighborhood
+      await tester.enterText(
+        find.byKey(const Key('edit-english-name')),
+        'Dara Sok',
+      );
+      await tester.enterText(
+        find.byKey(const Key('edit-khmer-name')),
+        'តារា សុខ',
+      );
+      await tester.tap(find.byKey(const Key('save-profile-btn')));
+      await tester.pumpAndSettle();
+
+      expect(repo.profile.englishName, equals('Dara Sok'));
+      expect(repo.profile.initials, equals('DS'));
+
+      // Return to Home tab and verify greeting reflects updated profile
+      await tester.tap(find.text('Home'));
+      await tester.pumpAndSettle();
+      expect(find.text('Hello, Dara Sok'), findsOneWidget);
+    },
+  );
+
+  testWidgets('AlertsPage filters All, Active, and Done notifications', (
+    tester,
+  ) async {
+    final repo = ReportRepository(
+      initialSettings: const AppSettings(englishFirst: true),
+    );
+    await tester.pumpWidget(
+      _wrapWithScope(repo, const Scaffold(body: AlertsPage())),
+    );
+
+    expect(find.text('Crew is on-site now'), findsOneWidget);
+    expect(find.text('Resolved · See after photo'), findsOneWidget);
+
+    await tester.tap(find.text('Done · រួចរាល់'));
+    await tester.pumpAndSettle();
+    expect(find.text('Resolved · See after photo'), findsOneWidget);
+    expect(find.text('Crew is on-site now'), findsNothing);
+  });
+
+  testWidgets('MyReportsPage filters reports and opens exact TrackingPage', (
+    tester,
+  ) async {
+    final repo = ReportRepository(
+      initialSettings: const AppSettings(englishFirst: true),
+    );
+    await tester.pumpWidget(_wrapWithScope(repo, const MyReportsPage()));
+
+    await tester.tap(find.text('Broken streetlight'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TrackingPage), findsOneWidget);
+    expect(find.text('#SC-20377'), findsOneWidget);
+    expect(find.textContaining('EDC'), findsWidgets);
+  });
+
+  testWidgets(
+    'TrackingPage resolved view toggles Before/After drag slider and emoji rating',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      await tester.pumpWidget(
+        _wrapWithScope(repo, const TrackingPage(reportId: '#SC-20290')),
+      );
+
+      expect(find.text('Problem solved'), findsOneWidget);
+      expect(find.byType(BeforeAfterSlider), findsNothing);
+
+      // Toggle Compare Slider mode
+      await tester.tap(find.text('Compare slider'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BeforeAfterSlider), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const Key('emoji-rating-5')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('emoji-rating-5')));
+      await tester.pumpAndSettle();
+
+      expect(repo.findById('#SC-20290')!.citizenRating, equals(5));
+    },
+  );
+
+  testWidgets(
+    'ReportWizard shows honest capture prompt, explicit voice feedback & Try Sample waveform',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          ReportWizardPage(
+            initialCategory: IssueCategory.drain,
+            voiceInputService: _UnavailableTestVoiceService(),
+            civicAiService: _UnconfiguredTestAiService(),
+          ),
+        ),
+      );
+
+      expect(find.text('Step 1 of 3 · Photo'), findsOneWidget);
+      // Honest Step 1 prompt — never fakes "AI: 90%" before a real photo is captured
+      expect(
+        find.byKey(const Key('step1-capture-prompt-pill')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('step1-ai-detected-pill')), findsNothing);
+
+      await tester.tap(find.text('Next'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Report details'), findsOneWidget);
+      expect(find.byKey(const Key('step2-add-photo-btn')), findsOneWidget);
+
+      // Tapping mic when recognizer is unavailable shows explicit feedback + Try Sample
+      await tester.ensureVisible(find.byKey(const Key('voice-record-btn')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('voice-record-btn')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(find.byKey(const Key('voice-feedback-box')), findsOneWidget);
+      expect(find.byKey(const Key('voice-try-sample-btn')), findsOneWidget);
+
+      // Tap Try Sample -> renders VoiceWaveform & Demo pill, then stop cleanly
+      await tester.ensureVisible(find.byKey(const Key('voice-try-sample-btn')));
+      await tester.tap(find.byKey(const Key('voice-try-sample-btn')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(find.byType(VoiceWaveform), findsOneWidget);
+      expect(find.byKey(const Key('voice-mode-pill')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('voice-record-btn')));
+      await tester.pump();
+      expect(find.byType(VoiceWaveform), findsNothing);
+    },
+  );
+
+  testWidgets('FakeGpsPage renders mock-GPS warning & buttons', (tester) async {
+    final repo = ReportRepository(
+      initialSettings: const AppSettings(englishFirst: true),
+    );
+    var retried = false;
+    await tester.pumpWidget(
+      _wrapWithScope(
+        repo,
+        FakeGpsPage(
+          detectedAppLabel: 'Fake GPS Pro',
+          onOpenSettings: () {},
+          onTryAgain: () => retried = true,
+        ),
+      ),
+    );
+
+    expect(find.text('Fake location detected'), findsOneWidget);
+    await tester.tap(find.textContaining('Try again'));
+    await tester.pump();
+    expect(retried, isTrue);
+  });
+
+  testWidgets(
+    'TrackingPage shows live 15-min countdown, Quick Edit, and removes user report cleanly',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      final submitted = repo.submitReport(
+        category: IssueCategory.trash,
+        description: 'Initial roadside trash pile',
+        severity: 3,
+        coordinates: const LatLng(11.5450, 104.9050),
+        isAnonymous: false,
+      );
+      final id = submitted.report.id;
+
+      await tester.pumpWidget(_wrapWithScope(repo, TrackingPage(reportId: id)));
+
+      expect(find.byKey(const Key('withdrawal-grace-card')), findsOneWidget);
+      expect(find.textContaining('Editable & removable for'), findsOneWidget);
+
+      // Quick edit description
+      await tester.tap(find.byKey(const Key('quick-edit-report-btn')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('quick-edit-description')),
+        'Updated huge trash pile near school',
+      );
+      await tester.tap(find.byKey(const Key('save-quick-edit-btn')));
+      await tester.pumpAndSettle();
+      expect(repo.findById(id)!.description, contains('near school'));
+
+      // Withdraw report with confirmation dialog
+      await tester.tap(find.byKey(const Key('withdraw-report-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-withdraw-report-btn')));
+      await tester.pumpAndSettle();
+
+      expect(repo.findById(id), isNull);
+      expect(repo.alerts.where((a) => a.reportId == id), isEmpty);
+    },
+  );
+
+  testWidgets(
+    'AlertsPage renders real relative time ages instead of frozen Just now',
+    (tester) async {
+      final now = DateTime.now();
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+        initialAlerts: [
+          AlertItem(
+            id: 'a-old',
+            reportId: '#SC-20481',
+            khmerTitle: 'បានទទួល',
+            englishTitle: 'Status updated',
+            khmerSubtitle: 'MPWT',
+            englishSubtitle: 'MPWT',
+            createdAt: now.subtract(const Duration(minutes: 12)),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        _wrapWithScope(repo, const Scaffold(body: AlertsPage())),
+      );
+
+      expect(find.textContaining('12m ago'), findsOneWidget);
+      expect(find.textContaining('Just now'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'HomePage My Reports | News switcher and AreaNewsPage switch Sangkat/Khan cleanly',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
+      await tester.pumpAndSettle();
+
+      // Switch to News preview on HomePage — shows both My Reports & neighbor reports
+      await tester.ensureVisible(find.byKey(const Key('home-tab-area-news')));
+      await tester.tap(find.byKey(const Key('home-tab-area-news')));
+      await tester.pumpAndSettle();
+      expect(find.text('Mine'), findsOneWidget);
+      expect(find.textContaining('Illegal Waste Dumping'), findsOneWidget);
+
+      // Open full AreaNewsPage
+      await tester.ensureVisible(find.byKey(const Key('open-area-news-btn')));
+      await tester.tap(find.byKey(const Key('open-area-news-btn')));
+      await tester.pumpAndSettle();
+      expect(find.byType(AreaNewsPage), findsOneWidget);
+      expect(find.textContaining('Phsar Thmei, Daun Penh'), findsWidgets);
+      expect(find.text('Deep pothole'), findsOneWidget);
+      expect(find.text('Illegal Waste Dumping'), findsOneWidget);
+
+      // Switch Khan & Sangkat to Toul Kork -> Boeung Kak 1 (shows Clogged drain)
+      await tester.tap(find.byKey(const Key('news-area-picker-btn')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.textContaining('Toul Kork'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Toul Kork'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Boeung Kak 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Boeung Kak 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-news-area-btn')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Clogged drain'), findsOneWidget);
+      expect(repo.settings.newsKhanEnglish, equals('Toul Kork'));
+      expect(repo.settings.newsSangkatEnglish, equals('Boeung Kak 1'));
+
+      // Switch to All districts view & sort by Priority Score
+      await tester.tap(find.byKey(const Key('news-show-all-districts-btn')));
+      await tester.pumpAndSettle();
+      expect(find.text('All Districts · Phnom Penh'), findsOneWidget);
+      expect(
+        repo.settings.newsKhanEnglish,
+        equals(AppSettings.allPhnomPenhKey),
+      );
+
+      await tester.tap(find.byKey(const Key('news-sort-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('news-sort-highestPriority')));
+      await tester.pumpAndSettle();
+      expect(find.text('Critical Road Crater'), findsOneWidget);
+      expect(find.text('5.0'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'TrackingPage renders understandable Priority Score breakdown formula',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      await tester.pumpWidget(
+        _wrapWithScope(repo, const TrackingPage(reportId: '#SC-20481')),
+      );
+
+      expect(find.byKey(const Key('priority-breakdown-card')), findsOneWidget);
+      expect(find.textContaining('How priority is scored'), findsOneWidget);
+      expect(find.textContaining('Major Artery'), findsOneWidget);
+      expect(
+        find.textContaining('Total: 2.0 + 1.2 + 1.2 = 4.4 / 5.0'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'MainShell shows OfflineSyncBanner and Queued badge when offline, then clears on reconnect',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+
+      await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
+      await tester.pumpAndSettle();
+
+      // Hidden while online with 0 queued reports
+      expect(find.byKey(const Key('offline-sync-banner')), findsNothing);
+
+      // Go offline & submit a report
+      repo.setOnlineStatus(false);
+      repo.submitReport(
+        category: IssueCategory.trash,
+        description: 'Offline roadside trash',
+        severity: 4,
+        coordinates: const LatLng(11.5390, 104.9020),
+        isAnonymous: false,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('offline-sync-banner')), findsOneWidget);
+      expect(find.textContaining('1 report(s) queued'), findsOneWidget);
+      expect(find.byKey(const Key('sync-status-badge')), findsWidgets);
+
+      // Reconnect -> auto-sync clears banner & badge
+      repo.setOnlineStatus(true);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('offline-sync-banner')), findsNothing);
+      expect(find.byKey(const Key('sync-status-badge')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'MapPage enforces Cambodia bounds and zoom limits, and Profile stays free of developer AI key settings',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+
+      // Verify MapPage configures Cambodia bounds & zoom limits
+      await tester.pumpWidget(_wrapWithScope(repo, const MapPage()));
+      await tester.pump();
+      final mapWidget = tester.widget<FlutterMap>(find.byType(FlutterMap));
+      expect(mapWidget.options.minZoom, equals(LocationService.minMapZoom));
+      expect(mapWidget.options.maxZoom, equals(LocationService.maxMapZoom));
+      expect(
+        mapWidget.options.cameraConstraint,
+        equals(
+          CameraConstraint.contain(bounds: LocationService.cambodiaMapBounds),
+        ),
+      );
+
+      // Verify ProfilePage keeps a clean citizen UI with zero API-key/developer settings
+      await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Gemini'), findsNothing);
+      expect(find.textContaining('API Key'), findsNothing);
+      expect(find.byKey(const Key('profile-ai-engine-tile')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'TrackingPage enforces distance-aware "Affects me" (allows nearby, blocks >15 km, re-enables on Undo)',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      // #SC-20524 is in Sen Sok (outside default Daun Penh Home Khan)
+      final target = repo.findById('#SC-20524')!;
+      final beforeCount = target.affectedCitizens;
+
+      // 1. User 230 km away (Siem Reap) & outside Home Khan -> blocked cleanly
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          TrackingPage(
+            reportId: '#SC-20524',
+            locationService: _FakeLocationService(
+              const LocationSuccess(
+                point: LatLng(13.3633, 103.8564),
+                accuracyMeters: 20,
+                isOutsideCambodia: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const Key('tracking-support-btn')));
+      await tester.pumpAndSettle();
+
+      expect(repo.findById('#SC-20524')!.affectedCitizens, equals(beforeCount));
+      expect(find.textContaining('too far'), findsOneWidget);
+
+      // Dismiss the SnackBar before mounting the nearby location scenario
+      ScaffoldMessenger.of(tester.element(find.byType(TrackingPage)))
+          .clearSnackBars();
+      await tester.pumpAndSettle();
+
+      // 2. User ~110 m away -> Verified nearby, increments count, Undo re-enables
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          TrackingPage(
+            reportId: '#SC-20524',
+            locationService: _FakeLocationService(
+              LocationSuccess(
+                point: LatLng(
+                  target.coordinates.latitude + 0.001,
+                  target.coordinates.longitude,
+                ),
+                accuracyMeters: 8,
+                isOutsideCambodia: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('tracking-support-btn')));
+      await tester.pumpAndSettle();
+
+      expect(
+        repo.findById('#SC-20524')!.affectedCitizens,
+        equals(beforeCount + 1),
+      );
+      expect(find.byKey(const Key('support-tier-badge')), findsOneWidget);
+      expect(find.textContaining('Verified nearby'), findsWidgets);
+
+      // Tap Undo -> refunds count and re-enables "Affects me too" button
+      await tester.ensureVisible(find.byKey(const Key('undo-support-btn')));
+      await tester.tap(find.byKey(const Key('undo-support-btn')));
+      await tester.pumpAndSettle();
+      expect(repo.findById('#SC-20524')!.affectedCitizens, equals(beforeCount));
+      expect(find.text('Affects me too'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'MapPage bottom sheet shows inline distance feedback and disables to Supported after verification',
+    (tester) async {
+      final seedRepo = ReportRepository();
+      final senSokReport = seedRepo.findById('#SC-20524')!;
+      final beforeCount = senSokReport.affectedCitizens;
+
+      // 1. Blocked > 15 km -> visible inline banner inside sheet, button stays enabled
+      final blockedRepo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+        initialReports: [senSokReport],
+      );
+      await tester.pumpWidget(
+        _wrapWithScope(
+          blockedRepo,
+          MapPage(
+            locationService: const _FakeLocationService(
+              LocationSuccess(
+                point: LatLng(13.3633, 103.8564),
+                accuracyMeters: 20,
+                isOutsideCambodia: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('#SC-20524'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('map-support-btn')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('map-support-feedback-banner')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('too far'), findsOneWidget);
+      expect(
+        blockedRepo.findById('#SC-20524')!.affectedCitizens,
+        equals(beforeCount),
+      );
+
+      // Dismiss bottom sheet before pumping the Phnom Penh scenario
+      Navigator.of(tester.element(find.byKey(const Key('map-support-btn'))))
+          .pop();
+      await tester.pumpAndSettle();
+
+      // 2. Allowed ~5.3 km (City commuter) -> increments count, disables to Supported
+      final allowedRepo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+        initialReports: [senSokReport],
+      );
+      await tester.pumpWidget(
+        _wrapWithScope(
+          allowedRepo,
+          MapPage(
+            locationService: const _FakeLocationService(
+              LocationSuccess(
+                point: LocationService.phnomPenhCenter,
+                accuracyMeters: 15,
+                isOutsideCambodia: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('#SC-20524'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('map-support-btn')));
+      await tester.pumpAndSettle();
+
+      expect(
+        allowedRepo.findById('#SC-20524')!.affectedCitizens,
+        equals(beforeCount + 1),
+      );
+      expect(
+        find.byKey(const Key('map-support-feedback-banner')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('City commuter'), findsOneWidget);
+      expect(find.text('Supported'), findsOneWidget);
+      final supportBtn = tester.widget<OutlinedButton>(
+        find.byKey(const Key('map-support-btn')),
+      );
+      expect(supportBtn.onPressed, isNull);
+    },
+  );
+
+  testWidgets(
+    'MapPage province quick-jump shows All Cambodia province bubbles and flies into Siem Reap',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+
+      await tester.pumpWidget(_wrapWithScope(repo, const MapPage()));
+      await tester.pump();
+
+      // Open 25-Province Quick-Jump Sheet -> jump to All Cambodia overview
+      await tester.tap(find.byKey(const Key('map-province-filter-btn')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('map-jump-all-cambodia')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('map-jump-all-cambodia')));
+      await tester.pumpAndSettle();
+
+      // Province cluster bubbles appear across Cambodia
+      expect(
+        find.byKey(const Key('province-cluster-phnom_penh')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('province-cluster-siem_reap')),
+        findsOneWidget,
+      );
+
+      // Jump directly to Siem Reap -> viewport shows Siem Reap report (#SC-20531)
+      await tester.tap(find.byKey(const Key('map-province-filter-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('map-jump-province-siem_reap')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Siem Reap'), findsWidgets);
+      expect(find.text('#SC-20531'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'AreaNewsPage switches to Siem Reap & All Cambodia, and EditProfilePage saves provincial Home Province',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+
+      await tester.pumpWidget(_wrapWithScope(repo, const AreaNewsPage()));
+      await tester.pumpAndSettle();
+
+      // Open 3-level picker -> select Siem Reap
+      await tester.tap(find.byKey(const Key('news-area-picker-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picker-province-siem_reap')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-news-area-btn')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('All Districts · Siem Reap'), findsOneWidget);
+      expect(find.text('Deep Pothole on Sivutha Blvd'), findsOneWidget);
+      expect(repo.settings.newsProvinceCode, equals('siem_reap'));
+
+      // Switch to All Cambodia (25 provinces)
+      await tester.tap(find.byKey(const Key('news-area-picker-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picker-all-cambodia-btn')));
+      await tester.pumpAndSettle();
+      expect(find.text('All Cambodia · 25 Provinces'), findsOneWidget);
+      expect(
+        repo.settings.newsProvinceCode,
+        equals(AppSettings.allCambodiaKey),
+      );
+
+      // EditProfilePage selects Siem Reap as Home Province & persists it
+      await tester.pumpWidget(_wrapWithScope(repo, const EditProfilePage()));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, -360));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('edit-province-picker-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('edit-province-option-siem_reap')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save-profile-btn')));
+      await tester.pumpAndSettle();
+
+      expect(repo.profile.homeProvinceCode, equals('siem_reap'));
+      expect(repo.profile.englishHomeArea, contains('Siem Reap'));
+    },
+  );
+}
+
+class _FakeLocationService extends LocationService {
+  const _FakeLocationService(this.result);
+
+  final LocationFetchResult result;
+
+  @override
+  Future<LocationFetchResult> getCurrentLocation({
+    bool enforceMockCheck = true,
+    bool fastFix = false,
+  }) async => result;
+}
+
+class _UnavailableTestVoiceService implements VoiceInputService {
+  @override
+  Future<bool> initialize({
+    required void Function(String status) onStatus,
+    required void Function(String message) onError,
+  }) async => false;
+
+  @override
+  Future<VoiceLocaleResolution> resolveLocale({
+    required bool preferEnglish,
+  }) async => const VoiceLocaleResolution(
+    localeId: 'en_US',
+    exactLanguageAvailable: false,
+  );
+
+  @override
+  Future<void> startListening({
+    required String? localeId,
+    required void Function(String text, bool isFinal) onResult,
+    required void Function(double normalizedLevel) onSoundLevel,
+  }) async {}
+
+  @override
+  Future<void> stopListening() async {}
+
+  @override
+  Future<void> cancel() async {}
+}
+
+class _UnconfiguredTestAiService implements CivicAiService {
+  @override
+  bool get isBackendConfigured => false;
+
+  @override
+  Future<PhotoAiAnalysis> analyzeIssuePhoto({
+    required String imagePath,
+    required bool englishFirst,
+    String? descriptionHint,
+    bool forceRefresh = false,
+  }) async => PhotoAiAnalysis.awaitingBackend;
+
+  @override
+  Future<AudioTranscriptionResult> transcribeVoiceAudio({
+    required String audioPath,
+    required bool englishFirst,
+  }) async => const AudioTranscriptionResult(success: false);
+}
