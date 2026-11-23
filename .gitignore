@@ -46,3 +46,13 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Android local Gradle/Kotlin build artifacts
+/android/build/
+/android/.kotlin/
+
+# Environment secrets & deploy metadata
+.env
+.env.*
+!.env.example
+.vercel
