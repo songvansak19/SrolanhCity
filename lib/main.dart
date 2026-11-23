@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:material_ui/material_ui.dart';
 
@@ -78,9 +79,23 @@ class _SrolanhCityAppState extends State<SrolanhCityApp> {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'SrolanhCity',
+        scrollBehavior: const _SrolanhScrollBehavior(),
         theme: buildSrolanhCityTheme(),
         home: const WelcomePage(),
       ),
     );
   }
+}
+
+class _SrolanhScrollBehavior extends MaterialScrollBehavior {
+  const _SrolanhScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.unknown,
+  };
 }

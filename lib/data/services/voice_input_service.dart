@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 /// Which voice recognition engine is active during citizen voice reporting.
@@ -71,10 +72,22 @@ class SpeechToTextVoiceInputService implements VoiceInputService {
   Future<VoiceLocaleResolution> resolveLocale({
     required bool preferEnglish,
   }) async {
+    // Web Speech API uses BCP-47 hyphenated tags ('km-KH' / 'en-US') and
+    // speech_to_text_web.locales() typically returns only [navigator.language]
+    // (e.g. ['en-US']) even though Chrome/Edge/Safari support Khmer ('km-KH').
+    // Passing 'km-KH' directly avoids silently forcing English.
+    if (kIsWeb) {
+      return VoiceLocaleResolution(
+        localeId: preferEnglish ? 'en-US' : 'km-KH',
+        exactLanguageAvailable: true,
+      );
+    }
+
+    final fallbackId = preferEnglish ? 'en_US' : 'km_KH';
     try {
       if (!_initialized && !_speech.isAvailable) {
         return VoiceLocaleResolution(
-          localeId: preferEnglish ? 'en_US' : 'km_KH',
+          localeId: fallbackId,
           exactLanguageAvailable: false,
         );
       }
@@ -84,7 +97,7 @@ class SpeechToTextVoiceInputService implements VoiceInputService {
       );
       if (locales.isEmpty) {
         return VoiceLocaleResolution(
-          localeId: preferEnglish ? 'en_US' : 'km_KH',
+          localeId: fallbackId,
           exactLanguageAvailable: false,
         );
       }
@@ -108,14 +121,16 @@ class SpeechToTextVoiceInputService implements VoiceInputService {
           );
         }
       }
-      final sys = await _speech.systemLocale();
+      // Do NOT silently overwrite a Khmer selection with an English system
+      // locale — request km_KH directly so cloud-backed Android/iOS recognizers
+      // can still transcribe Khmer when online.
       return VoiceLocaleResolution(
-        localeId: sys?.localeId ?? locales.first.localeId,
+        localeId: fallbackId,
         exactLanguageAvailable: false,
       );
     } catch (_) {
       return VoiceLocaleResolution(
-        localeId: preferEnglish ? 'en_US' : 'km_KH',
+        localeId: fallbackId,
         exactLanguageAvailable: false,
       );
     }

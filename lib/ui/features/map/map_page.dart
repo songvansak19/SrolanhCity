@@ -635,18 +635,27 @@ class _MapPageState extends State<MapPage> {
         .clamp(LocationService.minMapZoom, LocationService.maxMapZoom)
         .toDouble();
     final currentCenter = _mapReady ? _mapController.camera.center : _center;
-    final nextTier = MapClusterService.tierForZoom(clamped);
-    setState(() {
-      _zoom = clamped;
-      _center = currentCenter;
-      _clusterTier = nextTier;
-      _areaGridZoomBucket = (clamped * 2).round();
-    });
     if (_mapReady) {
       _mapController.move(currentCenter, clamped);
-      _visibleBounds = _mapController.camera.visibleBounds;
-      _carouselBounds = _visibleBounds;
     }
+    final resolvedZoom = _mapReady ? _mapController.camera.zoom : clamped;
+    final resolvedCenter = _mapReady
+        ? _mapController.camera.center
+        : currentCenter;
+    final resolvedBounds = _mapReady
+        ? _mapController.camera.visibleBounds
+        : null;
+    final nextTier = MapClusterService.tierForZoom(resolvedZoom);
+    setState(() {
+      _zoom = resolvedZoom;
+      _center = resolvedCenter;
+      _clusterTier = nextTier;
+      _areaGridZoomBucket = (resolvedZoom * 2).round();
+      if (resolvedBounds != null) {
+        _visibleBounds = resolvedBounds;
+        _carouselBounds = resolvedBounds;
+      }
+    });
   }
 
   void _openIncidentSheet(CivicReport report, Bilingual tr) {
@@ -1093,6 +1102,15 @@ class _MapPageState extends State<MapPage> {
             center: _center,
           );
     final isOverviewZoom = _zoom < MapClusterService.provinceClusterMaxZoom;
+    final showBottomCarousel =
+        _customPin == null &&
+        (!isOverviewZoom || _query.trim().isNotEmpty) &&
+        viewportReports.isNotEmpty;
+    final showEmptyAreaBanner =
+        _customPin == null &&
+        !isOverviewZoom &&
+        viewportReports.isEmpty &&
+        filteredReports.isNotEmpty;
     final currentProvince = isOverviewZoom
         ? null
         : CambodiaLocationCatalog.nearestProvinceForPoint(_center);
@@ -1506,7 +1524,11 @@ class _MapPageState extends State<MapPage> {
             right: 16,
             bottom: _customPin != null
                 ? 24
-                : (filteredReports.isNotEmpty ? 132 : 24),
+                : showBottomCarousel
+                ? 132
+                : showEmptyAreaBanner
+                ? 76
+                : 24,
             child: SafeArea(
               top: false,
               child: Column(
@@ -1633,7 +1655,7 @@ class _MapPageState extends State<MapPage> {
                 ),
               ),
             )
-          else if (viewportReports.isNotEmpty)
+          else if (showBottomCarousel)
             Positioned(
               left: 0,
               right: 0,
@@ -1804,7 +1826,7 @@ class _MapPageState extends State<MapPage> {
                 ),
               ),
             )
-          else if (filteredReports.isNotEmpty)
+          else if (showEmptyAreaBanner)
             Positioned(
               left: 16,
               right: 16,

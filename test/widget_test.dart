@@ -11,6 +11,7 @@ import 'package:my_app/main.dart';
 import 'package:my_app/ui/core/report_scope.dart';
 import 'package:my_app/ui/core/theme.dart';
 import 'package:my_app/ui/core/widgets/before_after_slider.dart';
+import 'package:my_app/ui/core/widgets/user_avatar.dart';
 import 'package:my_app/ui/core/widgets/voice_waveform.dart';
 import 'package:my_app/ui/features/alerts/alerts_page.dart';
 import 'package:my_app/ui/features/map/map_page.dart';
@@ -674,7 +675,7 @@ void main() {
       await tester.tap(find.byKey(const Key('map-jump-all-cambodia')));
       await tester.pumpAndSettle();
 
-      // Province cluster bubbles appear across Cambodia
+      // Province cluster bubbles appear across Cambodia and bottom carousel hides cleanly
       expect(
         find.byKey(const Key('province-cluster-phnom_penh')),
         findsOneWidget,
@@ -683,13 +684,15 @@ void main() {
         find.byKey(const Key('province-cluster-siem_reap')),
         findsOneWidget,
       );
+      expect(find.byKey(const Key('map-nearby-carousel')), findsNothing);
 
-      // Jump directly to Siem Reap -> viewport shows Siem Reap report (#SC-20531)
+      // Jump directly to Siem Reap -> carousel reappears showing Siem Reap report (#SC-20531)
       await tester.tap(find.byKey(const Key('map-province-filter-btn')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('map-jump-province-siem_reap')));
       await tester.pumpAndSettle();
 
+      expect(find.byKey(const Key('map-nearby-carousel')), findsOneWidget);
       expect(find.text('Siem Reap'), findsWidgets);
       expect(find.text('#SC-20531'), findsOneWidget);
     },
@@ -963,6 +966,14 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pumpAndSettle();
+
+      // Verify delete button sits flush near right edge & vertically aligned with author label
+      final cardRect = tester.getRect(
+        find.byKey(const Key('report-description-card')),
+      );
+      final deleteRect = tester.getRect(deleteBtn);
+      expect(cardRect.right - deleteRect.right, lessThanOrEqualTo(32.0));
+
       await tester.tap(deleteBtn);
       await tester.pumpAndSettle();
 
@@ -1061,6 +1072,69 @@ void main() {
         find.text('Dangerous puddle hiding the crater during rush hour'),
         findsOneWidget,
       );
+    },
+  );
+
+  testWidgets(
+    'UserAvatar renders persistent base64 data URI avatar via Image.memory',
+    (tester) async {
+      // Valid 1x1 transparent PNG data URI
+      const pngDataUri =
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+      const profile = UserProfile(avatarPhotoPath: pngDataUri);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildSrolanhCityTheme(),
+          home: const Scaffold(
+            body: Center(child: UserAvatar(profile: profile)),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(Image), findsOneWidget);
+      expect(find.text('G'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'ReportWizard Step 2 shows clear Khmer | EN segmented voice selector and updates active language label',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          ReportWizardPage(
+            initialCategory: IssueCategory.pothole,
+            voiceInputService: _UnavailableTestVoiceService(),
+            civicAiService: _UnconfiguredTestAiService(),
+          ),
+        ),
+      );
+
+      // Step 1 -> Step 2
+      await tester.tap(find.text('Next'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.byKey(const Key('voice-lang-toggle')), findsOneWidget);
+      expect(find.byKey(const Key('voice-lang-km')), findsOneWidget);
+      expect(find.byKey(const Key('voice-lang-en')), findsOneWidget);
+      expect(find.text('Voice: English (EN)'), findsOneWidget);
+
+      // Switch voice recognition language to Khmer
+      await tester.ensureVisible(find.byKey(const Key('voice-lang-km')));
+      await tester.tap(find.byKey(const Key('voice-lang-km')));
+      await tester.pump();
+      expect(find.text('Voice: Khmer (ខ្មែរ)'), findsOneWidget);
+
+      // Switch back to English
+      await tester.tap(find.byKey(const Key('voice-lang-en')));
+      await tester.pump();
+      expect(find.text('Voice: English (EN)'), findsOneWidget);
     },
   );
 }

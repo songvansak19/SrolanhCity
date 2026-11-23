@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../data/services/file_helper.dart';
 import '../../../domain/models/cambodia_locations.dart';
 import '../../../domain/models/report_models.dart';
 import '../../core/l10n.dart';
@@ -212,12 +214,24 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       final picked = await ImagePicker().pickImage(
         source: source,
-        imageQuality: 85,
-        maxWidth: 600,
+        imageQuality: 78,
+        maxWidth: 400,
+        maxHeight: 400,
       );
-      if (picked != null && mounted) {
-        setState(() => _avatarPhotoPath = picked.path);
-      }
+      if (picked == null || !mounted) return;
+      final savedPath = await persistSanitizedPhoto(picked, 0);
+      if (!mounted) return;
+      setState(() => _avatarPhotoPath = savedPath);
+      final repo = ReportScope.read(context);
+      repo.updateProfile(repo.profile.copyWith(avatarPhotoPath: savedPath));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text(
+            tr.primary('បានប្តូររូបភាពគណនីរួចរាល់!', 'Profile photo updated!'),
+          ),
+        ),
+      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -244,20 +258,21 @@ class _EditProfilePageState extends State<EditProfilePage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: AppColors.tealSoft,
-                  child: Icon(
-                    Icons.photo_camera_outlined,
-                    color: AppColors.teal,
+              if (!kIsWeb)
+                ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: AppColors.tealSoft,
+                    child: Icon(
+                      Icons.photo_camera_outlined,
+                      color: AppColors.teal,
+                    ),
                   ),
+                  title: Text(tr.paired('ថតរូបថ្មី', 'Take Photo')),
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    _pickAvatar(ImageSource.camera, tr);
+                  },
                 ),
-                title: Text(tr.paired('ថតរូបថ្មី', 'Take Photo')),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  _pickAvatar(ImageSource.camera, tr);
-                },
-              ),
               ListTile(
                 leading: const CircleAvatar(
                   backgroundColor: AppColors.tealSoft,
@@ -267,13 +282,30 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
                 title: Text(
-                  tr.paired('ជ្រើសពីវិចិត្រសាល', 'Choose from Gallery'),
+                  kIsWeb
+                      ? tr.paired('ជ្រើសរូបភាពពីឧបករណ៍', 'Choose Photo')
+                      : tr.paired('ជ្រើសពីវិចិត្រសាល', 'Choose from Gallery'),
                 ),
                 onTap: () {
                   Navigator.pop(sheetCtx);
                   _pickAvatar(ImageSource.gallery, tr);
                 },
               ),
+              if (kIsWeb)
+                ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: AppColors.tealSoft,
+                    child: Icon(
+                      Icons.photo_camera_outlined,
+                      color: AppColors.teal,
+                    ),
+                  ),
+                  title: Text(tr.paired('ថតរូបថ្មី', 'Take Photo')),
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    _pickAvatar(ImageSource.camera, tr);
+                  },
+                ),
               if (_avatarPhotoPath != null)
                 ListTile(
                   leading: const CircleAvatar(
@@ -287,6 +319,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   onTap: () {
                     Navigator.pop(sheetCtx);
                     setState(() => _avatarPhotoPath = null);
+                    final repo = ReportScope.read(context);
+                    repo.updateProfile(
+                      repo.profile.copyWith(clearAvatar: true),
+                    );
                   },
                 ),
             ],

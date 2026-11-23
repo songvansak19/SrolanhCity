@@ -5,7 +5,7 @@
 // fonts, and recently visited OpenStreetMap tiles so the installed PWA launches
 // reliably even in Airplane Mode.
 
-const APP_CACHE = 'srolanhcity-app-v1';
+const APP_CACHE = 'srolanhcity-app-v2';
 const TILE_CACHE = 'srolanhcity-tiles-v1';
 const MAX_CACHED_TILES = 250;
 

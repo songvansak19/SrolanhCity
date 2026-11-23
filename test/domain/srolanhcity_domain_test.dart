@@ -8,6 +8,7 @@ import 'package:my_app/data/repositories/report_repository.dart';
 import 'package:my_app/data/services/audio_recorder_service.dart';
 import 'package:my_app/data/services/civic_ai_service.dart';
 import 'package:my_app/data/services/exif_stripper.dart';
+import 'package:my_app/data/services/local_storage_service.dart';
 import 'package:my_app/data/services/location_service.dart';
 import 'package:my_app/data/services/reverse_geocoding_service.dart';
 import 'package:my_app/data/services/voice_input_service.dart';
@@ -1497,11 +1498,60 @@ void main() {
       // Offline-first PWA service worker & custom bootstrap
       final swJs = File('web/sw.js').readAsStringSync();
       final bootstrapJs = File('web/flutter_bootstrap.js').readAsStringSync();
-      expect(swJs, contains('srolanhcity-app-v1'));
+      expect(swJs, contains('srolanhcity-app-v2'));
       expect(swJs, contains('canvaskit/canvaskit.wasm'));
       expect(swJs, contains('tile.openstreetmap.org'));
       expect(bootstrapJs, contains('_flutter.loader.load()'));
       expect(bootstrapJs, isNot(contains('serviceWorkerSettings')));
+    });
+
+    test('hydrate backfills seeded multi-citizen comments on legacy cached reports while keeping user notes', () async {
+      final seed = ReportRepository().findById('#SC-20519')!;
+      final userNote = CitizenComment(
+        id: 'c-note-user-1',
+        text: 'My live update before backfill',
+        createdAt: DateTime(2026, 11, 24, 2, 30),
+        isOriginalReporter: false,
+        isCurrentUser: true,
+        isAnonymous: true,
+      );
+      // Simulate pre-update cached JSON that lacked seeded extra comments
+      final legacyCachedReport = seed.copyWith(
+        citizenComments: [
+          CitizenComment(
+            id: 'c-orig-#SC-20519',
+            text: seed.description,
+            createdAt: seed.createdAt,
+            isOriginalReporter: true,
+          ),
+          userNote,
+        ],
+      );
+
+      final fakeStore = _InMemoryLocalStorage({
+        'reports': [legacyCachedReport.toJson()],
+      });
+      final repo = ReportRepository(storage: fakeStore);
+      await repo.hydrate();
+
+      final restored = repo.findById('#SC-20519')!;
+      expect(restored.effectiveComments.length, equals(4));
+      expect(
+        restored.effectiveComments.any((c) => c.id == 'c-20519-2'),
+        isTrue,
+      );
+      expect(
+        restored.effectiveComments.any((c) => c.id == 'c-note-user-1'),
+        isTrue,
+      );
+    });
+
+    test('SpeechToTextVoiceInputService preserves Khmer locale request without overriding to English', () async {
+      final service = SpeechToTextVoiceInputService();
+      final km = await service.resolveLocale(preferEnglish: false);
+      final en = await service.resolveLocale(preferEnglish: true);
+      expect(km.localeId?.toLowerCase(), startsWith('km'));
+      expect(en.localeId?.toLowerCase(), startsWith('en'));
     });
 
     test('Multi-citizen comments: merges join comments, supports add/delete, syncs quickEdit/undo, and round-trips JSON', () {
@@ -1728,4 +1778,18 @@ class _FakeAudioRecorderService implements AudioRecorderService {
 
   @override
   Future<void> dispose() async {}
+}
+
+class _InMemoryLocalStorage extends LocalStorageService {
+  _InMemoryLocalStorage(this._state);
+
+  Map<String, dynamic>? _state;
+
+  @override
+  Future<Map<String, dynamic>?> readState() async => _state;
+
+  @override
+  Future<void> writeState(Map<String, dynamic> state) async {
+    _state = state;
+  }
 }

@@ -265,12 +265,15 @@ class ReportWizardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleVoiceLanguage() {
+  void setVoicePreferEnglish(bool preferEnglish) {
     if (_isRecordingVoice || _isTranscribingVoice) return;
-    _voicePreferEnglish = !_voicePreferEnglish;
+    if (_voicePreferEnglish == preferEnglish) return;
+    _voicePreferEnglish = preferEnglish;
     _clearVoiceFeedback();
     notifyListeners();
   }
+
+  void toggleVoiceLanguage() => setVoicePreferEnglish(!_voicePreferEnglish);
 
   bool addLocalPhotoPath(String path) {
     if (path.isEmpty) return false;
@@ -809,17 +812,17 @@ class ReportWizardViewModel extends ChangeNotifier {
 
   void _setVoiceFeedbackForError(String errorMsg) {
     final lower = errorMsg.toLowerCase();
-    if (lower.contains('permission')) {
+    if (lower.contains('permission') || lower.contains('not-allowed')) {
       _setVoiceFeedback(
         khmer: 'ត្រូវការសិទ្ធិមីក្រូហ្វូនដើម្បីរាយការណ៍ជាសំឡេង',
         english: 'Microphone permission is required for voice notes.',
         offerDemoFallback: true,
       );
-    } else if (lower.contains('network')) {
+    } else if (lower.contains('service-not-allowed') ||
+        lower.contains('network')) {
       _setVoiceFeedback(
-        khmer: 'សេវាស្តាប់សំឡេងត្រូវការអ៊ីនធឺណិត — អ្នកអាចវាយអក្សរ ឬសាកល្បងបាន',
-        english:
-            'Speech recognition needs internet — type your note or try Sample.',
+        khmer: 'កម្មវិធីរុករក (ដូចជា Brave) ឬបណ្តាញបានបិទសេវាសំឡេង — សូមសាកល្បង Chrome/Safari វាយអក្សរ ឬចុច "សាកល្បងសំឡេង"',
+        english: 'Browser/network blocked speech service (e.g., Brave Shields) — try Chrome/Safari, type your note, or tap "Try Sample".',
         offerDemoFallback: true,
       );
     } else if (lower.contains('language')) {

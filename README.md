@@ -92,7 +92,7 @@ dart format lib test
 dart analyze --fatal-infos
 flutter test
 ```
-The test suite includes **66 unit and widget tests** covering Priority Score tiers, multi-citizen Master Incident comments, self-duplicate & `"It's a different problem"` flows, Guest profile defaults, ODC/25-province GIS routing, stable zoom clustering & carousel scrolling, EXIF stripping, distance-aware `"Affects me"` anti-abuse rules, offline sync, PWA manifest branding, and full UI flows.
+The test suite includes **70 unit and widget tests** covering Priority Score tiers, multi-citizen Master Incident comments, self-duplicate & `"It's a different problem"` flows, Guest profile & data-URI avatar rendering, Khmer/English voice locale selection, ODC/25-province GIS routing, stable zoom clustering & overview carousel visibility, EXIF stripping, distance-aware `"Affects me"` anti-abuse rules, offline sync, PWA manifest & service worker branding, and full UI flows.
 
 ---
 

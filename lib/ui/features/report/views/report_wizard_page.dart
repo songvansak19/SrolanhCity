@@ -1830,12 +1830,12 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                   )
                                 : vm.isRecordingVoice
                                 ? tr.primary(
-                                    vm.isHoldRecording
-                                        ? 'លែងដៃដើម្បីបំប្លែង... 0:${vm.recordingSeconds.toString().padLeft(2, '0')}'
-                                        : 'កំពុងថតសំឡេង... 0:${vm.recordingSeconds.toString().padLeft(2, '0')}',
-                                    vm.isHoldRecording
-                                        ? 'Release to transcribe... 0:${vm.recordingSeconds.toString().padLeft(2, '0')}'
-                                        : 'Recording... 0:${vm.recordingSeconds.toString().padLeft(2, '0')}',
+                                    vm.voicePreferEnglish
+                                        ? 'កំពុងស្តាប់ភាសាអង់គ្លេស... 0:${vm.recordingSeconds.toString().padLeft(2, '0')}'
+                                        : 'កំពុងស្តាប់ភាសាខ្មែរ... 0:${vm.recordingSeconds.toString().padLeft(2, '0')}',
+                                    vm.voicePreferEnglish
+                                        ? 'Listening in English... 0:${vm.recordingSeconds.toString().padLeft(2, '0')}'
+                                        : 'Listening in Khmer... 0:${vm.recordingSeconds.toString().padLeft(2, '0')}',
                                   )
                                 : tr.primary(
                                     'រាយការណ៍ជាសំឡេង (សង្កត់ ឬចុច)',
@@ -1857,8 +1857,8 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                           Container(
                             key: const Key('voice-mode-pill'),
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
+                              horizontal: 7,
+                              vertical: 2.5,
                             ),
                             decoration: BoxDecoration(
                               color:
@@ -1868,9 +1868,9 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
-                              modePillLabel(),
+                              '${modePillLabel()} · ${vm.voicePreferEnglish ? 'EN' : 'ខ្មែរ'}',
                               style: TextStyle(
-                                fontSize: 9.5,
+                                fontSize: 10,
                                 fontWeight: FontWeight.w700,
                                 color:
                                     vm.voiceMode ==
@@ -1880,54 +1880,85 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                               ),
                             ),
                           ),
-                        ] else ...[
-                          const SizedBox(width: 6),
-                          InkWell(
-                            key: const Key('voice-lang-chip'),
-                            onTap: () {
-                              HapticFeedback.selectionClick();
-                              vm.toggleVoiceLanguage();
-                            },
-                            borderRadius: BorderRadius.circular(999),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: AppColors.teal.withValues(alpha: 0.35),
-                                ),
-                              ),
-                              child: Text(
-                                vm.voicePreferEnglish ? 'EN' : 'ខ្មែរ',
-                                style: const TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.tealDark,
-                                ),
-                              ),
-                            ),
-                          ),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      vm.voiceTranscript ??
-                          tr.primary(
-                            'ដូច Telegram · សង្កត់ ឬចុចដើម្បីនិយាយជាភាសាខ្មែរ/អង់គ្លេស',
-                            'Telegram-style · Hold or tap to speak in Khmer or English',
+                    const SizedBox(height: 5),
+                    // Clear 2-option voice recognition language selector (Khmer | EN)
+                    Row(
+                      children: [
+                        Container(
+                          key: const Key('voice-lang-toggle'),
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: AppColors.teal.withValues(alpha: 0.35),
+                            ),
                           ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                      ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _VoiceLangOption(
+                                key: const Key('voice-lang-km'),
+                                label: 'ខ្មែរ',
+                                selected: !vm.voicePreferEnglish,
+                                enabled: !isActive,
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  vm.setVoicePreferEnglish(false);
+                                },
+                              ),
+                              _VoiceLangOption(
+                                key: const Key('voice-lang-en'),
+                                label: 'EN',
+                                selected: vm.voicePreferEnglish,
+                                enabled: !isActive,
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  vm.setVoicePreferEnglish(true);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            vm.voicePreferEnglish
+                                ? tr.primary(
+                                    'ភាសាសំឡេង៖ អង់គ្លេស (EN)',
+                                    'Voice: English (EN)',
+                                  )
+                                : tr.primary(
+                                    'ភាសាសំឡេង៖ ខ្មែរ (km-KH)',
+                                    'Voice: Khmer (ខ្មែរ)',
+                                  ),
+                            key: const Key('voice-active-lang-label'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.tealDark,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                    if (vm.voiceTranscript != null) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        vm.voiceTranscript!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -2787,6 +2818,45 @@ class _SeverityCard extends StatelessWidget {
                 style: const TextStyle(fontSize: 10, color: AppColors.muted),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceLangOption extends StatelessWidget {
+  const _VoiceLangOption({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.teal : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.white : AppColors.tealDark,
           ),
         ),
       ),

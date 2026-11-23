@@ -291,9 +291,32 @@ class ReportRepository extends ChangeNotifier {
 
     final rawReports = data['reports'];
     if (rawReports is List && rawReports.isNotEmpty) {
+      final seedsById = <String, CivicReport>{
+        for (final seed in _seedReports()) seed.id: seed,
+      };
       final parsed = rawReports
           .whereType<Map<String, dynamic>>()
           .map(CivicReport.fromJson)
+          .map((report) {
+            final seed = seedsById[report.id];
+            if (seed == null || seed.citizenComments.length <= 1) {
+              return report;
+            }
+            final existingIds = report.citizenComments.map((c) => c.id).toSet();
+            final hasAnySeededExtra = seed.citizenComments
+                .skip(1)
+                .any((c) => existingIds.contains(c.id));
+            if (hasAnySeededExtra) return report;
+
+            // Backfill seeded multi-citizen comments onto pre-update caches
+            // while preserving any comments the user already added/joined.
+            final userAdded = report.citizenComments
+                .where((c) => c.isCurrentUser && !c.isOriginalReporter)
+                .toList(growable: false);
+            return report.copyWith(
+              citizenComments: [...seed.citizenComments, ...userAdded],
+            );
+          })
           .toList();
       if (parsed.isNotEmpty) {
         _reports

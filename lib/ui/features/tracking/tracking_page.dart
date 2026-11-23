@@ -1665,73 +1665,88 @@ class _CitizenCommentTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: badgeBg,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    authorLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w700,
-                      color: badgeFg,
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: badgeBg,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          authorLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: badgeFg,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ),
-              if (comment.severity != null) ...[
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Text(
-                    'S${comment.severity}/5',
-                    style: AppFonts.displayStyle(
-                      fontSize: 9.5,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w700,
+                    if (comment.severity != null) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Text(
+                          'S${comment.severity}/5',
+                          style: AppFonts.displayStyle(
+                            fontSize: 9.5,
+                            color: AppColors.muted,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: 6),
+                    LiveRelativeTimeText(
+                      timestamp: comment.createdAt,
+                      englishFirst: tr.englishFirst,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: AppColors.muted,
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-              const SizedBox(width: 6),
-              LiveRelativeTimeText(
-                timestamp: comment.createdAt,
-                englishFirst: tr.englishFirst,
-                style: const TextStyle(fontSize: 10.5, color: AppColors.muted),
               ),
               if (onDelete != null) ...[
-                const Spacer(),
-                IconButton(
-                  key: Key('delete-comment-${comment.id}'),
-                  tooltip: tr.primary('លុបមតិ', 'Delete note'),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 28,
-                    minHeight: 28,
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: tr.primary('លុបមតិ', 'Delete note'),
+                  child: Material(
+                    color: AppColors.dangerSoft,
+                    borderRadius: BorderRadius.circular(8),
+                    child: InkWell(
+                      key: Key('delete-comment-${comment.id}'),
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: onDelete,
+                      child: const Padding(
+                        padding: EdgeInsets.all(5),
+                        child: Icon(
+                          Icons.delete_outline_rounded,
+                          size: 15,
+                          color: AppColors.danger,
+                        ),
+                      ),
+                    ),
                   ),
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    size: 16,
-                    color: AppColors.danger,
-                  ),
-                  onPressed: onDelete,
                 ),
               ],
             ],
