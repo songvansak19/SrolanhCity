@@ -3,8 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:my_app/data/repositories/report_repository.dart';
+import 'package:my_app/data/services/audio_player_service.dart';
+import 'package:my_app/data/services/audio_recorder_service.dart';
 import 'package:my_app/data/services/civic_ai_service.dart';
+import 'package:my_app/data/services/comment_translation_service.dart';
+import 'package:my_app/data/services/exif_stripper.dart';
+import 'package:my_app/data/services/ip_geolocation_service.dart';
 import 'package:my_app/data/services/location_service.dart';
+import 'package:my_app/data/services/photo_media_types.dart';
 import 'package:my_app/data/services/voice_input_service.dart';
 import 'package:my_app/domain/models/report_models.dart';
 import 'package:my_app/main.dart';
@@ -14,10 +20,12 @@ import 'package:my_app/ui/core/widgets/before_after_slider.dart';
 import 'package:my_app/ui/core/widgets/user_avatar.dart';
 import 'package:my_app/ui/core/widgets/voice_waveform.dart';
 import 'package:my_app/ui/features/alerts/alerts_page.dart';
+import 'package:my_app/ui/features/help/help_center_page.dart';
 import 'package:my_app/ui/features/map/map_page.dart';
 import 'package:my_app/ui/features/news/area_news_page.dart';
 import 'package:my_app/ui/features/profile/edit_profile_page.dart';
 import 'package:my_app/ui/features/profile/my_reports_page.dart';
+import 'package:my_app/ui/features/profile/profile_page.dart';
 import 'package:my_app/ui/features/report/views/fake_gps_page.dart';
 import 'package:my_app/ui/features/report/views/report_wizard_page.dart';
 import 'package:my_app/ui/features/shell/main_shell.dart';
@@ -148,6 +156,16 @@ void main() {
 
     expect(find.byType(TrackingPage), findsOneWidget);
     expect(find.text('#SC-20377'), findsOneWidget);
+    await tester.drag(
+      find
+          .descendant(
+            of: find.byType(TrackingPage),
+            matching: find.byType(ListView),
+          )
+          .first,
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('EDC'), findsWidgets);
   });
 
@@ -930,11 +948,21 @@ void main() {
       );
 
       // Expand to see 3rd anonymous citizen comment
+      await tester.ensureVisible(
+        find.byKey(const Key('toggle-all-comments-btn')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('toggle-all-comments-btn')));
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.textContaining('Anonymous citizen #3'),
+        150,
+      );
       expect(find.textContaining('Anonymous citizen #3'), findsOneWidget);
 
       // Tap "+ Add note" -> opens _AddCommentSheet -> post a new note -> displays immediately
+      await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('add-comment-btn')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('add-comment-sheet')), findsOneWidget);
@@ -1066,7 +1094,12 @@ void main() {
       // Tap Track my report -> expands & verifies user's joined comment on TrackingPage
       await tester.tap(find.textContaining('Track my report'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('toggle-all-comments-btn')));
+      final toggleCommentsBtn = find.byKey(
+        const Key('toggle-all-comments-btn'),
+      );
+      await tester.ensureVisible(toggleCommentsBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(toggleCommentsBtn);
       await tester.pumpAndSettle();
       expect(
         find.text('Dangerous puddle hiding the crater during rush hour'),
@@ -1137,6 +1170,433 @@ void main() {
       expect(find.text('Voice: English (EN)'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'Affects me blocks impossible-travel GPS jump (Phnom Penh -> Siem Reap in 2 min) by opening FakeGpsPage',
+    (tester) async {
+      final now = DateTime.now();
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      repo.recordVerifiedGpsCheckpoint(
+        const LatLng(11.5564, 104.9282),
+        timestamp: now.subtract(const Duration(minutes: 2)),
+      );
+      final siemReapReport = repo.reports.firstWhere(
+        (r) =>
+            r.englishProvince.toLowerCase().contains('siem reap') &&
+            !r.isContributedByCurrentUser,
+      );
+
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          TrackingPage(
+            reportId: siemReapReport.id,
+            locationService: _FakeLocationService(
+              LocationSuccess(
+                point: siemReapReport.coordinates,
+                accuracyMeters: 12,
+                isOutsideCambodia: false,
+                timestamp: now,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('tracking-support-btn')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect(find.byType(FakeGpsPage), findsOneWidget);
+      expect(find.byKey(const Key('fake-gps-detail-text')), findsOneWidget);
+      expect(find.textContaining('Impossible travel'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'ReportWizard Step 3 displays Photo GPS verified pill when EXIF matches and warning banner with Use photo location when EXIF is far away',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+
+      // Case 1: Matching Phnom Penh EXIF (non-duplicate spot) -> green verified pill
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          ReportWizardPage(
+            initialCoordinates: const LatLng(11.5318, 104.9044),
+            initialPhotoExif: PhotoExifMetadata(
+              coordinates: const LatLng(11.5319, 104.9045),
+              capturedAt: DateTime.now().subtract(const Duration(minutes: 5)),
+            ),
+            voiceInputService: _UnavailableTestVoiceService(),
+            civicAiService: _UnconfiguredTestAiService(),
+            ipGeolocationService: const _TestIpGeoService(null),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Next'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.textContaining('Confirm location'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byKey(const Key('step3-exif-verified-pill')), findsOneWidget);
+      expect(
+        find.byKey(const Key('step3-integrity-warning-banner')),
+        findsNothing,
+      );
+
+      // Case 2: EXIF in Siem Reap while pinned in Phnom Penh -> saffron warning + 1-tap button
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          ReportWizardPage(
+            key: const ValueKey('wizard-mismatch'),
+            initialCoordinates: const LatLng(11.5318, 104.9044),
+            initialPhotoExif: PhotoExifMetadata(
+              coordinates: const LatLng(13.3633, 103.8564),
+              capturedAt: DateTime.now().subtract(const Duration(minutes: 10)),
+            ),
+            voiceInputService: _UnavailableTestVoiceService(),
+            civicAiService: _UnconfiguredTestAiService(),
+            ipGeolocationService: const _TestIpGeoService(null),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Next'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.textContaining('Confirm location'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        find.byKey(const Key('step3-integrity-warning-banner')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('step3-use-photo-gps-btn')), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'ReportWizard offline records local voice memo on Step 2 and displays Voice Memo card on TrackingPage',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      repo.setOnlineStatus(false);
+
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          ReportWizardPage(
+            initialCategory: IssueCategory.pothole,
+            initialCoordinates: const LatLng(11.5318, 104.9044),
+            voiceInputService: _UnavailableTestVoiceService(),
+            audioRecorderService: _WidgetFakeAudioRecorderService(),
+            audioPlayerService: _WidgetFakeAudioPlayerService(),
+            civicAiService: _UnconfiguredTestAiService(),
+            ipGeolocationService: const _TestIpGeoService(null),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Next'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byKey(const Key('voice-offline-badge')), findsOneWidget);
+
+      // Scroll voice record button into view, tap to start & tap again to stop
+      final recordBtn = find.byKey(const Key('voice-record-btn'));
+      await tester.ensureVisible(recordBtn);
+      await tester.pump();
+      await tester.tap(recordBtn);
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(recordBtn);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byKey(const Key('step2-voice-memo-player')), findsOneWidget);
+
+      // Advance to Step 3 & submit offline report
+      await tester.tap(find.textContaining('Confirm location'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.textContaining('Submit report'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      final created = repo.reports.first;
+      expect(created.syncStatus, equals(SyncStatus.pendingSync));
+      expect(created.voiceAudioPath, equals('data:audio/webm;base64,AAAA'));
+
+      // Verify TrackingPage renders Voice Memo card cleanly in a fresh MaterialApp
+      await tester.pumpWidget(
+        ReportScope(
+          key: const ValueKey('tracking-memo-scope'),
+          repository: repo,
+          child: MaterialApp(
+            theme: buildSrolanhCityTheme(),
+            home: TrackingPage(
+              reportId: created.id,
+              audioPlayerService: _WidgetFakeAudioPlayerService(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('tracking-voice-memo-card')),
+        250,
+        scrollable: find
+            .descendant(
+              of: find.byType(TrackingPage),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      expect(find.byKey(const Key('tracking-voice-memo-card')), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'TrackingPage inline comment translation translates English comment to Khmer and shows offline notice when disconnected',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      final fakeTranslator = _WidgetFakeTranslator();
+
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          TrackingPage(
+            reportId: '#SC-20519',
+            translationService: fakeTranslator,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final translateBtn = find.byKey(const Key('translate-comment-c-20519-2'));
+      expect(translateBtn, findsOneWidget);
+
+      await tester.ensureVisible(translateBtn);
+      await tester.tap(translateBtn);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('translated-comment-c-20519-2')),
+        findsOneWidget,
+      );
+      expect(find.text('ការបកប្រែជាភាសាខ្មែរ'), findsOneWidget);
+
+      // Toggle hide translation
+      await tester.tap(translateBtn);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('translated-comment-c-20519-2')),
+        findsNothing,
+      );
+
+      // Go offline -> translating another comment shows clean offline notice
+      repo.setOnlineStatus(false);
+      await tester.pumpAndSettle();
+      final origTranslateBtn = find.byKey(
+        const Key('translate-comment-c-20519-1'),
+      );
+      await tester.ensureVisible(origTranslateBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(origTranslateBtn);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('translate-error-c-20519-1')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'EditProfilePage updates avatar immediately on valid pick and shows helpful SnackBar on unsupported HEIC photo',
+    (tester) async {
+      const pngDataUri =
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+
+      // 1. Valid photo selection updates avatar immediately
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          EditProfilePage(
+            onPickAvatarPhoto: (_) async =>
+                const PersistedPhotoResult(path: pngDataUri),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('edit-change-photo-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('avatar-choose-photo-option')));
+      await tester.pumpAndSettle();
+
+      expect(repo.profile.avatarPhotoPath, equals(pngDataUri));
+      expect(find.text('Profile photo updated!'), findsOneWidget);
+
+      // Clear previous SnackBar before verifying HEIC warning SnackBar
+      ScaffoldMessenger.of(tester.element(find.byType(EditProfilePage)))
+          .clearSnackBars();
+      await tester.pumpAndSettle();
+
+      // 2. Unsupported format (e.g. HEIC) shows clear error SnackBar without clearing avatar
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          EditProfilePage(
+            key: const ValueKey('edit-profile-heic'),
+            onPickAvatarPhoto: (_) async =>
+                const PersistedPhotoResult(path: '', unsupportedFormat: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('edit-change-photo-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('avatar-choose-photo-option')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('HEIC'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'ProfilePage opens HelpCenterPage with hotlines, FAQ accordion, and interactive AI assistant ticket lookup',
+    (tester) async {
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      await tester.pumpWidget(
+        _wrapWithScope(repo, const Scaffold(body: ProfilePage())),
+      );
+      await tester.pumpAndSettle();
+
+      final helpTile = find.byKey(const Key('open-help-center-tile'));
+      await tester.scrollUntilVisible(helpTile, 250);
+      await tester.ensureVisible(helpTile);
+      await tester.pumpAndSettle();
+      await tester.tap(helpTile);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HelpCenterPage), findsOneWidget);
+      expect(find.byKey(const Key('help-hotlines-strip')), findsOneWidget);
+      expect(find.text('1190'), findsOneWidget);
+      expect(find.text('1298'), findsOneWidget);
+      expect(find.byKey(const Key('help-ai-chat')), findsOneWidget);
+
+      // Ask about ticket #SC-20481 -> assistant performs live ticket lookup
+      await tester.enterText(
+        find.byKey(const Key('help-chat-input')),
+        '#SC-20481',
+      );
+      await tester.tap(find.byKey(const Key('help-chat-send-btn')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Open #SC-20481'), findsOneWidget);
+
+      // Scroll down to verify FAQ accordion renders
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('help-faq-section')),
+        250,
+        scrollable: find
+            .descendant(
+              of: find.byType(HelpCenterPage),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      expect(find.byKey(const Key('help-faq-section')), findsOneWidget);
+    },
+  );
+
+  group('Accessibility (WCAG 2.1 AA) guidelines', () {
+    testWidgets(
+      'HelpCenterPage passes tap target, labeled target, and contrast guidelines',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        await tester.pumpWidget(_wrapWithScope(repo, const HelpCenterPage()));
+        await tester.pumpAndSettle();
+
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'FakeGpsPage honors reduced motion and passes tap target & contrast guidelines',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(disableAnimations: true),
+            child: _wrapWithScope(
+              repo,
+              FakeGpsPage(
+                detectedAppLabel: 'Mock GPS Provider',
+                onOpenSettings: () async => true,
+                onTryAgain: () {},
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'EditProfilePage and TrackingPage pass labeled tap target and contrast guidelines',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+
+        await tester.pumpWidget(_wrapWithScope(repo, const EditProfilePage()));
+        await tester.pumpAndSettle();
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+        await tester.pumpWidget(
+          _wrapWithScope(repo, const TrackingPage(reportId: '#SC-20481')),
+        );
+        await tester.pumpAndSettle();
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+        handle.dispose();
+      },
+    );
+  });
 }
 
 class _FakeLocationService extends LocationService {
@@ -1197,4 +1657,65 @@ class _UnconfiguredTestAiService implements CivicAiService {
     required String audioPath,
     required bool englishFirst,
   }) async => const AudioTranscriptionResult(success: false);
+
+  @override
+  Future<HelpChatReply> askHelpAssistant({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  }) async => const HelpChatReply(success: false, text: '');
+}
+
+class _TestIpGeoService implements IpGeolocationService {
+  const _TestIpGeoService(this.info);
+  final IpGeoInfo? info;
+
+  @override
+  Future<IpGeoInfo?> lookupCurrentIp() async => info;
+}
+
+class _WidgetFakeAudioRecorderService implements AudioRecorderService {
+  @override
+  Future<bool> hasPermission() async => true;
+
+  @override
+  Future<bool> startRecording({bool persistentMemo = false}) async => true;
+
+  @override
+  Future<double> getNormalizedAmplitude() async => 0.6;
+
+  @override
+  Future<String?> stopRecording() async => 'data:audio/webm;base64,AAAA';
+
+  @override
+  Future<void> cancelAndDelete() async {}
+
+  @override
+  Future<void> deleteFile(String? path) async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
+class _WidgetFakeAudioPlayerService implements AudioPlayerService {
+  @override
+  bool get isPlaybackSupported => true;
+
+  @override
+  Future<bool> play(String source, {VoidCallback? onCompleted}) async => true;
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
+class _WidgetFakeTranslator implements CommentTranslationService {
+  @override
+  Future<String?> translate({
+    required String text,
+    required String targetLang,
+  }) async => targetLang == 'km' ? 'ការបកប្រែជាភាសាខ្មែរ' : 'Translated EN';
 }

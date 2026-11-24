@@ -1,6 +1,5 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../domain/models/cambodia_locations.dart';
 import '../../core/l10n.dart';
@@ -8,43 +7,13 @@ import '../../core/report_scope.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/bilingual_text.dart';
 import '../../core/widgets/user_avatar.dart';
+import '../help/help_center_page.dart';
 import '../news/area_news_page.dart';
 import 'edit_profile_page.dart';
 import 'my_reports_page.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
-
-  Future<void> _callEmergencyHotline(BuildContext context, Bilingual tr) async {
-    final uri = Uri(scheme: 'tel', path: '1190');
-    try {
-      final launched = await launchUrl(uri);
-      if (!launched && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              tr.primary(
-                'សូមហៅទៅលេខបន្ទាន់ 1190 ដោយផ្ទាល់ពីទូរស័ព្ទអ្នក',
-                'Dial road emergency hotline 1190 from your phone.',
-              ),
-            ),
-          ),
-        );
-      }
-    } catch (_) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            tr.primary(
-              'ខ្សែទូរស័ព្ទបន្ទាន់បញ្ហាផ្លូវ៖ 1190',
-              'Road emergency hotline: 1190',
-            ),
-          ),
-        ),
-      );
-    }
-  }
 
   void _showPrivacyDialog(BuildContext context, Bilingual tr) {
     showDialog<void>(
@@ -56,34 +25,36 @@ class ProfilePage extends StatelessWidget {
           size: 32,
         ),
         title: Text(tr.primary('ឯកជនភាព និងសុវត្ថិភាព', 'Privacy-by-Design')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _PrivacyPoint(
-              icon: Icons.public_off_outlined,
-              text: tr.primary(
-                'ផែនទីសាធារណៈមិនបង្ហាញឈ្មោះ លេខទូរស័ព្ទ ឬលេខសម្គាល់អ្នករាយការណ៍ឡើយ។',
-                'Public map pins never expose reporter name, phone, or user ID.',
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _PrivacyPoint(
+                icon: Icons.public_off_outlined,
+                text: tr.primary(
+                  'ផែនទីសាធារណៈមិនបង្ហាញឈ្មោះ លេខទូរស័ព្ទ ឬលេខសម្គាល់អ្នករាយការណ៍ឡើយ។',
+                  'Public map pins never expose reporter name, phone, or user ID.',
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            _PrivacyPoint(
-              icon: Icons.photo_filter_outlined,
-              text: tr.primary(
-                'ទិន្នន័យ EXIF ក្នុងរូបថតត្រូវបានលុបចេញដោយស្វ័យប្រវត្តិមុនពេលរក្សាទុក។',
-                'Camera EXIF metadata is stripped automatically on upload.',
+              const SizedBox(height: 8),
+              _PrivacyPoint(
+                icon: Icons.photo_filter_outlined,
+                text: tr.primary(
+                  'ទិន្នន័យ EXIF ក្នុងរូបថតត្រូវបានលុបចេញដោយស្វ័យប្រវត្តិមុនពេលរក្សាទុក។',
+                  'Camera EXIF metadata is stripped automatically on upload.',
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            _PrivacyPoint(
-              icon: Icons.lock_outline,
-              text: tr.primary(
-                'ព័ត៌មានគណនីត្រូវបានអ៊ិនគ្រីប TLS ទាំងពេលបញ្ជូន និងពេលរក្សាទុក។',
-                'Phone numbers and credentials are encrypted in transit (TLS) and at rest.',
+              const SizedBox(height: 8),
+              _PrivacyPoint(
+                icon: Icons.lock_outline,
+                text: tr.primary(
+                  'ព័ត៌មានគណនីត្រូវបានអ៊ិនគ្រីប TLS ទាំងពេលបញ្ជូន និងពេលរក្សាទុក។',
+                  'Phone numbers and credentials are encrypted in transit (TLS) and at rest.',
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           FilledButton(
@@ -95,78 +66,11 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  void _showHelpSheet(BuildContext context, Bilingual tr) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: AppColors.paper,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              BilingualText(
-                bilingual: tr,
-                khmer: 'ជំនួយ និងទំនាក់ទំនងបន្ទាន់',
-                english: 'Help & Emergency',
-                fontSize: 18,
-              ),
-              const SizedBox(height: 8),
-              ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: AppColors.tealSoft,
-                  child: Icon(Icons.phone_outlined, color: AppColors.teal),
-                ),
-                title: Text(
-                  tr.primary('ខ្សែទូរស័ព្ទបន្ទាន់', 'Road Emergency Hotline'),
-                ),
-                subtitle: Text(
-                  tr.primary(
-                    'ក្រសួងសាធារណការ៖ 1190 (ចុចដើម្បីហៅ)',
-                    'MPWT Road Hotline: 1190 (Tap to call)',
-                  ),
-                ),
-                trailing: const Icon(
-                  Icons.call_outlined,
-                  color: AppColors.teal,
-                ),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _callEmergencyHotline(context, tr);
-                },
-              ),
-              ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: AppColors.tealSoft,
-                  child: Icon(Icons.chat_outlined, color: AppColors.teal),
-                ),
-                title: Text(tr.primary('ជំនួយកម្មវិធី', 'App Support')),
-                subtitle: Text(
-                  tr.primary(
-                    'សួរសំណួរអំពីការរាយការណ៍ ឬតាមដានជួសជុល',
-                    'Get help with reporting or repair tracking',
-                  ),
-                ),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        tr.primary(
-                          'ក្រុមជំនួយ SrolanhCity ត្រៀមជួយ ២៤/៧',
-                          'SrolanhCity citizen support is available 24/7.',
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
+  void _openHelpCenter(BuildContext context) {
+    HapticFeedback.selectionClick();
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const HelpCenterPage()),
     );
   }
 
@@ -467,18 +371,26 @@ class ProfilePage extends StatelessWidget {
                     ),
                     const Divider(height: 1, color: AppColors.border),
                     ListTile(
+                      key: const Key('open-help-center-tile'),
                       leading: const Icon(
-                        Icons.help_outline,
+                        Icons.support_agent_rounded,
                         color: AppColors.teal,
                       ),
                       title: Text(
                         tr.primary(
-                          'ជំនួយ និងខ្សែទូរស័ព្ទ 1190',
-                          'Help & Hotline 1190',
+                          'មជ្ឈមណ្ឌលជំនួយ និង 1190',
+                          'Help Center & Hotline 1190',
                         ),
                       ),
+                      subtitle: Text(
+                        tr.primary(
+                          'ជំនួយការ AI · សំណួរញឹកញាប់ · 1190 / 1298',
+                          'AI Assistant · FAQs · Hotlines 1190 / 1298',
+                        ),
+                        style: const TextStyle(fontSize: 12),
+                      ),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _showHelpSheet(context, tr),
+                      onTap: () => _openHelpCenter(context),
                     ),
                   ],
                 ),

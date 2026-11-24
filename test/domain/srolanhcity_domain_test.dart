@@ -7,7 +7,9 @@ import 'package:latlong2/latlong.dart';
 import 'package:my_app/data/repositories/report_repository.dart';
 import 'package:my_app/data/services/audio_recorder_service.dart';
 import 'package:my_app/data/services/civic_ai_service.dart';
+import 'package:my_app/data/services/comment_translation_service.dart';
 import 'package:my_app/data/services/exif_stripper.dart';
+import 'package:my_app/data/services/ip_geolocation_service.dart';
 import 'package:my_app/data/services/local_storage_service.dart';
 import 'package:my_app/data/services/location_service.dart';
 import 'package:my_app/data/services/reverse_geocoding_service.dart';
@@ -15,7 +17,9 @@ import 'package:my_app/data/services/voice_input_service.dart';
 import 'package:my_app/domain/models/cambodia_locations.dart';
 import 'package:my_app/domain/models/report_models.dart';
 import 'package:my_app/domain/services/ai_classifier_service.dart';
+import 'package:my_app/domain/services/anti_spoof_service.dart';
 import 'package:my_app/domain/services/gis_routing_service.dart';
+import 'package:my_app/domain/services/help_assistant_service.dart';
 import 'package:my_app/domain/services/map_cluster_service.dart';
 import 'package:my_app/domain/services/priority_calculator.dart';
 import 'package:my_app/domain/services/relative_time_formatter.dart';
@@ -1498,7 +1502,7 @@ void main() {
       // Offline-first PWA service worker & custom bootstrap
       final swJs = File('web/sw.js').readAsStringSync();
       final bootstrapJs = File('web/flutter_bootstrap.js').readAsStringSync();
-      expect(swJs, contains('srolanhcity-app-v2'));
+      expect(swJs, contains('srolanhcity-app-v3'));
       expect(swJs, contains('canvaskit/canvaskit.wasm'));
       expect(swJs, contains('tile.openstreetmap.org'));
       expect(bootstrapJs, contains('_flutter.loader.load()'));
@@ -1651,6 +1655,295 @@ void main() {
         equals('Expanded trash pile blocking sidewalk'),
       );
     });
+
+    test('Reopen-online auto-sync: hydrate automatically syncs pendingSync reports with voice memos and restores GPS checkpoint', () async {
+      final offlineRepo = ReportRepository();
+      offlineRepo.setOnlineStatus(false);
+      final queued = offlineRepo.submitReport(
+        category: IssueCategory.drain,
+        description: 'Offline flooded drain',
+        severity: 4,
+        coordinates: const LatLng(11.5564, 104.9282),
+        isAnonymous: false,
+        voiceAudioPath: 'data:audio/webm;base64,AAAA',
+        voiceAudioDurationSeconds: 7,
+      );
+      expect(queued.report.syncStatus, equals(SyncStatus.pendingSync));
+      expect(
+        queued.report.voiceAudioPath,
+        equals('data:audio/webm;base64,AAAA'),
+      );
+      expect(queued.report.voiceAudioDurationSeconds, equals(7));
+
+      final savedCheckpoint = GpsCheckpoint(
+        point: const LatLng(11.5564, 104.9282),
+        timestamp: DateTime(2026, 11, 24, 10, 0),
+      );
+      final fakeStore = _InMemoryLocalStorage({
+        'reports': [queued.report.toJson()],
+        'alerts': const <Map<String, dynamic>>[],
+        'lastVerifiedGpsCheckpoint': savedCheckpoint.toJson(),
+      });
+
+      // Reopen online -> hydrate() must immediately auto-sync pendingSync!
+      final reopenedRepo = ReportRepository(storage: fakeStore);
+      await reopenedRepo.hydrate();
+      expect(reopenedRepo.hasPendingSync, isFalse);
+      final synced = reopenedRepo.findById(queued.report.id)!;
+      expect(synced.syncStatus, equals(SyncStatus.synced));
+      expect(synced.voiceAudioPath, equals('data:audio/webm;base64,AAAA'));
+      expect(reopenedRepo.alerts.first.englishTitle, contains('Synced 1'));
+      expect(reopenedRepo.lastVerifiedGpsCheckpoint, isNotNull);
+      expect(
+        reopenedRepo.lastVerifiedGpsCheckpoint!.point.latitude,
+        closeTo(11.5564, 0.0001),
+      );
+    });
+
+    test('ExifStripper extracts GPS & DateTimeOriginal in both II and MM TIFF headers before stripping APP1 completely', () {
+      for (final endian in [Endian.little, Endian.big]) {
+        final jpeg = _buildSyntheticExifJpeg(
+          endian: endian,
+          latDeg: 11,
+          latMin: 33,
+          latSecNum: 2304,
+          latSecDen: 100,
+          lngDeg: 104,
+          lngMin: 55,
+          lngSecNum: 4152,
+          lngSecDen: 100,
+          dateTimeOriginal: '2026:11:20 09:30:00',
+        );
+        final meta = ExifStripper.extractJpegMetadata(jpeg);
+        expect(meta.hasCoordinates, isTrue);
+        expect(meta.coordinates!.latitude, closeTo(11.5564, 0.001));
+        expect(meta.coordinates!.longitude, closeTo(104.9282, 0.001));
+        expect(meta.capturedAt, equals(DateTime(2026, 11, 20, 9, 30, 0)));
+
+        // Strip must remove APP1 completely while preserving JPEG SOI + EOI.
+        final stripped = ExifStripper.stripJpegMetadata(jpeg);
+        expect(stripped.length, lessThan(jpeg.length));
+        expect(ExifStripper.extractJpegMetadata(stripped).isEmpty, isTrue);
+      }
+    });
+
+    test('AntiSpoofService catches impossible travel, synthetic accuracy, photo EXIF mismatch, and non-KH IP while keeping honest users unblocked', () {
+      const phnomPenh = LatLng(11.5564, 104.9282);
+      const siemReap = LatLng(13.3633, 103.8564);
+      final t0 = DateTime(2026, 11, 24, 10, 0);
+
+      // 1. Impossible travel (232 km in 3 minutes) -> blocked
+      final impossible = AntiSpoofService.evaluateGpsFix(
+        current: GpsReadingSample(
+          point: siemReap,
+          timestamp: t0.add(const Duration(minutes: 3)),
+          accuracyMeters: 12.0,
+        ),
+        lastCheckpoint: GpsCheckpoint(point: phnomPenh, timestamp: t0),
+      );
+      expect(impossible.isBlocked, isTrue);
+      expect(impossible.reasons, contains(SpoofSignalReason.impossibleTravel));
+
+      // 2. Realistic travel (232 km in 5 hours) -> trusted
+      final realistic = AntiSpoofService.evaluateGpsFix(
+        current: GpsReadingSample(
+          point: siemReap,
+          timestamp: t0.add(const Duration(hours: 5)),
+          accuracyMeters: 12.0,
+        ),
+        lastCheckpoint: GpsCheckpoint(point: phnomPenh, timestamp: t0),
+      );
+      expect(realistic.riskLevel, equals(SpoofRiskLevel.trusted));
+
+      // 3. Synthetic GPS accuracy (0.1 m) -> blocked
+      final synthetic = AntiSpoofService.evaluateGpsFix(
+        current: GpsReadingSample(
+          point: phnomPenh,
+          timestamp: t0,
+          accuracyMeters: 0.1,
+        ),
+      );
+      expect(synthetic.isBlocked, isTrue);
+      expect(synthetic.reasons, contains(SpoofSignalReason.syntheticAccuracy));
+
+      // 4. Photo EXIF verified within 500 m, warning when > 5 km or > 30 days, clean when null
+      final exifOk = AntiSpoofService.evaluatePhotoExif(
+        exif: PhotoExifMetadata(coordinates: phnomPenh, capturedAt: t0),
+        pinnedLocation: const LatLng(11.5565, 104.9283),
+        now: t0.add(const Duration(minutes: 5)),
+      );
+      expect(exifOk.photoExifVerified, isTrue);
+      expect(exifOk.riskLevel, equals(SpoofRiskLevel.trusted));
+
+      final exifFarAndOld = AntiSpoofService.evaluatePhotoExif(
+        exif: PhotoExifMetadata(
+          coordinates: siemReap,
+          capturedAt: t0.subtract(const Duration(days: 45)),
+        ),
+        pinnedLocation: phnomPenh,
+        now: t0,
+      );
+      expect(exifFarAndOld.hasWarning, isTrue);
+      expect(
+        exifFarAndOld.reasons,
+        containsAll([
+          SpoofSignalReason.photoExifLocationMismatch,
+          SpoofSignalReason.photoExifStale,
+        ]),
+      );
+
+      expect(
+        AntiSpoofService.evaluatePhotoExif(
+          exif: null,
+          pinnedLocation: phnomPenh,
+        ).riskLevel,
+        equals(SpoofRiskLevel.trusted),
+      );
+
+      // 5. IP geolocation soft warning on non-KH, clean on KH or offline null
+      expect(
+        AntiSpoofService.evaluateIpGeo(ipCountryCode: 'KH').riskLevel,
+        equals(SpoofRiskLevel.trusted),
+      );
+      expect(
+        AntiSpoofService.evaluateIpGeo(ipCountryCode: null).riskLevel,
+        equals(SpoofRiskLevel.trusted),
+      );
+      final foreignIp = AntiSpoofService.evaluateIpGeo(ipCountryCode: 'US');
+      expect(foreignIp.hasWarning, isTrue);
+      expect(foreignIp.reasons, contains(SpoofSignalReason.ipCountryMismatch));
+      expect(
+        foreignIp.toIntegrityJson(ipCountryCode: 'US')['attestation'],
+        isNotNull,
+      );
+    });
+
+    test('ReportWizardViewModel records local voice memos offline and enables Brave speech fallback', () async {
+      final repo = ReportRepository();
+      repo.setOnlineStatus(false);
+      final fakeRecorder = _FakeAudioRecorderService(amplitude: 0.55);
+      final vm = ReportWizardViewModel(
+        repository: repo,
+        initialCoordinates: const LatLng(11.5318, 104.9044),
+        voiceInputService: _FakeVoiceInputService(available: false),
+        audioRecorderService: fakeRecorder,
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: _FakeIpGeoService(null),
+      );
+      addTearDown(vm.dispose);
+
+      await vm.toggleVoiceRecording();
+      expect(vm.isRecordingVoice, isTrue);
+      expect(vm.voiceMode, equals(VoiceCaptureMode.offlineAudioMemo));
+      expect(fakeRecorder.lastPersistentMemo, isTrue);
+
+      await vm.toggleVoiceRecording();
+      expect(vm.isRecordingVoice, isFalse);
+      expect(vm.hasVoiceAudioMemo, isTrue);
+      expect(vm.voiceAudioDurationSeconds, greaterThanOrEqualTo(1));
+
+      final submitted = vm.submit();
+      expect(submitted.report.syncStatus, equals(SyncStatus.pendingSync));
+      expect(submitted.report.voiceAudioPath, equals(vm.voiceAudioPath));
+
+      // Online with blocked Web Speech (Brave) offers Record Voice Memo fallback
+      repo.setOnlineStatus(true);
+      final vmOnline = ReportWizardViewModel(
+        repository: repo,
+        voiceInputService: _FakeVoiceInputService(available: false),
+        audioRecorderService: _FakeAudioRecorderService(amplitude: 0.5),
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: _FakeIpGeoService(
+          const IpGeoInfo(countryCode: 'KH'),
+        ),
+      );
+      addTearDown(vmOnline.dispose);
+      await vmOnline.toggleVoiceRecording();
+      expect(vmOnline.showVoiceMemoFallbackAction, isTrue);
+    });
+
+    test('CommentTranslationService detects Khmer vs English target language accurately', () {
+      expect(
+        CommentTranslationService.detectTargetLanguage(
+          'Water completely hides the hole after heavy rain.',
+        ),
+        equals('km'),
+      );
+      expect(
+        CommentTranslationService.detectTargetLanguage(
+          'រណ្តៅជ្រៅខ្លាំងលើមហាវិថីព្រះមុនីវង្ស',
+        ),
+        equals('en'),
+      );
+    });
+
+    test('HelpAssistantService performs live ticket lookup, answers bilingual FAQs, and uses backend AI when configured', () async {
+      final repo = ReportRepository();
+      final onDevice = HelpAssistantService(
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+      );
+
+      // 1. Live ticket lookup for #SC-20481
+      final ticketReply = await onDevice.respond(
+        message: 'Check status of #SC-20481',
+        history: const [],
+        repository: repo,
+        englishFirst: true,
+      );
+      expect(ticketReply.success, isTrue);
+      expect(ticketReply.fromBackendAi, isFalse);
+      expect(ticketReply.referencedReportId, equals('#SC-20481'));
+      expect(
+        ticketReply.suggestedAction,
+        equals(HelpSuggestedAction.openTicket),
+      );
+      expect(ticketReply.text, contains('MPWT'));
+
+      // 2. Khmer streetlight ministry question -> EDC 1298
+      final edcReply = await onDevice.respond(
+        message: 'ក្រសួងណាជួសជុលភ្លើងផ្លូវខូច?',
+        history: const [],
+        repository: repo,
+        englishFirst: false,
+      );
+      expect(edcReply.text, contains('1298'));
+      expect(
+        edcReply.suggestedAction,
+        equals(HelpSuggestedAction.callPowerHotline1298),
+      );
+
+      // 3. Backend LLM reply when configured & online
+      final backendHelper = HelpAssistantService(
+        civicAiService: _FakeConfiguredCivicAiService(
+          photoResult: PhotoAiAnalysis.awaitingBackend,
+          audioResult: const AudioTranscriptionResult(success: false),
+          helpReply: const HelpChatReply(
+            success: true,
+            text: 'Live backend AI answer for your civic question.',
+            fromBackendAi: true,
+          ),
+        ),
+      );
+      final liveReply = await backendHelper.respond(
+        message: 'Hello AI',
+        history: const [],
+        repository: repo,
+        englishFirst: true,
+      );
+      expect(liveReply.fromBackendAi, isTrue);
+      expect(liveReply.text, contains('Live backend AI answer'));
+
+      // Falls back cleanly to on-device when offline
+      repo.setOnlineStatus(false);
+      final offlineReply = await backendHelper.respond(
+        message: 'How is P5 priority calculated?',
+        history: const [],
+        repository: repo,
+        englishFirst: true,
+      );
+      expect(offlineReply.fromBackendAi, isFalse);
+      expect(offlineReply.text, contains('40%'));
+    });
   });
 }
 
@@ -1714,16 +2007,26 @@ class _UnconfiguredFakeCivicAiService implements CivicAiService {
     required String audioPath,
     required bool englishFirst,
   }) async => const AudioTranscriptionResult(success: false);
+
+  @override
+  Future<HelpChatReply> askHelpAssistant({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  }) async => const HelpChatReply(success: false, text: '');
 }
 
 class _FakeConfiguredCivicAiService implements CivicAiService {
   _FakeConfiguredCivicAiService({
     required this.photoResult,
     required this.audioResult,
+    this.helpReply = const HelpChatReply(success: false, text: ''),
   });
 
   final PhotoAiAnalysis photoResult;
   final AudioTranscriptionResult audioResult;
+  final HelpChatReply helpReply;
 
   @override
   bool get isBackendConfigured => true;
@@ -1741,6 +2044,14 @@ class _FakeConfiguredCivicAiService implements CivicAiService {
     required String audioPath,
     required bool englishFirst,
   }) async => audioResult;
+
+  @override
+  Future<HelpChatReply> askHelpAssistant({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  }) async => helpReply;
 }
 
 class _FakeAudioRecorderService implements AudioRecorderService {
@@ -1749,13 +2060,17 @@ class _FakeAudioRecorderService implements AudioRecorderService {
   final double amplitude;
   final List<String> deletedPaths = [];
   String? _activePath;
+  bool lastPersistentMemo = false;
 
   @override
   Future<bool> hasPermission() async => true;
 
   @override
-  Future<bool> startRecording() async {
-    _activePath = '${Directory.systemTemp.path}/fake_voice.wav';
+  Future<bool> startRecording({bool persistentMemo = false}) async {
+    lastPersistentMemo = persistentMemo;
+    _activePath = persistentMemo
+        ? 'data:audio/webm;base64,AAAA'
+        : '${Directory.systemTemp.path}/fake_voice.wav';
     return true;
   }
 
@@ -1792,4 +2107,102 @@ class _InMemoryLocalStorage extends LocalStorageService {
   Future<void> writeState(Map<String, dynamic> state) async {
     _state = state;
   }
+}
+
+class _FakeIpGeoService implements IpGeolocationService {
+  const _FakeIpGeoService(this.info);
+  final IpGeoInfo? info;
+
+  @override
+  Future<IpGeoInfo?> lookupCurrentIp() async => info;
+}
+
+/// Builds a minimal valid JPEG containing an APP1 EXIF/TIFF block with GPS
+/// DMS rationals and `DateTimeOriginal` in the specified byte order (`II`/`MM`).
+Uint8List _buildSyntheticExifJpeg({
+  required Endian endian,
+  required int latDeg,
+  required int latMin,
+  required int latSecNum,
+  required int latSecDen,
+  required int lngDeg,
+  required int lngMin,
+  required int lngSecNum,
+  required int lngSecDen,
+  required String dateTimeOriginal,
+}) {
+  final tiff = ByteData(220);
+  if (endian == Endian.little) {
+    tiff.setUint8(0, 0x49);
+    tiff.setUint8(1, 0x49);
+  } else {
+    tiff.setUint8(0, 0x4D);
+    tiff.setUint8(1, 0x4D);
+  }
+  tiff.setUint16(2, 0x002A, endian);
+  tiff.setUint32(4, 8, endian);
+
+  void writeEntry(int off, int tag, int type, int count, int value) {
+    tiff.setUint16(off, tag, endian);
+    tiff.setUint16(off + 2, type, endian);
+    tiff.setUint32(off + 4, count, endian);
+    tiff.setUint32(off + 8, value, endian);
+  }
+
+  // IFD0 at 8
+  tiff.setUint16(8, 2, endian);
+  writeEntry(10, 0x8769, 4, 1, 40); // ExifIFD pointer
+  writeEntry(22, 0x8825, 4, 1, 70); // GPSIFD pointer
+  tiff.setUint32(34, 0, endian);
+
+  // ExifIFD at 40
+  tiff.setUint16(40, 1, endian);
+  writeEntry(42, 0x9003, 2, 20, 140); // DateTimeOriginal
+  tiff.setUint32(54, 0, endian);
+
+  // GPSIFD at 70
+  tiff.setUint16(70, 4, endian);
+  tiff.setUint16(72, 0x0001, endian);
+  tiff.setUint16(74, 2, endian);
+  tiff.setUint32(76, 2, endian);
+  tiff.setUint8(80, 0x4E); // 'N'
+  tiff.setUint8(81, 0x00);
+  writeEntry(84, 0x0002, 5, 3, 164);
+  tiff.setUint16(96, 0x0003, endian);
+  tiff.setUint16(98, 2, endian);
+  tiff.setUint32(100, 2, endian);
+  tiff.setUint8(104, 0x45); // 'E'
+  tiff.setUint8(105, 0x00);
+  writeEntry(108, 0x0004, 5, 3, 188);
+  tiff.setUint32(120, 0, endian);
+
+  final dtBytes = dateTimeOriginal.codeUnits;
+  for (var i = 0; i < dtBytes.length && i < 19; i++) {
+    tiff.setUint8(140 + i, dtBytes[i]);
+  }
+  tiff.setUint8(140 + dtBytes.length, 0);
+
+  void writeRational(int off, int num, int den) {
+    tiff.setUint32(off, num, endian);
+    tiff.setUint32(off + 4, den, endian);
+  }
+
+  writeRational(164, latDeg, 1);
+  writeRational(172, latMin, 1);
+  writeRational(180, latSecNum, latSecDen);
+
+  writeRational(188, lngDeg, 1);
+  writeRational(196, lngMin, 1);
+  writeRational(204, lngSecNum, lngSecDen);
+
+  final tiffBytes = tiff.buffer.asUint8List();
+  final app1PayloadLen = 2 + 6 + tiffBytes.length;
+  final out = BytesBuilder()
+    ..add([0xFF, 0xD8])
+    ..add([0xFF, 0xE1, (app1PayloadLen >> 8) & 0xFF, app1PayloadLen & 0xFF])
+    ..add([0x45, 0x78, 0x69, 0x66, 0x00, 0x00])
+    ..add(tiffBytes)
+    ..add([0xFF, 0xDA, 0x00, 0x04, 0x11, 0x22])
+    ..add([0xFF, 0xD9]);
+  return out.toBytes();
 }

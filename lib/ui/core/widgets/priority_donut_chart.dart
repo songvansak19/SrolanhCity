@@ -19,36 +19,46 @@ class PriorityDonutChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CustomPaint(
-        painter: _DonutPainter(
-          trafficFraction: 0.40 * (breakdown.trafficScore / 5),
-          severityFraction: 0.30 * (breakdown.severityScore / 5),
-          reportsFraction: 0.30 * (breakdown.reportCountScore / 5),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                breakdown.rawScore.toStringAsFixed(1),
-                style: AppFonts.displayStyle(
-                  fontSize: size * 0.22,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
+    return Semantics(
+      label: 'P${breakdown.level} ${breakdown.rawScore.toStringAsFixed(1)}/5.0',
+      excludeSemantics: true,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: CustomPaint(
+          painter: _DonutPainter(
+            trafficFraction: 0.40 * (breakdown.trafficScore / 5),
+            severityFraction: 0.30 * (breakdown.severityScore / 5),
+            reportsFraction: 0.30 * (breakdown.reportCountScore / 5),
+          ),
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.all(size * 0.2),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      breakdown.rawScore.toStringAsFixed(1),
+                      style: AppFonts.displayStyle(
+                        fontSize: size * 0.22,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    Text(
+                      '/5.0',
+                      style: AppFonts.displayStyle(
+                        fontSize: size * 0.12,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                '/5.0',
-                style: AppFonts.displayStyle(
-                  fontSize: size * 0.12,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.muted,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

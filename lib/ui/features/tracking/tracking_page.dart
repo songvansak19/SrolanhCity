@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../data/repositories/report_repository.dart';
+import '../../../data/services/audio_player_service.dart';
+import '../../../data/services/comment_translation_service.dart';
 import '../../../data/services/location_service.dart';
 import '../../../domain/models/report_models.dart';
 import '../../../domain/services/priority_calculator.dart';
@@ -26,10 +30,14 @@ class TrackingPage extends StatefulWidget {
     super.key,
     required this.reportId,
     this.locationService = const LocationService(),
+    this.translationService,
+    this.audioPlayerService,
   });
 
   final String reportId;
   final LocationService locationService;
+  final CommentTranslationService? translationService;
+  final AudioPlayerService? audioPlayerService;
 
   @override
   State<TrackingPage> createState() => _TrackingPageState();
@@ -38,6 +46,49 @@ class TrackingPage extends StatefulWidget {
 class _TrackingPageState extends State<TrackingPage> {
   bool _isCheckingSupportLocation = false;
   bool _useCompareSlider = false;
+  late final AudioPlayerService _audioPlayer =
+      widget.audioPlayerService ?? AudioPlayerService.createDefault();
+  bool _isPlayingVoiceMemo = false;
+
+  @override
+  void dispose() {
+    if (widget.audioPlayerService == null) {
+      unawaited(_audioPlayer.dispose());
+    } else {
+      unawaited(_audioPlayer.stop());
+    }
+    super.dispose();
+  }
+
+  Future<void> _toggleVoiceMemoPlayback(String path, Bilingual tr) async {
+    HapticFeedback.selectionClick();
+    if (_isPlayingVoiceMemo) {
+      await _audioPlayer.stop();
+      if (mounted) setState(() => _isPlayingVoiceMemo = false);
+      return;
+    }
+    final started = await _audioPlayer.play(
+      path,
+      onCompleted: () {
+        if (mounted) setState(() => _isPlayingVoiceMemo = false);
+      },
+    );
+    if (!mounted) return;
+    if (started) {
+      setState(() => _isPlayingVoiceMemo = true);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tr.primary(
+              'បានភ្ជាប់សំឡេងរួចរាល់ — នឹងបញ្ជូនជាមួយរបាយការណ៍',
+              'Voice memo is attached and queued with this report.',
+            ),
+          ),
+        ),
+      );
+    }
+  }
 
   Future<void> _shareResolvedReport(CivicReport report, Bilingual tr) async {
     HapticFeedback.selectionClick();
@@ -431,6 +482,7 @@ class _TrackingPageState extends State<TrackingPage> {
                         report: report,
                         tr: tr,
                         allowAddNote: false,
+                        translationService: widget.translationService,
                       ),
                       const SizedBox(height: 18),
 
@@ -452,6 +504,7 @@ class _TrackingPageState extends State<TrackingPage> {
                               fontSize: 15,
                               crossAxisAlignment: CrossAxisAlignment.center,
                               textAlign: TextAlign.center,
+                              isHeader: true,
                             ),
                             const SizedBox(height: 14),
                             Row(
@@ -462,6 +515,7 @@ class _TrackingPageState extends State<TrackingPage> {
                                     emoji: emojis[i],
                                     ratingValue: i + 1,
                                     selected: report.citizenRating == i + 1,
+                                    tr: tr,
                                     onTap: () {
                                       HapticFeedback.selectionClick();
                                       repo.rateResolvedReport(report.id, i + 1);
@@ -582,6 +636,7 @@ class _TrackingPageState extends State<TrackingPage> {
                           khmer: 'តាមដានការជួសជុល',
                           english: 'Repair tracking',
                           fontSize: 17,
+                          isHeader: true,
                         ),
                       ),
                       Text(
@@ -609,30 +664,38 @@ class _TrackingPageState extends State<TrackingPage> {
                         ),
                         child: Row(
                           children: [
-                            InkWell(
-                              onTap: () => PhotoLightboxPage.open(
-                                context,
-                                category: report.category,
-                                bilingual: tr,
-                                localPhotoPath: report.localPhotoPath,
-                                assetPath: report.photoAssetPath,
-                                title: tr.primary(
-                                  report.khmerTitle,
-                                  report.englishTitle,
-                                ),
-                                subtitle: report.id,
-                                heroTag: 'report-photo-${report.id}',
+                            Semantics(
+                              button: true,
+                              excludeSemantics: true,
+                              label: tr.primary(
+                                'មើលរូបភាពពេញអេក្រង់',
+                                'View full photo',
                               ),
-                              borderRadius: BorderRadius.circular(16),
-                              child: Hero(
-                                tag: 'report-photo-${report.id}',
-                                child: ReportPhoto(
+                              child: InkWell(
+                                onTap: () => PhotoLightboxPage.open(
+                                  context,
                                   category: report.category,
+                                  bilingual: tr,
                                   localPhotoPath: report.localPhotoPath,
                                   assetPath: report.photoAssetPath,
-                                  width: 72,
-                                  height: 72,
-                                  borderRadius: 16,
+                                  title: tr.primary(
+                                    report.khmerTitle,
+                                    report.englishTitle,
+                                  ),
+                                  subtitle: report.id,
+                                  heroTag: 'report-photo-${report.id}',
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                child: Hero(
+                                  tag: 'report-photo-${report.id}',
+                                  child: ReportPhoto(
+                                    category: report.category,
+                                    localPhotoPath: report.localPhotoPath,
+                                    assetPath: report.photoAssetPath,
+                                    width: 72,
+                                    height: 72,
+                                    borderRadius: 16,
+                                  ),
                                 ),
                               ),
                             ),
@@ -703,10 +766,14 @@ class _TrackingPageState extends State<TrackingPage> {
                                       ),
                                       if (report.isAnonymous) ...[
                                         const SizedBox(width: 6),
-                                        const Icon(
+                                        Icon(
                                           Icons.visibility_off_outlined,
                                           size: 13,
                                           color: AppColors.muted,
+                                          semanticLabel: tr.primary(
+                                            'របាយការណ៍អនាមិក',
+                                            'Anonymous report',
+                                          ),
                                         ),
                                       ],
                                     ],
@@ -722,6 +789,7 @@ class _TrackingPageState extends State<TrackingPage> {
                         report: report,
                         tr: tr,
                         allowAddNote: true,
+                        translationService: widget.translationService,
                       ),
                       if (allPhotos.length > 1) ...[
                         const SizedBox(height: 12),
@@ -744,23 +812,31 @@ class _TrackingPageState extends State<TrackingPage> {
                             itemCount: allPhotos.length,
                             separatorBuilder: (_, _) =>
                                 const SizedBox(width: 8),
-                            itemBuilder: (context, index) => InkWell(
-                              onTap: () => PhotoLightboxPage.open(
-                                context,
-                                category: report.category,
-                                bilingual: tr,
-                                localPhotoPath: allPhotos[index],
-                                title:
-                                    '${tr.primary(report.khmerTitle, report.englishTitle)} (${index + 1}/${allPhotos.length})',
-                                subtitle: report.id,
+                            itemBuilder: (context, index) => Semantics(
+                              button: true,
+                              excludeSemantics: true,
+                              label: tr.primary(
+                                'មើលរូបភាព ${index + 1} ពេញអេក្រង់',
+                                'View photo ${index + 1} full screen',
                               ),
-                              borderRadius: BorderRadius.circular(14),
-                              child: ReportPhoto(
-                                category: report.category,
-                                localPhotoPath: allPhotos[index],
-                                width: 76,
-                                height: 76,
-                                borderRadius: 14,
+                              child: InkWell(
+                                onTap: () => PhotoLightboxPage.open(
+                                  context,
+                                  category: report.category,
+                                  bilingual: tr,
+                                  localPhotoPath: allPhotos[index],
+                                  title:
+                                      '${tr.primary(report.khmerTitle, report.englishTitle)} (${index + 1}/${allPhotos.length})',
+                                  subtitle: report.id,
+                                ),
+                                borderRadius: BorderRadius.circular(14),
+                                child: ReportPhoto(
+                                  category: report.category,
+                                  localPhotoPath: allPhotos[index],
+                                  width: 76,
+                                  height: 76,
+                                  borderRadius: 14,
+                                ),
                               ),
                             ),
                           ),
@@ -1072,6 +1148,106 @@ class _TrackingPageState extends State<TrackingPage> {
                               report.status == ReportStatus.crewDispatched,
                         ),
 
+                      if (report.voiceAudioPath != null &&
+                          report.voiceAudioPath!.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          key: const Key('tracking-voice-memo-card'),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.tealSoft,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: AppColors.teal.withValues(alpha: 0.28),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Semantics(
+                                button: true,
+                                excludeSemantics: true,
+                                label: _isPlayingVoiceMemo
+                                    ? tr.primary(
+                                        'ផ្អាកកំណត់ត្រាសំឡេង',
+                                        'Pause voice memo',
+                                      )
+                                    : tr.primary(
+                                        'ចាក់ស្តាប់កំណត់ត្រាសំឡេង',
+                                        'Play voice memo',
+                                      ),
+                                child: InkWell(
+                                  key: const Key('tracking-voice-memo-play'),
+                                  onTap: () => _toggleVoiceMemoPlayback(
+                                    report.voiceAudioPath!,
+                                    tr,
+                                  ),
+                                  customBorder: const CircleBorder(),
+                                  child: SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: Center(
+                                      child: CircleAvatar(
+                                        radius: 19,
+                                        backgroundColor: AppColors.teal,
+                                        child: Icon(
+                                          _isPlayingVoiceMemo
+                                              ? Icons.stop_rounded
+                                              : Icons.play_arrow_rounded,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      tr.primary(
+                                        'កំណត់ត្រាសំឡេង (0:${(report.voiceAudioDurationSeconds ?? 1).toString().padLeft(2, '0')})',
+                                        'Voice Memo (0:${(report.voiceAudioDurationSeconds ?? 1).toString().padLeft(2, '0')})',
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.tealDark,
+                                      ),
+                                    ),
+                                    Text(
+                                      report.syncStatus ==
+                                              SyncStatus.pendingSync
+                                          ? tr.primary(
+                                              'រក្សាទុកក្រៅបណ្តាញ · រង់ចាំផ្ញើស្វ័យប្រវត្តិ',
+                                              'Saved offline · queued for auto-sync',
+                                            )
+                                          : tr.primary(
+                                              'បានភ្ជាប់ជាមួយរបាយការណ៍',
+                                              'Attached to civic report',
+                                            ),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.muted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.graphic_eq_rounded,
+                                color: AppColors.teal,
+                                size: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       if (report.voiceTranscript != null) ...[
                         const SizedBox(height: 10),
                         Container(
@@ -1134,92 +1310,90 @@ class _TrackingPageState extends State<TrackingPage> {
                             final isOwnReport =
                                 report.createdByCurrentUser ||
                                 (report.isMine && !report.joinedByCurrentUser);
-                            return SizedBox(
-                              height: 50,
-                              child: FilledButton.icon(
-                                key: const Key('tracking-support-btn'),
-                                onPressed:
-                                    (alreadyContributed ||
-                                        _isCheckingSupportLocation)
-                                    ? null
-                                    : () async {
-                                        setState(
-                                          () =>
-                                              _isCheckingSupportLocation = true,
-                                        );
-                                        final outcome =
-                                            await SupportActionCoordinator.requestSupport(
-                                              context: context,
-                                              repository: repo,
-                                              report: report,
-                                              locationService:
-                                                  widget.locationService,
-                                              bilingual: tr,
-                                            );
-                                        if (!mounted) return;
-                                        setState(
-                                          () => _isCheckingSupportLocation =
-                                              false,
-                                        );
-                                        if (!context.mounted) return;
-                                        if (outcome.message != null) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            SnackBar(
-                                              content: Text(outcome.message!),
-                                              action:
-                                                  outcome
-                                                      .canOpenLocationSettings
-                                                  ? SnackBarAction(
-                                                      label: tr.primary(
-                                                        'បើក GPS',
-                                                        'Open GPS',
-                                                      ),
-                                                      onPressed: widget
-                                                          .locationService
-                                                          .openLocationSettings,
-                                                    )
-                                                  : null,
-                                            ),
+                            return FilledButton.icon(
+                              key: const Key('tracking-support-btn'),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size(0, 50),
+                              ),
+                              onPressed:
+                                  (alreadyContributed ||
+                                      _isCheckingSupportLocation)
+                                  ? null
+                                  : () async {
+                                      setState(
+                                        () => _isCheckingSupportLocation = true,
+                                      );
+                                      final outcome =
+                                          await SupportActionCoordinator.requestSupport(
+                                            context: context,
+                                            repository: repo,
+                                            report: report,
+                                            locationService:
+                                                widget.locationService,
+                                            bilingual: tr,
                                           );
-                                        }
-                                      },
-                                icon: _isCheckingSupportLocation
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : Icon(
-                                        alreadyContributed
-                                            ? Icons.check
-                                            : Icons.thumb_up_alt_outlined,
-                                        size: 18,
+                                      if (!mounted) return;
+                                      setState(
+                                        () =>
+                                            _isCheckingSupportLocation = false,
+                                      );
+                                      if (!context.mounted) return;
+                                      if (outcome.message != null) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(outcome.message!),
+                                            action:
+                                                outcome.canOpenLocationSettings
+                                                ? SnackBarAction(
+                                                    label: tr.primary(
+                                                      'បើក GPS',
+                                                      'Open GPS',
+                                                    ),
+                                                    onPressed: widget
+                                                        .locationService
+                                                        .openLocationSettings,
+                                                  )
+                                                : null,
+                                          ),
+                                        );
+                                      }
+                                    },
+                              icon: _isCheckingSupportLocation
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
                                       ),
-                                label: Text(
-                                  _isCheckingSupportLocation
-                                      ? tr.primary(
-                                          'កំពុងផ្ទៀងផ្ទាត់...',
-                                          'Verifying...',
-                                        )
-                                      : isOwnReport
-                                      ? tr.primary(
-                                          'របាយការណ៍របស់អ្នក',
-                                          'Your report',
-                                        )
-                                      : alreadyContributed
-                                      ? tr.primary('បានគាំទ្រ', 'Supported')
-                                      : tr.primary(
-                                          'ខ្ញុំក៏រងផលប៉ះពាល់',
-                                          'Affects me too',
-                                        ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                                    )
+                                  : Icon(
+                                      alreadyContributed
+                                          ? Icons.check
+                                          : Icons.thumb_up_alt_outlined,
+                                      size: 18,
+                                    ),
+                              label: Text(
+                                _isCheckingSupportLocation
+                                    ? tr.primary(
+                                        'កំពុងផ្ទៀងផ្ទាត់...',
+                                        'Verifying...',
+                                      )
+                                    : isOwnReport
+                                    ? tr.primary(
+                                        'របាយការណ៍របស់អ្នក',
+                                        'Your report',
+                                      )
+                                    : alreadyContributed
+                                    ? tr.primary('បានគាំទ្រ', 'Supported')
+                                    : tr.primary(
+                                        'ខ្ញុំក៏រងផលប៉ះពាល់',
+                                        'Affects me too',
+                                      ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             );
                           },
@@ -1256,65 +1430,73 @@ class _BeforeAfterPhotoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(24),
-      child: SizedBox(
-        height: 224,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ReportPhoto(
-              category: category,
-              localPhotoPath: localPhotoPath,
-              assetPath: assetPath,
-              width: double.infinity,
-              height: 224,
-              borderRadius: 24,
-            ),
-            Positioned(
-              left: 10,
-              top: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(999),
-                  boxShadow: AppColors.cardShadow,
-                ),
-                child: Text(
-                  badgeLabel,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
+    return Semantics(
+      button: true,
+      excludeSemantics: true,
+      label: '$badgeLabel · $dateLabel',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: SizedBox(
+          height: 224,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ReportPhoto(
+                category: category,
+                localPhotoPath: localPhotoPath,
+                assetPath: assetPath,
+                width: double.infinity,
+                height: 224,
+                borderRadius: 24,
               ),
-            ),
-            Positioned(
-              left: 10,
-              bottom: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.device.withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  dateLabel,
-                  style: const TextStyle(
-                    fontSize: 10.5,
+              Positioned(
+                left: 10,
+                top: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
                     color: Colors.white,
-                    fontWeight: FontWeight.w600,
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: AppColors.cardShadow,
+                  ),
+                  child: Text(
+                    badgeLabel,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+              Positioned(
+                left: 10,
+                bottom: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.device.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    dateLabel,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1326,26 +1508,35 @@ class _EmojiRatingButton extends StatelessWidget {
     required this.emoji,
     required this.ratingValue,
     required this.selected,
+    required this.tr,
     required this.onTap,
   });
 
   final String emoji;
   final int ratingValue;
   final bool selected;
+  final Bilingual tr;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Semantics(
       button: true,
       selected: selected,
-      label: 'Rate repair $ratingValue out of 5',
+      excludeSemantics: true,
+      label: tr.primary(
+        'វាយតម្លៃការជួសជុល $ratingValue ក្នុង ៥',
+        'Rate repair $ratingValue out of 5',
+      ),
       child: InkWell(
         key: Key('emoji-rating-$ratingValue'),
         onTap: onTap,
         customBorder: const CircleBorder(),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
+          duration: reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 160),
           width: 48,
           height: 48,
           alignment: Alignment.center,
@@ -1369,11 +1560,13 @@ class _CitizenCommentsCard extends StatefulWidget {
     required this.report,
     required this.tr,
     required this.allowAddNote,
+    this.translationService,
   });
 
   final CivicReport report;
   final Bilingual tr;
   final bool allowAddNote;
+  final CommentTranslationService? translationService;
 
   @override
   State<_CitizenCommentsCard> createState() => _CitizenCommentsCardState();
@@ -1381,6 +1574,68 @@ class _CitizenCommentsCard extends StatefulWidget {
 
 class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
   bool _showAll = false;
+  late final CommentTranslationService _translator =
+      widget.translationService ?? HttpCommentTranslationService.instance;
+  final Map<String, String> _translations = <String, String>{};
+  final Set<String> _showingTranslationIds = <String>{};
+  final Set<String> _translatingIds = <String>{};
+  final Map<String, String> _translationErrors = <String, String>{};
+
+  Future<void> _toggleTranslateComment(
+    CitizenComment comment,
+    Bilingual tr,
+  ) async {
+    HapticFeedback.selectionClick();
+    if (_showingTranslationIds.contains(comment.id)) {
+      setState(() => _showingTranslationIds.remove(comment.id));
+      return;
+    }
+    if (_translations.containsKey(comment.id)) {
+      setState(() {
+        _translationErrors.remove(comment.id);
+        _showingTranslationIds.add(comment.id);
+      });
+      return;
+    }
+
+    final repo = ReportScope.read(context);
+    if (!repo.isOnline) {
+      setState(() {
+        _translationErrors[comment.id] = tr.primary(
+          'ត្រូវការអ៊ីនធឺណិតដើម្បីបកប្រែ',
+          'Internet required to translate',
+        );
+      });
+      return;
+    }
+
+    final targetLang = CommentTranslationService.detectTargetLanguage(
+      comment.text,
+      appEnglishFirst: tr.englishFirst,
+    );
+    setState(() {
+      _translationErrors.remove(comment.id);
+      _translatingIds.add(comment.id);
+    });
+
+    final translated = await _translator.translate(
+      text: comment.text,
+      targetLang: targetLang,
+    );
+    if (!mounted) return;
+    setState(() {
+      _translatingIds.remove(comment.id);
+      if (translated != null && translated.trim().isNotEmpty) {
+        _translations[comment.id] = translated.trim();
+        _showingTranslationIds.add(comment.id);
+      } else {
+        _translationErrors[comment.id] = tr.primary(
+          'មិនអាចបកប្រែបានទេឥឡូវនេះ — សូមព្យាយាមម្តងទៀត',
+          'Translation unavailable right now — please try again.',
+        );
+      }
+    });
+  }
 
   String _authorLabel(CitizenComment comment, int index, Bilingual tr) {
     if (comment.isOriginalReporter) {
@@ -1504,10 +1759,9 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 4,
+                      vertical: 6,
                     ),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    minimumSize: const Size(48, 44),
                   ),
                   icon: const Icon(
                     Icons.add_comment_outlined,
@@ -1526,20 +1780,43 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
             ],
           ),
           const SizedBox(height: 8),
-          for (var i = 0; i < visibleComments.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            _CitizenCommentTile(
-              comment: visibleComments[i],
-              authorLabel: _authorLabel(visibleComments[i], i, tr),
-              tr: tr,
-              onDelete:
-                  (visibleComments[i].isCurrentUser &&
-                      !visibleComments[i].isOriginalReporter &&
-                      !visibleComments[i].id.startsWith('c-join-'))
-                  ? () => _deleteComment(visibleComments[i])
-                  : null,
+          AnimatedSize(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < visibleComments.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 8),
+                  _CitizenCommentTile(
+                    comment: visibleComments[i],
+                    authorLabel: _authorLabel(visibleComments[i], i, tr),
+                    tr: tr,
+                    translatedText:
+                        _showingTranslationIds.contains(visibleComments[i].id)
+                        ? _translations[visibleComments[i].id]
+                        : null,
+                    isTranslating: _translatingIds.contains(
+                      visibleComments[i].id,
+                    ),
+                    translationError: _translationErrors[visibleComments[i].id],
+                    onToggleTranslate: visibleComments[i].hasText
+                        ? () => _toggleTranslateComment(visibleComments[i], tr)
+                        : null,
+                    onDelete:
+                        (visibleComments[i].isCurrentUser &&
+                            !visibleComments[i].isOriginalReporter &&
+                            !visibleComments[i].id.startsWith('c-join-'))
+                        ? () => _deleteComment(visibleComments[i])
+                        : null,
+                  ),
+                ],
+              ],
             ),
-          ],
+          ),
           if (comments.length > 2) ...[
             const SizedBox(height: 6),
             Align(
@@ -1553,10 +1830,9 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
-                    vertical: 4,
+                    vertical: 6,
                   ),
-                  minimumSize: const Size(0, 32),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  minimumSize: const Size(48, 44),
                 ),
                 icon: Icon(
                   _showAll
@@ -1628,12 +1904,20 @@ class _CitizenCommentTile extends StatelessWidget {
     required this.comment,
     required this.authorLabel,
     required this.tr,
+    this.translatedText,
+    this.isTranslating = false,
+    this.translationError,
+    this.onToggleTranslate,
     this.onDelete,
   });
 
   final CitizenComment comment;
   final String authorLabel;
   final Bilingual tr;
+  final String? translatedText;
+  final bool isTranslating;
+  final String? translationError;
+  final VoidCallback? onToggleTranslate;
   final VoidCallback? onDelete;
 
   @override
@@ -1727,22 +2011,33 @@ class _CitizenCommentTile extends StatelessWidget {
                 ),
               ),
               if (onDelete != null) ...[
-                const SizedBox(width: 8),
-                Tooltip(
-                  message: tr.primary('លុបមតិ', 'Delete note'),
-                  child: Material(
-                    color: AppColors.dangerSoft,
-                    borderRadius: BorderRadius.circular(8),
+                const SizedBox(width: 4),
+                Semantics(
+                  button: true,
+                  excludeSemantics: true,
+                  label: tr.primary('លុបមតិ', 'Delete note'),
+                  child: Tooltip(
+                    message: tr.primary('លុបមតិ', 'Delete note'),
                     child: InkWell(
                       key: Key('delete-comment-${comment.id}'),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
                       onTap: onDelete,
-                      child: const Padding(
-                        padding: EdgeInsets.all(5),
-                        child: Icon(
-                          Icons.delete_outline_rounded,
-                          size: 15,
-                          color: AppColors.danger,
+                      child: SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.all(5),
+                            decoration: BoxDecoration(
+                              color: AppColors.dangerSoft,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.delete_outline_rounded,
+                              size: 15,
+                              color: AppColors.danger,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -1763,6 +2058,159 @@ class _CitizenCommentTile extends StatelessWidget {
               fontStyle: comment.hasText ? FontStyle.normal : FontStyle.italic,
             ),
           ),
+          if (onToggleTranslate != null) ...[
+            const SizedBox(height: 6),
+            Builder(
+              builder: (context) {
+                final targetLang =
+                    CommentTranslationService.detectTargetLanguage(
+                      comment.text,
+                      appEnglishFirst: tr.englishFirst,
+                    );
+                final isShowing = translatedText != null;
+                final reduceMotion = MediaQuery.disableAnimationsOf(context);
+                final translateLabel = isTranslating
+                    ? tr.primary('កំពុងបកប្រែ...', 'Translating...')
+                    : isShowing
+                    ? tr.primary('លាក់ការបកប្រែ', 'Hide translation')
+                    : targetLang == 'km'
+                    ? tr.primary('បកប្រែជាភាសាខ្មែរ', 'Translate to Khmer')
+                    : tr.primary('បកប្រែជាអង់គ្លេស', 'Translate to English');
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AnimatedSize(
+                      duration: reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 200),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topLeft,
+                      child: isShowing
+                          ? Semantics(
+                              container: true,
+                              liveRegion: true,
+                              child: Container(
+                                key: Key('translated-comment-${comment.id}'),
+                                width: double.infinity,
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.tealSoft.withValues(
+                                    alpha: 0.55,
+                                  ),
+                                  borderRadius: BorderRadius.circular(11),
+                                  border: Border.all(
+                                    color: AppColors.teal.withValues(
+                                      alpha: 0.25,
+                                    ),
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      targetLang == 'km'
+                                          ? tr.primary(
+                                              'បកប្រែជាភាសាខ្មែរ',
+                                              'Translated to Khmer',
+                                            )
+                                          : tr.primary(
+                                              'បកប្រែជាភាសាអង់គ្លេស',
+                                              'Translated to English',
+                                            ),
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.tealDark,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      translatedText!,
+                                      style: const TextStyle(
+                                        fontSize: 12.8,
+                                        height: 1.42,
+                                        color: AppColors.ink,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    if (translationError != null)
+                      Semantics(
+                        container: true,
+                        liveRegion: true,
+                        child: Padding(
+                          key: Key('translate-error-${comment.id}'),
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(
+                            translationError!,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.muted,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                      ),
+                    Semantics(
+                      button: true,
+                      expanded: isShowing,
+                      child: InkWell(
+                        key: Key('translate-comment-${comment.id}'),
+                        onTap: isTranslating ? null : onToggleTranslate,
+                        borderRadius: BorderRadius.circular(8),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 44),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isTranslating)
+                                  const SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 1.8,
+                                      color: AppColors.teal,
+                                    ),
+                                  )
+                                else
+                                  const Icon(
+                                    Icons.translate_rounded,
+                                    size: 13.5,
+                                    color: AppColors.teal,
+                                  ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  translateLabel,
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.teal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
         ],
       ),
     );
@@ -1820,6 +2268,7 @@ class _AddCommentSheetState extends State<_AddCommentSheet> {
                 khmer: 'បន្ថែមមតិប្រជាពលរដ្ឋ',
                 english: 'Add a citizen note',
                 fontSize: 17,
+                isHeader: true,
               ),
               const SizedBox(height: 4),
               Text(
@@ -2090,83 +2539,93 @@ class _PriorityThresholdRow extends StatelessWidget {
     final badgeColor = AppColors.priorityColor(rule.level);
     final badgeFg = AppColors.priorityForeground(rule.level);
 
-    return Container(
-      key: isActive ? Key('priority-tier-active-p${rule.level}') : null,
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      decoration: BoxDecoration(
-        color: isActive ? AppColors.tealSoft : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        border: isActive
-            ? Border.all(color: AppColors.teal.withValues(alpha: 0.45))
-            : null,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 5,
-            child: Row(
-              children: [
-                Container(
-                  width: 28,
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: badgeColor,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    'P${rule.level}',
-                    style: AppFonts.displayStyle(
-                      fontSize: 10.5,
-                      color: badgeFg,
-                      fontWeight: FontWeight.w700,
+    return MergeSemantics(
+      child: Semantics(
+        selected: isActive,
+        child: Container(
+          key: isActive ? Key('priority-tier-active-p${rule.level}') : null,
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          decoration: BoxDecoration(
+            color: isActive ? AppColors.tealSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: isActive
+                ? Border.all(color: AppColors.teal.withValues(alpha: 0.45))
+                : null,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 5,
+                child: Row(
+                  children: [
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 28),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: badgeColor,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        'P${rule.level}',
+                        style: AppFonts.displayStyle(
+                          fontSize: 10.5,
+                          color: badgeFg,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        tr.primary(rule.khmerName, rule.englishName),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: isActive
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: isActive ? AppColors.tealDark : AppColors.ink,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  rule.scoreRange,
+                  textAlign: TextAlign.center,
+                  style: AppFonts.displayStyle(
+                    fontSize: 11.5,
+                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+                    color: isActive ? AppColors.tealDark : AppColors.ink,
                   ),
                 ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    tr.primary(rule.khmerName, rule.englishName),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                      color: isActive ? AppColors.tealDark : AppColors.ink,
-                    ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  tr.primary(rule.khmerSla, rule.englishSla),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                    color: isActive ? AppColors.tealDark : AppColors.muted,
                   ),
                 ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              rule.scoreRange,
-              textAlign: TextAlign.center,
-              style: AppFonts.displayStyle(
-                fontSize: 11.5,
-                fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
-                color: isActive ? AppColors.tealDark : AppColors.ink,
               ),
-            ),
+            ],
           ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              tr.primary(rule.khmerSla, rule.englishSla),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.end,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                color: isActive ? AppColors.tealDark : AppColors.muted,
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2187,60 +2646,70 @@ class _PriorityFactorBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
+    return MergeSemantics(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ink,
+                  ),
                 ),
               ),
-            ),
-            Text(
-              '$scoreOutOfFive/5',
-              style: AppFonts.displayStyle(
-                fontSize: 11,
-                color: AppColors.muted,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 3),
-        Row(
-          children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(999),
-                child: LinearProgressIndicator(
-                  value: (scoreOutOfFive / 5.0).clamp(0.0, 1.0),
-                  minHeight: 5,
-                  backgroundColor: AppColors.mutedSurface,
-                  valueColor: AlwaysStoppedAnimation<Color>(color),
+              Text(
+                '$scoreOutOfFive/5',
+                style: AppFonts.displayStyle(
+                  fontSize: 11,
+                  color: AppColors.muted,
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              reason,
-              style: const TextStyle(fontSize: 10.5, color: AppColors.muted),
-            ),
-          ],
-        ),
-      ],
+            ],
+          ),
+          const SizedBox(height: 3),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    semanticsLabel: title,
+                    value: (scoreOutOfFive / 5.0).clamp(0.0, 1.0),
+                    minHeight: 5,
+                    backgroundColor: AppColors.mutedSurface,
+                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  reason,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    color: AppColors.muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2430,6 +2899,7 @@ class _QuickEditReportSheetState extends State<_QuickEditReportSheet> {
               khmer: 'កែប្រែរបាយការណ៍រហ័ស',
               english: 'Quick edit report',
               fontSize: 17,
+              isHeader: true,
             ),
             const SizedBox(height: 12),
             TextField(
@@ -2450,38 +2920,38 @@ class _QuickEditReportSheetState extends State<_QuickEditReportSheet> {
               ),
             ),
             const SizedBox(height: 8),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 for (final (score, kh, en) in const [
                   (2, 'តិច', 'Minor'),
                   (3, 'មធ្យម', 'Moderate'),
                   (5, 'គ្រោះថ្នាក់', 'Dangerous'),
-                ]) ...[
-                  Expanded(
-                    child: ChoiceChip(
-                      label: Text(tr.primary(kh, en)),
-                      selected:
-                          (score == 2 && _selectedSeverity <= 2) ||
-                          (score == 3 &&
-                              _selectedSeverity >= 3 &&
-                              _selectedSeverity <= 4) ||
-                          (score == 5 && _selectedSeverity >= 5),
-                      onSelected: (_) {
-                        HapticFeedback.selectionClick();
-                        setState(() => _selectedSeverity = score);
-                      },
-                    ),
+                ])
+                  ChoiceChip(
+                    label: Text(tr.primary(kh, en)),
+                    selected:
+                        (score == 2 && _selectedSeverity <= 2) ||
+                        (score == 3 &&
+                            _selectedSeverity >= 3 &&
+                            _selectedSeverity <= 4) ||
+                        (score == 5 && _selectedSeverity >= 5),
+                    onSelected: (_) {
+                      HapticFeedback.selectionClick();
+                      setState(() => _selectedSeverity = score);
+                    },
                   ),
-                  if (score != 5) const SizedBox(width: 8),
-                ],
               ],
             ),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
-              height: 50,
               child: FilledButton(
                 key: const Key('save-quick-edit-btn'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                ),
                 onPressed: () {
                   final ok = widget.onSave(_controller.text, _selectedSeverity);
                   Navigator.pop(context, ok);

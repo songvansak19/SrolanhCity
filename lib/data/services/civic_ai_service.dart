@@ -81,6 +81,51 @@ class AudioTranscriptionResult {
   final String? errorMessage;
 }
 
+/// One message turn sent as conversational history to `/api/v1/ai/help-chat`.
+class HelpChatTurn {
+  const HelpChatTurn({required this.role, required this.text});
+
+  final String role; // 'user' | 'assistant'
+  final String text;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'role': role,
+    'text': text,
+  };
+}
+
+/// Optional contextual action chip attached to a Help Center AI reply.
+enum HelpSuggestedAction {
+  openReportWizard,
+  openMyReports,
+  openTicket,
+  callRoadHotline1190,
+  callPowerHotline1298,
+  openEditProfile,
+}
+
+/// Structured reply from SrolanhCity's Help Center AI endpoint or on-device
+/// civic assistant fallback.
+class HelpChatReply {
+  const HelpChatReply({
+    required this.success,
+    required this.text,
+    this.fromBackendAi = false,
+    this.suggestedAction,
+    this.referencedReportId,
+    this.isRateLimited = false,
+    this.errorMessage,
+  });
+
+  final bool success;
+  final String text;
+  final bool fromBackendAi;
+  final HelpSuggestedAction? suggestedAction;
+  final String? referencedReportId;
+  final bool isRateLimited;
+  final String? errorMessage;
+}
+
 /// Clean client-to-backend AI contract.
 ///
 /// The mobile app never holds third-party AI API keys or calls external AI
@@ -102,6 +147,13 @@ abstract class CivicAiService {
     required String audioPath,
     required bool englishFirst,
   });
+
+  Future<HelpChatReply> askHelpAssistant({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  });
 }
 
 /// Backend-first HTTP client targeting SrolanhCity's own API endpoints:
@@ -117,6 +169,7 @@ class BackendCivicAiService implements CivicAiService {
   static const String _envBaseUrl = String.fromEnvironment('API_BASE_URL');
   static const String classifyPath = '/api/v1/ai/classify-issue';
   static const String transcribePath = '/api/v1/ai/transcribe-voice';
+  static const String helpChatPath = '/api/v1/ai/help-chat';
   static const Duration requestTimeout = Duration(seconds: 18);
 
   final http.Client? httpClient;
@@ -263,6 +316,75 @@ class BackendCivicAiService implements CivicAiService {
     }
 
     return parseAudioResponseJson(response.body!);
+  }
+
+  /// Builds the JSON request body for `POST /api/v1/ai/help-chat`.
+  Map<String, dynamic> buildHelpChatRequestBody({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  }) => <String, dynamic>{
+    'message': message.trim(),
+    'language': englishFirst ? 'en' : 'km',
+    'history': history.take(8).map((t) => t.toJson()).toList(),
+    if (citizenContext != null && citizenContext.isNotEmpty)
+      'citizen_context': citizenContext,
+  };
+
+  @override
+  Future<HelpChatReply> askHelpAssistant({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  }) async {
+    if (!isBackendConfigured) {
+      return const HelpChatReply(
+        success: false,
+        text: '',
+        errorMessage: 'Backend AI service is not connected yet.',
+      );
+    }
+
+    final payload = buildHelpChatRequestBody(
+      message: message,
+      history: history,
+      englishFirst: englishFirst,
+      citizenContext: citizenContext,
+    );
+    final response = await _postJson(path: helpChatPath, payload: payload);
+    if (!response.ok) {
+      return HelpChatReply(
+        success: false,
+        text: '',
+        isRateLimited: response.isRateLimited,
+        errorMessage: response.errorMessage,
+      );
+    }
+    return parseHelpChatResponseJson(response.body!);
+  }
+
+  static HelpChatReply parseHelpChatResponseJson(String rawBody) {
+    try {
+      final decoded = jsonDecode(rawBody);
+      if (decoded is Map<String, dynamic>) {
+        final reply = ((decoded['reply'] as String?) ?? '').trim();
+        if (reply.isNotEmpty) {
+          return HelpChatReply(
+            success: true,
+            text: reply,
+            fromBackendAi: true,
+            referencedReportId: (decoded['report_id'] as String?)?.trim(),
+          );
+        }
+      }
+    } catch (_) {}
+    return const HelpChatReply(
+      success: false,
+      text: '',
+      errorMessage: 'Could not parse backend Help AI JSON.',
+    );
   }
 
   static PhotoAiAnalysis parsePhotoResponseJson(String rawBody) {

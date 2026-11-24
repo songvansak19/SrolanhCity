@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'exif_stripper.dart';
+import 'photo_media_types.dart';
 
 Future<Uint8List?> readLocalFileBytes(String path) async {
   try {
@@ -26,25 +27,39 @@ Future<void> deleteLocalFile(String? path) async {
   } catch (_) {}
 }
 
-/// Copies a picked/captured image into the app's persistent photos directory
-/// after stripping hidden JPEG EXIF/GPS metadata (`hackathonshow.md §6`).
-Future<String> persistSanitizedPhoto(XFile picked, int index) async {
+/// Extracts pre-strip EXIF metadata in memory, strips hidden JPEG EXIF/GPS
+/// metadata (`hackathonshow.md §6`), and saves the clean image to persistent
+/// app storage.
+Future<PersistedPhotoResult> persistSanitizedPhotoWithExif(
+  XFile picked,
+  int index,
+) async {
   try {
+    final rawBytes = await picked.readAsBytes();
+    final ext = picked.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+    final exif = ext == 'jpg'
+        ? ExifStripper.extractJpegMetadata(rawBytes)
+        : const PhotoExifMetadata();
+    final sanitizedBytes = ext == 'jpg'
+        ? ExifStripper.stripJpegMetadata(rawBytes)
+        : rawBytes;
+
     final docsDir = await getApplicationDocumentsDirectory();
     final photosDir = Directory('${docsDir.path}/report_photos');
     if (!photosDir.existsSync()) {
       await photosDir.create(recursive: true);
     }
-    final ext = picked.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
     final uniquePath =
         '${photosDir.path}/report_${DateTime.now().microsecondsSinceEpoch}_$index.$ext';
-    final rawBytes = await picked.readAsBytes();
-    final sanitizedBytes = ext == 'jpg'
-        ? ExifStripper.stripJpegMetadata(rawBytes)
-        : rawBytes;
     await File(uniquePath).writeAsBytes(sanitizedBytes, flush: true);
-    return uniquePath;
+    return PersistedPhotoResult(path: uniquePath, exifMetadata: exif);
   } catch (_) {
-    return picked.path;
+    return PersistedPhotoResult(path: picked.path);
   }
+}
+
+/// Backward-compatible wrapper returning only the sanitized local file path.
+Future<String> persistSanitizedPhoto(XFile picked, int index) async {
+  final result = await persistSanitizedPhotoWithExif(picked, index);
+  return result.path;
 }

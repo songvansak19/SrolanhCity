@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../data/repositories/report_repository.dart';
 import '../../data/services/location_service.dart';
 import '../../domain/models/report_models.dart';
+import '../../domain/services/anti_spoof_service.dart';
 import '../../domain/services/support_eligibility_service.dart';
 import '../features/report/views/fake_gps_page.dart';
 import 'l10n.dart';
@@ -32,8 +33,8 @@ class SupportActionOutcome {
   final bool openedFakeGps;
 }
 
-/// Shared distance-aware & anti-abuse "Affects me" coordinator used by both
-/// `TrackingPage` and `MapPage`.
+/// Shared distance-aware & multi-layer anti-spoof "Affects me" coordinator
+/// used by both `TrackingPage` and `MapPage`.
 abstract final class SupportActionCoordinator {
   static Future<SupportActionOutcome> requestSupport({
     required BuildContext context,
@@ -59,12 +60,32 @@ abstract final class SupportActionCoordinator {
     }
 
     // 2. Acquire snappy GPS fix (with Fake/Mock GPS enforcement).
-    final locationResult = await locationService.getCurrentLocation(
+    var locationResult = await locationService.getCurrentLocation(
       enforceMockCheck: true,
       fastFix: true,
     );
     if (!context.mounted) {
       return const SupportActionOutcome(succeeded: false);
+    }
+
+    // 2b. Layer 2 & 3 cross-session anti-spoof evaluation (impossible-travel
+    // velocity + synthetic GPS signature) against last verified checkpoint.
+    SpoofAssessment gpsAssessment = SpoofAssessment.clean;
+    if (locationResult is LocationSuccess &&
+        !locationResult.isOutsideCambodia) {
+      gpsAssessment = AntiSpoofService.evaluateGpsFix(
+        current: locationResult.toReadingSample(),
+        lastCheckpoint: repository.lastVerifiedGpsCheckpoint,
+      );
+      if (gpsAssessment.isBlocked) {
+        locationResult = LocationMockDetected(
+          point: locationResult.point,
+          detectedLabel:
+              gpsAssessment.detectedLabel ?? 'Mock GPS / Spoofing Provider',
+          reasonKhmer: gpsAssessment.khmerSummary,
+          reasonEnglish: gpsAssessment.englishSummary,
+        );
+      }
     }
 
     // 3. Evaluate proximity & Home Khan fallback rules.
@@ -78,9 +99,16 @@ abstract final class SupportActionCoordinator {
     switch (decision) {
       case SupportEligible(:final tier, :final distanceMeters):
         HapticFeedback.mediumImpact();
-        final LatLng? userPoint = locationResult is LocationSuccess
-            ? locationResult.point
-            : null;
+        LatLng? userPoint;
+        if (locationResult is LocationSuccess) {
+          userPoint = locationResult.point;
+          if (!locationResult.isOutsideCambodia) {
+            repository.recordVerifiedGpsCheckpoint(
+              locationResult.point,
+              timestamp: locationResult.timestamp,
+            );
+          }
+        }
         final updated = repository.supportReport(
           report.id,
           tier: tier,
@@ -89,12 +117,15 @@ abstract final class SupportActionCoordinator {
         if (updated == null) {
           return const SupportActionOutcome(succeeded: false);
         }
-        // Build backend-ready payload contract (used once backend API connects).
+        // Build backend-ready payload contract including anti-spoof integrity.
         repository.buildSupportApiPayload(
           reportId: report.id,
           tier: tier,
           distanceMeters: distanceMeters,
           userCoordinates: userPoint,
+          integrityMetadata: repository.buildIntegrityApiPayload(
+            assessment: gpsAssessment,
+          ),
         );
         final distLabel = distanceMeters != null
             ? ' (${SupportEligibilityService.formatDistance(distanceMeters, englishFirst: englishFirst)})'
@@ -111,10 +142,17 @@ abstract final class SupportActionCoordinator {
         );
 
       case SupportDeniedMockGps():
+        final mockResult = locationResult is LocationMockDetected
+            ? locationResult
+            : null;
         await Navigator.push<void>(
           context,
           MaterialPageRoute<void>(
             builder: (_) => FakeGpsPage(
+              detectedAppLabel:
+                  mockResult?.detectedLabel ?? 'Mock GPS / Spoofing Provider',
+              detailKhmer: mockResult?.reasonKhmer,
+              detailEnglish: mockResult?.reasonEnglish,
               onOpenSettings: locationService.openLocationSettings,
               onTryAgain: () => Navigator.pop(context),
             ),

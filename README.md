@@ -9,9 +9,9 @@ A **Khmer-first, bilingual (Khmer / English) civic infrastructure reporting app*
 ## Key Features
 
 ### 1. Fast 3-Step Civic Reporting
-- **Photo-First with Automatic Privacy**: Attach up to 3 photos with pure-Dart JPEG **EXIF / GPS metadata stripping** (`APP1`, `APP2`, `APP13`, `COM` markers removed before storage or upload).
-- **Telegram-Style Khmer & English Voice Reporting**: Supports both Hold-to-Speak and Tap-to-Toggle voice reporting with a 1-tap `ខ្មែរ / EN` switcher, live sound-level waveform, and backend-ready 16 kHz mono WAV recording.
-- **Verified GPS Pinning & Fake-GPS Guard**: Acquires live Cambodia GPS with reverse geocoding and blocks spoofed/mock GPS locations cleanly.
+- **Photo-First with Automatic Privacy & Mobile-Web Resilience**: Attach up to 3 photos with pure-Dart pre-strip EXIF GPS/timestamp extraction (for anti-spoof verification) followed by complete JPEG **EXIF / GPS metadata stripping** (`APP1`, `APP2`, `APP13`, `COM` markers removed before storage or upload). Direct Web `FileReader` + `<canvas>` decoding ensures reliable gallery uploads on Android/iOS mobile browsers.
+- **Online & Offline Khmer/English Voice Reporting**: Supports both Hold-to-Speak and Tap-to-Toggle voice reporting with a 1-tap `ខ្មែរ / EN` switcher, live sound-level waveform, real offline local voice memo recording & inline playback (`MediaRecorder` on Web, `package:record` on Native), automatic Brave/browser fallback, and backend-ready transcription.
+- **5-Layer Anti-Spoof & Verified GPS Pinning**: Combines OS mock-location blocking, impossible-travel velocity detection (`> 250 km/h` / teleport guard), synthetic GPS accuracy heuristics, pre-strip photo EXIF cross-checking (with 1-tap **Use photo location**), and soft IP-vs-GPS country checks.
 - **Guest-First Privacy & Flexible Issue Reporting**: Starts cleanly as **Guest (`ភ្ញៀវ`)** with optional phone and home area, and supports custom **Other Issue (`បញ្ហាផ្សេងៗ`)** reports with optional custom titles when tapping **"It's a different problem"** near an existing pin.
 
 ### 2. Nationwide 25-Province Interactive Map
@@ -24,7 +24,7 @@ A **Khmer-first, bilingual (Khmer / English) civic infrastructure reporting app*
 
 ### 3. Duplicate Clustering, Multi-Citizen Comments & Priority Thresholds (`P1–P5`)
 - **Spatial Deduplication & Self-Duplicate Guard**: Detects open same-category reports nearby (`≤ 50 m`, or `≤ 120 m` along the same road) and merges community reports into a single **Master Incident**. Re-reporting an issue already in **My Reports** directs you to **View your existing report** instead of duplicating or self-upvoting, while **"It's a different problem"** lets you switch category or file a separate **Other Issue** ticket.
-- **Multi-Citizen Comment Threads**: Joining a Master Incident preserves every reporter's written comment and extra photos, and citizens can add or delete follow-up field notes directly on the **Tracking** screen. Notes use privacy-first labels (`Original reporter`, `Citizen #N`, `You`, `Anonymous`), reconcile silent confirmations honestly (`N other citizen(s) confirmed without commenting`), fall back to `No comment` when empty, and surface compact `+N more` pills across the Map sheet, My Reports, and Area News.
+- **Multi-Citizen Comment Threads & Inline Translation**: Joining a Master Incident preserves every reporter's written comment and extra photos, and citizens can add, delete, or **translate comments inline (`Khmer ↔ English`)** directly on the **Tracking** screen. Notes use privacy-first labels (`Original reporter`, `Citizen #N`, `You`, `Anonymous`), reconcile silent confirmations honestly (`N other citizen(s) confirmed without commenting`), fall back to `No comment` when empty, and surface compact `+N more` pills across the Map sheet, My Reports, and Area News.
 - **Priority Score Breakdown & P5 → P1 Threshold Table**: Combines Road Traffic (`40%`), Danger Level (`30%`), and Affected Citizens (`30%`) into an interactive donut chart, factor bars, and a highlighted **P5 (`4.5 – 5.0`) → P1 (`1.0 – 1.4`)** target-fix threshold table.
 
 ### 4. Distance-Aware `"Affects me"` Voting & Anti-Abuse Guardrails
@@ -36,7 +36,8 @@ A **Khmer-first, bilingual (Khmer / English) civic infrastructure reporting app*
 ### 5. 4-Stage Accountability Tracking & Nationwide Area News
 - **Live Timeline**: `Submitted` → `Scheduled` → `Crew On-Site` → `Resolved` with a **Before / After draggable comparison slider**, pinch-to-zoom lightbox, 5-emoji satisfaction rating, and a **15-minute Quick Edit / Withdraw** grace period for newly submitted reports.
 - **3-Level Nationwide Area News & GIS Routing**: Browse reports across **25 Capital & Provinces → Khan / Krong / Srok → Sangkat / Khum** (or **All Cambodia**), with automatic routing to **MPWT**, **Phnom Penh Capital Hall**, **Provincial DPWT**, **EDC Branches**, and **Municipal / District Administrations**.
-- **Offline-First & Installable Mobile PWA**: Queues reports created offline with a global sync status banner and auto-syncs upon reconnect; persists locally as JSON on mobile and `window.localStorage` on Web; ships with a custom offline-first Service Worker ([sw.js](web/sw.js)) caching the app shell, local CanvasKit, bundled assets, Khmer/English fonts, and visited map tiles for full offline cold-launch, plus full **SrolanhCity** PWA branding (`manifest.json`, Mekong Teal theme color, adaptive maskable icons, and iOS Apple Touch icon).
+- **Offline-First Reopen Auto-Sync & Installable Mobile PWA**: Queues reports and voice memos created offline with a global sync status banner and automatically syncs queued items both on live reconnect and on cold reopen when back online; persists locally as JSON on mobile and `window.localStorage` on Web; ships with a custom offline-first Service Worker ([sw.js](web/sw.js)) caching the app shell, local CanvasKit, bundled assets, Khmer/English fonts, and visited map tiles for full offline cold-launch, plus full **SrolanhCity** PWA branding (`manifest.json`, Mekong Teal theme color, adaptive maskable icons, and iOS Apple Touch icon).
+- **Help Center, Hybrid AI Civic Assistant & WCAG 2.1 AA Accessibility**: Dedicated Help Center (`មជ្ឈមណ្ឌលជំនួយ`) with quick Cambodia civic hotlines (`1190`, `1298`, `117`), expandable bilingual FAQs, an offline-capable Khmer/English Civic Assistant with live `#SC-XXXXX` ticket lookup and backend LLM hook (`POST /api/v1/ai/help-chat`), reduced-motion-safe page transitions, and audited WCAG 2.1 AA contrast, semantics, and tap targets.
 
 ---
 
@@ -92,7 +93,7 @@ dart format lib test
 dart analyze --fatal-infos
 flutter test
 ```
-The test suite includes **70 unit and widget tests** covering Priority Score tiers, multi-citizen Master Incident comments, self-duplicate & `"It's a different problem"` flows, Guest profile & data-URI avatar rendering, Khmer/English voice locale selection, ODC/25-province GIS routing, stable zoom clustering & overview carousel visibility, EXIF stripping, distance-aware `"Affects me"` anti-abuse rules, offline sync, PWA manifest & service worker branding, and full UI flows.
+The test suite includes **85 unit, widget, and WCAG 2.1 AA accessibility tests** covering Priority Score tiers, multi-citizen Master Incident comments & inline Khmer/English translation, self-duplicate & `"It's a different problem"` flows, Guest profile & resilient data-URI avatar uploads, Khmer/English online/offline voice memos, 5-layer anti-spoof & EXIF GPS verification, ODC/25-province GIS routing, stable zoom clustering & overview carousel visibility, distance-aware `"Affects me"` anti-abuse rules, offline reopen auto-sync, Help Center AI ticket lookup, PWA manifest & service worker branding, and automated Flutter accessibility guidelines.
 
 ---
 

@@ -5,7 +5,8 @@ import '../theme.dart';
 
 /// Signature SrolanhCity stacked bilingual typography:
 /// Primary language on top, secondary language underneath at 72% size and
-/// 70% opacity (honoring the user's Khmer-First / English-First setting).
+/// WCAG-AA-safe 80% opacity (honoring the user's Khmer-First / English-First
+/// setting).
 class BilingualText extends StatelessWidget {
   const BilingualText({
     super.key,
@@ -19,6 +20,7 @@ class BilingualText extends StatelessWidget {
     this.textAlign = TextAlign.start,
     this.maxLines = 2,
     this.useDisplayFont = false,
+    this.isHeader = false,
   });
 
   final Bilingual bilingual;
@@ -31,13 +33,14 @@ class BilingualText extends StatelessWidget {
   final TextAlign textAlign;
   final int maxLines;
   final bool useDisplayFont;
+  final bool isHeader;
 
   @override
   Widget build(BuildContext context) {
     final primaryText = bilingual.primary(khmer, english);
     final secondaryText = bilingual.secondary(khmer, english);
 
-    return Column(
+    final column = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: crossAxisAlignment,
       children: [
@@ -65,11 +68,14 @@ class BilingualText extends StatelessWidget {
             fontFamily: AppFonts.body,
             fontSize: (fontSize * 0.72).clamp(10.0, 16.0),
             fontWeight: FontWeight.w400,
-            color: color.withValues(alpha: 0.72),
+            color: color.withValues(alpha: 0.80),
             height: 1.25,
           ),
         ),
       ],
     );
+
+    if (!isHeader) return column;
+    return Semantics(header: true, child: column);
   }
 }

@@ -1,9 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../../../data/services/file_helper.dart';
+import '../../../data/services/photo_picker_service.dart';
 import '../../../domain/models/cambodia_locations.dart';
 import '../../../domain/models/report_models.dart';
 import '../../core/l10n.dart';
@@ -12,10 +14,17 @@ import '../../core/theme.dart';
 import '../../core/widgets/bilingual_text.dart';
 import '../../core/widgets/user_avatar.dart';
 
+/// Optional test/override callback for picking an avatar photo.
+typedef AvatarPhotoPickerCallback = Future<PersistedPhotoResult?> Function(
+  ImageSource source,
+);
+
 /// Allows citizens to edit their local profile information (name, phone,
 /// home Sangkat/Khan, and avatar photo).
 class EditProfilePage extends StatefulWidget {
-  const EditProfilePage({super.key});
+  const EditProfilePage({super.key, this.onPickAvatarPhoto});
+
+  final AvatarPhotoPickerCallback? onPickAvatarPhoto;
 
   @override
   State<EditProfilePage> createState() => _EditProfilePageState();
@@ -31,6 +40,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   ProvinceOption? _selectedProvince;
   String? _avatarPhotoPath;
+  bool _isUpdatingAvatar = false;
   bool _initialized = false;
 
   @override
@@ -150,6 +160,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           return ListTile(
                             key: Key('edit-province-option-${province.code}'),
                             dense: true,
+                            selected: selected,
                             leading: Icon(
                               province.isCapital
                                   ? Icons.location_city_rounded
@@ -211,19 +222,43 @@ class _EditProfilePageState extends State<EditProfilePage> {
   }
 
   Future<void> _pickAvatar(ImageSource source, Bilingual tr) async {
+    if (_isUpdatingAvatar) return;
+    // IMPORTANT for Mobile Web (Android Brave/Chrome & iOS Safari):
+    // Start picking BEFORE calling setState or Navigator.pop so the hidden
+    // `<input type="file">.click()` runs synchronously inside the user's tap!
+    final pickFuture = widget.onPickAvatarPhoto != null
+        ? widget.onPickAvatarPhoto!(source)
+        : pickSanitizedPhoto(
+            source: source,
+            maxDimension: 360,
+            jpegQuality: 80,
+            preferredCameraDevice: CameraDevice.front,
+          );
+    if (mounted) {
+      setState(() => _isUpdatingAvatar = true);
+    }
     try {
-      final picked = await ImagePicker().pickImage(
-        source: source,
-        imageQuality: 78,
-        maxWidth: 400,
-        maxHeight: 400,
-      );
-      if (picked == null || !mounted) return;
-      final savedPath = await persistSanitizedPhoto(picked, 0);
+      final result = await pickFuture;
       if (!mounted) return;
-      setState(() => _avatarPhotoPath = savedPath);
+      if (result == null) return;
+
+      if (result.unsupportedFormat || !result.isValid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              tr.primary(
+                'ទម្រង់រូបភាពនេះ (ឧ. HEIC) មិនគាំទ្រដោយកម្មវិធីរុករកទេ — សូមជ្រើសរូប JPG ឬ PNG',
+                'This photo format (e.g. HEIC) is not supported by your browser — please choose a JPG or PNG photo.',
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+
+      setState(() => _avatarPhotoPath = result.path);
       final repo = ReportScope.read(context);
-      repo.updateProfile(repo.profile.copyWith(avatarPhotoPath: savedPath));
+      repo.updateProfile(repo.profile.copyWith(avatarPhotoPath: result.path));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 2),
@@ -244,6 +279,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
           ),
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingAvatar = false);
+      }
     }
   }
 
@@ -260,6 +299,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
             children: [
               if (!kIsWeb)
                 ListTile(
+                  key: const Key('avatar-take-photo-option'),
                   leading: const CircleAvatar(
                     backgroundColor: AppColors.tealSoft,
                     child: Icon(
@@ -269,11 +309,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                   title: Text(tr.paired('ថតរូបថ្មី', 'Take Photo')),
                   onTap: () {
+                    unawaited(_pickAvatar(ImageSource.camera, tr));
                     Navigator.pop(sheetCtx);
-                    _pickAvatar(ImageSource.camera, tr);
                   },
                 ),
               ListTile(
+                key: const Key('avatar-choose-photo-option'),
                 leading: const CircleAvatar(
                   backgroundColor: AppColors.tealSoft,
                   child: Icon(
@@ -287,12 +328,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       : tr.paired('ជ្រើសពីវិចិត្រសាល', 'Choose from Gallery'),
                 ),
                 onTap: () {
+                  // Trigger file picker synchronously BEFORE popping sheet!
+                  unawaited(_pickAvatar(ImageSource.gallery, tr));
                   Navigator.pop(sheetCtx);
-                  _pickAvatar(ImageSource.gallery, tr);
                 },
               ),
               if (kIsWeb)
                 ListTile(
+                  key: const Key('avatar-take-photo-option'),
                   leading: const CircleAvatar(
                     backgroundColor: AppColors.tealSoft,
                     child: Icon(
@@ -302,12 +345,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                   title: Text(tr.paired('ថតរូបថ្មី', 'Take Photo')),
                   onTap: () {
+                    unawaited(_pickAvatar(ImageSource.camera, tr));
                     Navigator.pop(sheetCtx);
-                    _pickAvatar(ImageSource.camera, tr);
                   },
                 ),
               if (_avatarPhotoPath != null)
                 ListTile(
+                  key: const Key('avatar-remove-photo-option'),
                   leading: const CircleAvatar(
                     backgroundColor: AppColors.dangerSoft,
                     child: Icon(Icons.delete_outline, color: AppColors.danger),
@@ -356,6 +400,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final tr = Bilingual(repo.settings.englishFirst);
 
     return GestureDetector(
+      excludeFromSemantics: true,
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
         body: SafeArea(
@@ -401,17 +446,58 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           Center(
                             child: Semantics(
                               button: true,
+                              excludeSemantics: true,
                               label: tr.primary(
                                 'ប្តូររូបភាពគណនី',
                                 'Change profile photo',
                               ),
                               child: InkWell(
-                                onTap: () => _showAvatarSheet(tr),
+                                key: const Key('edit-avatar-tap-target'),
+                                onTap: _isUpdatingAvatar
+                                    ? null
+                                    : () => _showAvatarSheet(tr),
                                 customBorder: const CircleBorder(),
-                                child: UserAvatar(
-                                  profile: _buildDraftProfile(),
-                                  radius: 46,
-                                  showEditBadge: true,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    AnimatedSwitcher(
+                                      duration:
+                                          MediaQuery.disableAnimationsOf(
+                                            context,
+                                          )
+                                          ? Duration.zero
+                                          : const Duration(milliseconds: 220),
+                                      child: UserAvatar(
+                                        key: ValueKey(
+                                          _avatarPhotoPath ?? 'initials',
+                                        ),
+                                        profile: _buildDraftProfile(),
+                                        radius: 46,
+                                        showEditBadge: true,
+                                      ),
+                                    ),
+                                    if (_isUpdatingAvatar)
+                                      Container(
+                                        width: 92,
+                                        height: 92,
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.42,
+                                          ),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Center(
+                                          child: SizedBox(
+                                            width: 24,
+                                            height: 24,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2.5,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -419,7 +505,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           const SizedBox(height: 8),
                           Center(
                             child: TextButton(
-                              onPressed: () => _showAvatarSheet(tr),
+                              key: const Key('edit-change-photo-btn'),
+                              onPressed: _isUpdatingAvatar
+                                  ? null
+                                  : () => _showAvatarSheet(tr),
                               child: Text(
                                 tr.paired('ប្តូររូបភាព', 'Change photo'),
                                 style: const TextStyle(
@@ -514,73 +603,86 @@ class _EditProfilePageState extends State<EditProfilePage> {
                             fontSize: 14,
                           ),
                           const SizedBox(height: 10),
-                          InkWell(
-                            key: const Key('edit-province-picker-btn'),
-                            onTap: () => _openProvincePicker(tr),
-                            borderRadius: BorderRadius.circular(16),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppColors.border),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.public_rounded,
-                                    color: AppColors.teal,
-                                    size: 20,
+                          Semantics(
+                            button: true,
+                            label: tr.primary(
+                              'រាជធានី / ខេត្ត',
+                              'Capital / Province',
+                            ),
+                            value: _selectedProvince == null
+                                ? tr.primary('មិនទាន់ជ្រើសរើស', 'Not selected')
+                                : tr.primary(
+                                    _selectedProvince!.khmer,
+                                    _selectedProvince!.english,
                                   ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          tr.primary(
-                                            'រាជធានី / ខេត្ត',
-                                            'Capital / Province',
-                                          ),
-                                          style: const TextStyle(
-                                            fontSize: 10.5,
-                                            color: AppColors.muted,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        Text(
-                                          _selectedProvince == null
-                                              ? tr.primary(
-                                                  'មិនទាន់ជ្រើសរើស (ស្រេចចិត្ត)',
-                                                  'Not selected (optional)',
-                                                )
-                                              : tr.primary(
-                                                  _selectedProvince!.khmer,
-                                                  _selectedProvince!.english,
-                                                ),
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight:
-                                                _selectedProvince == null
-                                                ? FontWeight.w500
-                                                : FontWeight.w700,
-                                            color: _selectedProvince == null
-                                                ? AppColors.muted
-                                                : AppColors.ink,
-                                          ),
-                                        ),
-                                      ],
+                            child: InkWell(
+                              key: const Key('edit-province-picker-btn'),
+                              onTap: () => _openProvincePicker(tr),
+                              borderRadius: BorderRadius.circular(16),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.public_rounded,
+                                      color: AppColors.teal,
+                                      size: 20,
                                     ),
-                                  ),
-                                  const Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                    color: AppColors.teal,
-                                  ),
-                                ],
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            tr.primary(
+                                              'រាជធានី / ខេត្ត',
+                                              'Capital / Province',
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 10.5,
+                                              color: AppColors.muted,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          Text(
+                                            _selectedProvince == null
+                                                ? tr.primary(
+                                                    'មិនទាន់ជ្រើសរើស (ស្រេចចិត្ត)',
+                                                    'Not selected (optional)',
+                                                  )
+                                                : tr.primary(
+                                                    _selectedProvince!.khmer,
+                                                    _selectedProvince!.english,
+                                                  ),
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight:
+                                                  _selectedProvince == null
+                                                  ? FontWeight.w500
+                                                  : FontWeight.w700,
+                                              color: _selectedProvince == null
+                                                  ? AppColors.muted
+                                                  : AppColors.ink,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      color: AppColors.teal,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),

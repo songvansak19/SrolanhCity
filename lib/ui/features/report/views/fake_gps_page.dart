@@ -12,11 +12,15 @@ class FakeGpsPage extends StatefulWidget {
     required this.onOpenSettings,
     required this.onTryAgain,
     this.detectedAppLabel = 'Mock GPS / Spoofing Provider',
+    this.detailKhmer,
+    this.detailEnglish,
   });
 
   final VoidCallback onOpenSettings;
   final VoidCallback onTryAgain;
   final String detectedAppLabel;
+  final String? detailKhmer;
+  final String? detailEnglish;
 
   @override
   State<FakeGpsPage> createState() => _FakeGpsPageState();
@@ -32,7 +36,20 @@ class _FakeGpsPageState extends State<FakeGpsPage>
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
-    )..repeat(reverse: true);
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (reduceMotion) {
+      _pulseController
+        ..stop()
+        ..value = 0.0;
+    } else if (!_pulseController.isAnimating) {
+      _pulseController.repeat(reverse: true);
+    }
   }
 
   @override
@@ -49,6 +66,7 @@ class _FakeGpsPageState extends State<FakeGpsPage>
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
+          tooltip: tr.primary('បិទ', 'Close'),
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
@@ -118,13 +136,15 @@ class _FakeGpsPageState extends State<FakeGpsPage>
                             fontWeight: FontWeight.w700,
                             crossAxisAlignment: CrossAxisAlignment.center,
                             textAlign: TextAlign.center,
+                            isHeader: true,
                           ),
                           const SizedBox(height: 14),
                           Text(
                             tr.primary(
-                              'សូមបិទកម្មវិធីប្តូរទីតាំង (Mock location) មុនពេលរាយការណ៍ ដើម្បីធានាថាទិន្នន័យពិតប្រាកដ និងក្រុមជួសជុលទៅដល់ទីតាំងត្រឹមត្រូវ។',
-                              'Please turn off mock-location or GPS spoofing apps before reporting. This keeps civic data honest and crews focused on real problems.',
+                              widget.detailKhmer ?? 'សូមបិទកម្មវិធីប្តូរទីតាំង (Mock location) មុនពេលរាយការណ៍ ដើម្បីធានាថាទិន្នន័យពិតប្រាកដ និងក្រុមជួសជុលទៅដល់ទីតាំងត្រឹមត្រូវ។',
+                              widget.detailEnglish ?? 'Please turn off mock-location or GPS spoofing apps before reporting. This keeps civic data honest and crews focused on real problems.',
                             ),
+                            key: const Key('fake-gps-detail-text'),
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: AppColors.muted,
@@ -197,8 +217,10 @@ class _FakeGpsPageState extends State<FakeGpsPage>
                   const SizedBox(height: 14),
                   SizedBox(
                     width: double.infinity,
-                    height: 54,
                     child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(54),
+                      ),
                       onPressed: widget.onOpenSettings,
                       child: Text(tr.paired('បើកការកំណត់', 'Open settings')),
                     ),
@@ -206,8 +228,10 @@ class _FakeGpsPageState extends State<FakeGpsPage>
                   const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
-                    height: 50,
                     child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                      ),
                       onPressed: widget.onTryAgain,
                       child: Text(tr.paired('ព្យាយាមម្តងទៀត', 'Try again')),
                     ),

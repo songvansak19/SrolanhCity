@@ -45,117 +45,163 @@ class _BeforeAfterSliderState extends State<BeforeAfterSlider> {
     }
   }
 
+  void _stepBy(double delta) {
+    final next = (_position + delta).clamp(0.08, 0.92);
+    if ((next - _position).abs() > 0.002) {
+      HapticFeedback.selectionClick();
+      setState(() => _position = next);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: '${widget.beforeLabel} / ${widget.afterLabel} comparison slider',
-      slider: true,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth;
-          final dividerX = width * _position;
+    final percent = (_position * 100).round();
+    final increasedPercent = ((_position + 0.1).clamp(0.08, 0.92) * 100)
+        .round();
+    final decreasedPercent = ((_position - 0.1).clamp(0.08, 0.92) * 100)
+        .round();
 
-          return GestureDetector(
-            key: const Key('before-after-slider'),
-            onHorizontalDragStart: (_) => HapticFeedback.selectionClick(),
-            onHorizontalDragUpdate: (details) =>
-                _updateFromLocalX(details.localPosition.dx, width),
-            onTapDown: (details) {
-              HapticFeedback.selectionClick();
-              _updateFromLocalX(details.localPosition.dx, width);
-            },
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: SizedBox(
-                height: widget.height,
-                width: width,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // Right / Underlying: AFTER photo
-                    ReportPhoto(
-                      category: widget.category,
-                      assetPath:
-                          widget.afterAssetPath ?? 'assets/pothole-after.jpg',
-                      width: width,
-                      height: widget.height,
-                      borderRadius: 0,
-                    ),
+    return FocusableActionDetector(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.arrowRight): _SliderAdjustIntent(
+          0.1,
+        ),
+        SingleActivator(LogicalKeyboardKey.arrowLeft): _SliderAdjustIntent(
+          -0.1,
+        ),
+      },
+      actions: <Type, Action<Intent>>{
+        _SliderAdjustIntent: CallbackAction<_SliderAdjustIntent>(
+          onInvoke: (intent) {
+            _stepBy(intent.delta);
+            return null;
+          },
+        ),
+      },
+      child: Semantics(
+        label: '${widget.beforeLabel} / ${widget.afterLabel} comparison slider',
+        slider: true,
+        value: '$percent%',
+        increasedValue: '$increasedPercent%',
+        decreasedValue: '$decreasedPercent%',
+        onIncrease: () => _stepBy(0.1),
+        onDecrease: () => _stepBy(-0.1),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final dividerX = width * _position;
 
-                    // Left / Clipped: BEFORE photo
-                    ClipRect(
-                      clipper: _LeftSplitClipper(_position),
-                      child: ReportPhoto(
+            return GestureDetector(
+              key: const Key('before-after-slider'),
+              onHorizontalDragStart: (_) => HapticFeedback.selectionClick(),
+              onHorizontalDragUpdate: (details) =>
+                  _updateFromLocalX(details.localPosition.dx, width),
+              onTapDown: (details) {
+                HapticFeedback.selectionClick();
+                _updateFromLocalX(details.localPosition.dx, width);
+              },
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: SizedBox(
+                  height: widget.height,
+                  width: width,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Right / Underlying: AFTER photo
+                      ReportPhoto(
                         category: widget.category,
-                        localPhotoPath: widget.beforeLocalPath,
-                        assetPath: widget.beforeAssetPath,
+                        assetPath:
+                            widget.afterAssetPath ?? 'assets/pothole-after.jpg',
                         width: width,
                         height: widget.height,
                         borderRadius: 0,
                       ),
-                    ),
 
-                    // Top Left Before pill
-                    Positioned(
-                      left: 12,
-                      top: 12,
-                      child: _PillBadge(label: widget.beforeLabel),
-                    ),
-                    // Top Right After pill
-                    Positioned(
-                      right: 12,
-                      top: 12,
-                      child: _PillBadge(label: widget.afterLabel),
-                    ),
-                    // Bottom Dates
-                    Positioned(
-                      left: 12,
-                      bottom: 12,
-                      child: _DarkPill(label: widget.beforeDate),
-                    ),
-                    Positioned(
-                      right: 12,
-                      bottom: 12,
-                      child: _DarkPill(label: widget.afterDate),
-                    ),
-
-                    // Vertical Divider Line
-                    Positioned(
-                      left: dividerX - 1.5,
-                      top: 0,
-                      bottom: 0,
-                      child: Container(width: 3, color: Colors.white),
-                    ),
-
-                    // Draggable Center Handle
-                    Positioned(
-                      left: dividerX - 20,
-                      top: (widget.height / 2) - 20,
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: AppColors.teal, width: 2.2),
-                          boxShadow: AppColors.cardShadow,
-                        ),
-                        child: const Icon(
-                          Icons.compare_arrows_rounded,
-                          color: AppColors.teal,
-                          size: 22,
+                      // Left / Clipped: BEFORE photo
+                      ClipRect(
+                        clipper: _LeftSplitClipper(_position),
+                        child: ReportPhoto(
+                          category: widget.category,
+                          localPhotoPath: widget.beforeLocalPath,
+                          assetPath: widget.beforeAssetPath,
+                          width: width,
+                          height: widget.height,
+                          borderRadius: 0,
                         ),
                       ),
-                    ),
-                  ],
+
+                      // Top Left Before pill
+                      Positioned(
+                        left: 12,
+                        top: 12,
+                        child: _PillBadge(label: widget.beforeLabel),
+                      ),
+                      // Top Right After pill
+                      Positioned(
+                        right: 12,
+                        top: 12,
+                        child: _PillBadge(label: widget.afterLabel),
+                      ),
+                      // Bottom Dates
+                      Positioned(
+                        left: 12,
+                        bottom: 12,
+                        child: _DarkPill(label: widget.beforeDate),
+                      ),
+                      Positioned(
+                        right: 12,
+                        bottom: 12,
+                        child: _DarkPill(label: widget.afterDate),
+                      ),
+
+                      // Vertical Divider Line
+                      Positioned(
+                        left: dividerX - 1.5,
+                        top: 0,
+                        bottom: 0,
+                        child: Container(width: 3, color: Colors.white),
+                      ),
+
+                      // Draggable Center Handle
+                      Positioned(
+                        left: dividerX - 20,
+                        top: (widget.height / 2) - 20,
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppColors.teal,
+                              width: 2.2,
+                            ),
+                            boxShadow: AppColors.cardShadow,
+                          ),
+                          child: const Icon(
+                            Icons.compare_arrows_rounded,
+                            color: AppColors.teal,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
+}
+
+class _SliderAdjustIntent extends Intent {
+  const _SliderAdjustIntent(this.delta);
+
+  final double delta;
 }
 
 class _LeftSplitClipper extends CustomClipper<Rect> {

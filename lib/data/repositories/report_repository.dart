@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import '../../domain/models/cambodia_locations.dart';
 import '../../domain/models/report_models.dart';
 import '../../domain/models/routing_result.dart';
+import '../../domain/services/anti_spoof_service.dart';
 import '../../domain/services/gis_routing_service.dart';
 import '../../domain/services/priority_calculator.dart';
 import '../../domain/services/relative_time_formatter.dart';
@@ -61,6 +62,7 @@ class ReportRepository extends ChangeNotifier {
   AppSettings _settings;
   UserProfile _profile;
   ReportDraft? _draft;
+  GpsCheckpoint? _lastVerifiedGpsCheckpoint;
   int _nextTicketNumber = 20540;
   bool _isOnline = true;
 
@@ -82,6 +84,8 @@ class ReportRepository extends ChangeNotifier {
   UserProfile get profile => _profile;
 
   ReportDraft? get draft => _draft;
+
+  GpsCheckpoint? get lastVerifiedGpsCheckpoint => _lastVerifiedGpsCheckpoint;
 
   bool get isOnline => _isOnline;
 
@@ -372,6 +376,17 @@ class ReportRepository extends ChangeNotifier {
         );
     }
 
+    _lastVerifiedGpsCheckpoint = GpsCheckpoint.fromJson(
+      data['lastVerifiedGpsCheckpoint'],
+    );
+
+    // Reopen-online auto-sync: if the citizen queued reports offline, closed
+    // the app, and reopened with internet active, sync them automatically now.
+    if (_isOnline && hasPendingSync) {
+      syncPendingReports();
+      return;
+    }
+
     notifyListeners();
   }
 
@@ -389,9 +404,32 @@ class ReportRepository extends ChangeNotifier {
         'supportVoteTimestamps': _supportVoteTimestamps
             .map((ts) => ts.toIso8601String())
             .toList(),
+        if (_lastVerifiedGpsCheckpoint != null)
+          'lastVerifiedGpsCheckpoint': _lastVerifiedGpsCheckpoint!.toJson(),
       }),
     );
   }
+
+  /// Persists the latest trusted GPS fix for cross-session impossible-travel
+  /// spoofing checks.
+  void recordVerifiedGpsCheckpoint(LatLng point, {DateTime? timestamp}) {
+    _lastVerifiedGpsCheckpoint = GpsCheckpoint(
+      point: point,
+      timestamp: timestamp ?? DateTime.now(),
+    );
+    _persist();
+  }
+
+  /// Builds the backend-ready anti-spoof integrity envelope attached to
+  /// report submissions and "Affects me" confirmations.
+  Map<String, dynamic> buildIntegrityApiPayload({
+    required SpoofAssessment assessment,
+    String? ipCountryCode,
+    DeviceIntegrityAttestation? attestation,
+  }) => assessment.toIntegrityJson(
+    attestation: attestation,
+    ipCountryCode: ipCountryCode,
+  );
 
   void updateProfile(UserProfile next) {
     _profile = next;
@@ -399,17 +437,19 @@ class ReportRepository extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Updates live network connectivity state. When connectivity returns and
-  /// queued offline reports exist, automatically syncs them.
+  /// Updates live network connectivity state. When connectivity returns (or
+  /// finishes initializing online) and queued offline reports exist,
+  /// automatically syncs them.
   void setOnlineStatus(bool online, {DateTime? now}) {
-    final wasOffline = !_isOnline;
-    if (_isOnline == online) return;
+    final changed = _isOnline != online;
     _isOnline = online;
-    if (online && wasOffline && hasPendingSync) {
+    if (online && hasPendingSync) {
       syncPendingReports(now: now);
       return;
     }
-    notifyListeners();
+    if (changed) {
+      notifyListeners();
+    }
   }
 
   /// Marks all queued offline reports as synced, persists state, and fires a
@@ -548,6 +588,8 @@ class ReportRepository extends ChangeNotifier {
     String? localPhotoPath,
     List<String> additionalLocalPhotoPaths = const [],
     String? voiceTranscript,
+    String? voiceAudioPath,
+    int? voiceAudioDurationSeconds,
     GeocodedPlace? geocodedPlace,
     bool forceCreateNew = false,
     DateTime? now,
@@ -611,6 +653,8 @@ class ReportRepository extends ChangeNotifier {
           isAnonymous: isAnonymous,
           severity: clampedSeverity,
           voiceTranscript: voiceTranscript,
+          voiceAudioPath: voiceAudioPath,
+          voiceAudioDurationSeconds: voiceAudioDurationSeconds,
         );
         final mergedComments = <CitizenComment>[
           ...existing.effectiveComments,
@@ -625,6 +669,9 @@ class ReportRepository extends ChangeNotifier {
           localPhotoPath: mergedLocalPhoto,
           additionalLocalPhotoPaths: mergedExtraPhotos,
           voiceTranscript: voiceTranscript ?? existing.voiceTranscript,
+          voiceAudioPath: voiceAudioPath ?? existing.voiceAudioPath,
+          voiceAudioDurationSeconds:
+              voiceAudioDurationSeconds ?? existing.voiceAudioDurationSeconds,
           citizenComments: mergedComments,
         );
 
@@ -705,6 +752,8 @@ class ReportRepository extends ChangeNotifier {
       createdByCurrentUser: true,
       syncStatus: _isOnline ? SyncStatus.synced : SyncStatus.pendingSync,
       voiceTranscript: voiceTranscript,
+      voiceAudioPath: voiceAudioPath,
+      voiceAudioDurationSeconds: voiceAudioDurationSeconds,
       beforeDateLabel: RelativeTimeFormatter.formatShortDate(submittedAt),
       afterDateLabel: 'Pending',
       createdAt: submittedAt,
@@ -718,6 +767,8 @@ class ReportRepository extends ChangeNotifier {
           isAnonymous: isAnonymous,
           severity: clampedSeverity,
           voiceTranscript: voiceTranscript,
+          voiceAudioPath: voiceAudioPath,
+          voiceAudioDurationSeconds: voiceAudioDurationSeconds,
         ),
       ],
       timeline: _buildTimeline(
@@ -971,12 +1022,14 @@ class ReportRepository extends ChangeNotifier {
     required SupportVerificationTier tier,
     double? distanceMeters,
     LatLng? userCoordinates,
+    Map<String, dynamic>? integrityMetadata,
   }) => <String, dynamic>{
     'report_id': reportId,
     'verification_tier': tier.name,
     if (distanceMeters != null) 'distance_meters': distanceMeters.round(),
     if (userCoordinates != null) 'lat': userCoordinates.latitude,
     if (userCoordinates != null) 'lng': userCoordinates.longitude,
+    'integrity': ?integrityMetadata,
   };
 
   /// Records a citizen's 1–5 emoji satisfaction rating on a resolved repair.

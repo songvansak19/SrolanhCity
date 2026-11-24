@@ -5,6 +5,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../domain/services/anti_spoof_service.dart';
+
 /// Outcome of requesting the user's current GPS position.
 sealed class LocationFetchResult {
   const LocationFetchResult();
@@ -15,17 +17,41 @@ final class LocationSuccess extends LocationFetchResult {
     required this.point,
     required this.accuracyMeters,
     required this.isOutsideCambodia,
+    this.altitude,
+    this.speed,
+    this.timestamp,
   });
 
   final LatLng point;
   final double accuracyMeters;
   final bool isOutsideCambodia;
+  final double? altitude;
+  final double? speed;
+  final DateTime? timestamp;
+
+  GpsReadingSample toReadingSample({DateTime? fallbackNow}) => GpsReadingSample(
+    point: point,
+    timestamp: timestamp ?? fallbackNow ?? DateTime.now(),
+    accuracyMeters: accuracyMeters,
+    altitude: altitude,
+    speed: speed,
+    isMocked: false,
+    isWeb: kIsWeb,
+  );
 }
 
 final class LocationMockDetected extends LocationFetchResult {
-  const LocationMockDetected({required this.point});
+  const LocationMockDetected({
+    required this.point,
+    this.detectedLabel = 'Mock GPS / Spoofing Provider',
+    this.reasonKhmer,
+    this.reasonEnglish,
+  });
 
   final LatLng point;
+  final String detectedLabel;
+  final String? reasonKhmer;
+  final String? reasonEnglish;
 }
 
 final class LocationServiceDisabled extends LocationFetchResult {
@@ -44,9 +70,9 @@ final class LocationFailure extends LocationFetchResult {
   final String message;
 }
 
-/// Platform GPS wrapper with best-accuracy acquisition, mock-GPS spoofing
-/// detection, and Cambodia bounding-box checks (catching default Android
-/// Emulator Mountain View coordinates cleanly).
+/// Platform GPS wrapper with best-accuracy acquisition, multi-layer mock-GPS
+/// spoofing detection, and Cambodia bounding-box checks (catching default
+/// Android Emulator Mountain View coordinates cleanly).
 class LocationService {
   const LocationService();
 
@@ -133,17 +159,38 @@ class LocationService {
       }
 
       final point = LatLng(position.latitude, position.longitude);
+      final fixTime = position.timestamp;
 
-      if (enforceMockCheck &&
-          position.isMocked &&
-          !isLikelyEmulatorDefault(point)) {
-        return LocationMockDetected(point: point);
+      if (enforceMockCheck && !isLikelyEmulatorDefault(point)) {
+        final signalCheck = AntiSpoofService.evaluateGpsFix(
+          current: GpsReadingSample(
+            point: point,
+            timestamp: fixTime,
+            accuracyMeters: position.accuracy,
+            altitude: position.altitude,
+            speed: position.speed,
+            isMocked: position.isMocked,
+            isWeb: kIsWeb,
+          ),
+        );
+        if (signalCheck.isBlocked) {
+          return LocationMockDetected(
+            point: point,
+            detectedLabel:
+                signalCheck.detectedLabel ?? 'Mock GPS / Spoofing Provider',
+            reasonKhmer: signalCheck.khmerSummary,
+            reasonEnglish: signalCheck.englishSummary,
+          );
+        }
       }
 
       return LocationSuccess(
         point: point,
         accuracyMeters: position.accuracy,
         isOutsideCambodia: !isInsideCambodia(point),
+        altitude: position.altitude,
+        speed: position.speed,
+        timestamp: fixTime,
       );
     } catch (error) {
       return LocationFailure(error.toString());

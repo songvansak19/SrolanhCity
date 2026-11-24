@@ -10,6 +10,7 @@ import '../../../data/services/location_service.dart';
 import '../../../data/services/reverse_geocoding_service.dart';
 import '../../../domain/models/cambodia_locations.dart';
 import '../../../domain/models/report_models.dart';
+import '../../../domain/services/anti_spoof_service.dart';
 import '../../../domain/services/gis_routing_service.dart';
 import '../../../domain/services/map_cluster_service.dart';
 import '../../core/l10n.dart';
@@ -339,6 +340,10 @@ class _MapPageState extends State<MapPage> {
                     TextField(
                       key: const Key('map-province-search'),
                       decoration: InputDecoration(
+                        labelText: tr.primary(
+                          'ស្វែងរកខេត្ត',
+                          'Search province',
+                        ),
                         hintText: tr.primary(
                           'ស្វែងរកខេត្ត (ឧ. សៀមរាប, ព្រះសីហនុ, កំពត)...',
                           'Search province (e.g., Siem Reap, Kampot)...',
@@ -350,85 +355,121 @@ class _MapPageState extends State<MapPage> {
                     ),
                     const SizedBox(height: 8),
                     Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: matches.length,
-                        separatorBuilder: (_, _) =>
-                            const Divider(height: 1, color: AppColors.border),
-                        itemBuilder: (_, index) {
-                          final province = matches[index];
-                          final count = repo.reportCountForProvince(province);
-                          final isSelected =
-                              activeProvince?.code == province.code;
-                          return ListTile(
-                            key: Key('map-jump-province-${province.code}'),
-                            dense: true,
-                            leading: Icon(
-                              province.isCapital
-                                  ? Icons.location_city_rounded
-                                  : Icons.place_outlined,
-                              color: isSelected
-                                  ? AppColors.teal
-                                  : (count > 0
-                                        ? AppColors.ink
-                                        : AppColors.muted),
-                              size: 20,
-                            ),
-                            title: Text(
-                              tr.primary(province.khmer, province.english),
-                              style: TextStyle(
-                                fontWeight: isSelected || count > 0
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                color: isSelected
-                                    ? AppColors.tealDark
-                                    : AppColors.ink,
+                      child: matches.isEmpty
+                          ? Semantics(
+                              container: true,
+                              liveRegion: true,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 20,
+                                ),
+                                child: Text(
+                                  tr.primary(
+                                    'រកមិនឃើញខេត្តដែលត្រូវគ្នាទេ',
+                                    'No matching province found',
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: AppColors.muted,
+                                    fontSize: 13,
+                                  ),
+                                ),
                               ),
-                            ),
-                            subtitle: Text(
-                              tr.secondary(province.khmer, province.english),
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                            trailing: count > 0
-                                ? Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 9,
-                                      vertical: 3,
+                            )
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: matches.length,
+                              separatorBuilder: (_, _) => const Divider(
+                                height: 1,
+                                color: AppColors.border,
+                              ),
+                              itemBuilder: (_, index) {
+                                final province = matches[index];
+                                final count = repo.reportCountForProvince(
+                                  province,
+                                );
+                                final isSelected =
+                                    activeProvince?.code == province.code;
+                                return ListTile(
+                                  key: Key(
+                                    'map-jump-province-${province.code}',
+                                  ),
+                                  dense: true,
+                                  selected: isSelected,
+                                  leading: Icon(
+                                    province.isCapital
+                                        ? Icons.location_city_rounded
+                                        : Icons.place_outlined,
+                                    color: isSelected
+                                        ? AppColors.teal
+                                        : (count > 0
+                                              ? AppColors.ink
+                                              : AppColors.muted),
+                                    size: 20,
+                                  ),
+                                  title: Text(
+                                    tr.primary(
+                                      province.khmer,
+                                      province.english,
                                     ),
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? AppColors.teal
-                                          : AppColors.tealSoft,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      '$count',
-                                      style: AppFonts.displayStyle(
-                                        fontSize: 11.5,
-                                        color: isSelected
-                                            ? Colors.white
-                                            : AppColors.tealDark,
-                                      ),
-                                    ),
-                                  )
-                                : const Text(
-                                    '0',
                                     style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: AppColors.muted,
+                                      fontWeight: isSelected || count > 0
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                      color: isSelected
+                                          ? AppColors.tealDark
+                                          : AppColors.ink,
                                     ),
                                   ),
-                            onTap: () {
-                              Navigator.pop(sheetCtx);
-                              HapticFeedback.selectionClick();
-                              _flyToPoint(
-                                province.center,
-                                province.isCapital ? 13.8 : 13.6,
-                              );
-                            },
-                          );
-                        },
-                      ),
+                                  subtitle: Text(
+                                    tr.secondary(
+                                      province.khmer,
+                                      province.english,
+                                    ),
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                  trailing: count > 0
+                                      ? Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 9,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isSelected
+                                                ? AppColors.teal
+                                                : AppColors.tealSoft,
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '$count',
+                                            style: AppFonts.displayStyle(
+                                              fontSize: 11.5,
+                                              color: isSelected
+                                                  ? Colors.white
+                                                  : AppColors.tealDark,
+                                            ),
+                                          ),
+                                        )
+                                      : const Text(
+                                          '0',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: AppColors.muted,
+                                          ),
+                                        ),
+                                  onTap: () {
+                                    Navigator.pop(sheetCtx);
+                                    HapticFeedback.selectionClick();
+                                    _flyToPoint(
+                                      province.center,
+                                      province.isCapital ? 13.8 : 13.6,
+                                    );
+                                  },
+                                );
+                              },
+                            ),
                     ),
                   ],
                 ),
@@ -551,6 +592,32 @@ class _MapPageState extends State<MapPage> {
               ),
             );
           } else {
+            final repo = ReportScope.read(context);
+            final spoofCheck = AntiSpoofService.evaluateGpsFix(
+              current: result.toReadingSample(),
+              lastCheckpoint: repo.lastVerifiedGpsCheckpoint,
+            );
+            if (spoofCheck.isBlocked) {
+              await Navigator.push<void>(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => FakeGpsPage(
+                    detectedAppLabel:
+                        spoofCheck.detectedLabel ??
+                        'Mock GPS / Spoofing Provider',
+                    detailKhmer: spoofCheck.khmerSummary,
+                    detailEnglish: spoofCheck.englishSummary,
+                    onOpenSettings: widget.locationService.openLocationSettings,
+                    onTryAgain: () => Navigator.pop(context),
+                  ),
+                ),
+              );
+              return;
+            }
+            repo.recordVerifiedGpsCheckpoint(
+              point,
+              timestamp: result.timestamp,
+            );
             setState(() {
               _outsideCambodiaDetected = false;
               _rawOutsidePoint = null;
@@ -566,11 +633,18 @@ class _MapPageState extends State<MapPage> {
             }
             await _updatePinLabel(point);
           }
-        case LocationMockDetected():
+        case LocationMockDetected(
+          :final detectedLabel,
+          :final reasonKhmer,
+          :final reasonEnglish,
+        ):
           await Navigator.push<void>(
             context,
             MaterialPageRoute<void>(
               builder: (_) => FakeGpsPage(
+                detectedAppLabel: detectedLabel,
+                detailKhmer: reasonKhmer,
+                detailEnglish: reasonEnglish,
                 onOpenSettings: widget.locationService.openLocationSettings,
                 onTryAgain: () => Navigator.pop(context),
               ),
@@ -702,7 +776,7 @@ class _MapPageState extends State<MapPage> {
                 }
 
                 return SafeArea(
-                  child: Padding(
+                  child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -710,27 +784,35 @@ class _MapPageState extends State<MapPage> {
                       children: [
                         Row(
                           children: [
-                            InkWell(
-                              onTap: () => PhotoLightboxPage.open(
-                                context,
-                                category: live.category,
-                                bilingual: tr,
-                                localPhotoPath: live.localPhotoPath,
-                                assetPath: live.photoAssetPath,
-                                title: tr.primary(
-                                  live.khmerTitle,
-                                  live.englishTitle,
-                                ),
-                                subtitle: live.id,
+                            Semantics(
+                              button: true,
+                              excludeSemantics: true,
+                              label: tr.primary(
+                                'មើលរូបភាពពេញអេក្រង់',
+                                'View full photo',
                               ),
-                              borderRadius: BorderRadius.circular(16),
-                              child: ReportPhoto(
-                                category: live.category,
-                                localPhotoPath: live.localPhotoPath,
-                                assetPath: live.photoAssetPath,
-                                width: 76,
-                                height: 76,
-                                borderRadius: 16,
+                              child: InkWell(
+                                onTap: () => PhotoLightboxPage.open(
+                                  context,
+                                  category: live.category,
+                                  bilingual: tr,
+                                  localPhotoPath: live.localPhotoPath,
+                                  assetPath: live.photoAssetPath,
+                                  title: tr.primary(
+                                    live.khmerTitle,
+                                    live.englishTitle,
+                                  ),
+                                  subtitle: live.id,
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                child: ReportPhoto(
+                                  category: live.category,
+                                  localPhotoPath: live.localPhotoPath,
+                                  assetPath: live.photoAssetPath,
+                                  width: 76,
+                                  height: 76,
+                                  borderRadius: 16,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 14),
@@ -761,6 +843,7 @@ class _MapPageState extends State<MapPage> {
                                     khmer: live.khmerTitle,
                                     english: live.englishTitle,
                                     fontSize: 16,
+                                    isHeader: true,
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
@@ -940,61 +1023,67 @@ class _MapPageState extends State<MapPage> {
                         ),
                         if (supportOutcome?.message != null) ...[
                           const SizedBox(height: 10),
-                          Container(
-                            key: const Key('map-support-feedback-banner'),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 9,
-                            ),
-                            decoration: BoxDecoration(
-                              color: supportOutcome!.isError
-                                  ? AppColors.saffronSoft
-                                  : AppColors.tealSoft,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: supportOutcome!.isError
-                                    ? AppColors.saffron.withValues(alpha: 0.65)
-                                    : AppColors.teal.withValues(alpha: 0.35),
+                          Semantics(
+                            container: true,
+                            liveRegion: true,
+                            child: Container(
+                              key: const Key('map-support-feedback-banner'),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 9,
                               ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  supportOutcome!.isError
-                                      ? Icons.location_off_outlined
-                                      : Icons.verified_rounded,
-                                  size: 16,
+                              decoration: BoxDecoration(
+                                color: supportOutcome!.isError
+                                    ? AppColors.saffronSoft
+                                    : AppColors.tealSoft,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
                                   color: supportOutcome!.isError
-                                      ? AppColors.saffronInk
-                                      : AppColors.teal,
+                                      ? AppColors.saffron.withValues(
+                                          alpha: 0.65,
+                                        )
+                                      : AppColors.teal.withValues(alpha: 0.35),
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    supportOutcome!.message!,
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: supportOutcome!.isError
-                                          ? AppColors.saffronInk
-                                          : AppColors.tealDark,
-                                    ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    supportOutcome!.isError
+                                        ? Icons.location_off_outlined
+                                        : Icons.verified_rounded,
+                                    size: 16,
+                                    color: supportOutcome!.isError
+                                        ? AppColors.saffronInk
+                                        : AppColors.teal,
                                   ),
-                                ),
-                                if (supportOutcome!.canOpenLocationSettings)
-                                  TextButton(
-                                    onPressed: widget
-                                        .locationService
-                                        .openLocationSettings,
+                                  const SizedBox(width: 8),
+                                  Expanded(
                                     child: Text(
-                                      tr.primary('បើក GPS', 'GPS'),
-                                      style: const TextStyle(
+                                      supportOutcome!.message!,
+                                      style: TextStyle(
                                         fontSize: 11.5,
-                                        fontWeight: FontWeight.w700,
+                                        fontWeight: FontWeight.w600,
+                                        color: supportOutcome!.isError
+                                            ? AppColors.saffronInk
+                                            : AppColors.tealDark,
                                       ),
                                     ),
                                   ),
-                              ],
+                                  if (supportOutcome!.canOpenLocationSettings)
+                                    TextButton(
+                                      onPressed: widget
+                                          .locationService
+                                          .openLocationSettings,
+                                      child: Text(
+                                        tr.primary('បើក GPS', 'GPS'),
+                                        style: const TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                         ],
@@ -1174,13 +1263,17 @@ class _MapPageState extends State<MapPage> {
                     switch (item) {
                       ProvinceClusterItem() => Marker(
                         point: item.position,
-                        width: 148,
-                        height: 38,
+                        width: 152,
+                        height: 48,
                         child: _ProvinceClusterBubble(
                           key: Key('province-cluster-${item.province.code}'),
                           label: tr.primary(
                             item.province.shortKhmer,
                             item.province.english,
+                          ),
+                          semanticLabel: tr.primary(
+                            '${item.province.khmer} · ${item.count} របាយការណ៍ · ពង្រីកមើល',
+                            '${item.province.english}, ${item.count} reports, zoom in',
                           ),
                           count: item.count,
                           color: item.allResolved
@@ -1206,6 +1299,10 @@ class _MapPageState extends State<MapPage> {
                         height: 52,
                         child: _AreaClusterMarker(
                           count: item.count,
+                          semanticLabel: tr.primary(
+                            'ចង្កោមរបាយការណ៍ ${item.count} កន្លែង · ពង្រីកមើល',
+                            'Cluster of ${item.count} reports, zoom in',
+                          ),
                           color: item.allResolved
                               ? AppColors.success
                               : AppColors.priorityColor(item.maxPriorityLevel),
@@ -1225,12 +1322,16 @@ class _MapPageState extends State<MapPage> {
                       ),
                       SingleReportPinItem(:final report) => Marker(
                         point: report.coordinates,
-                        width: highlightedId == report.id ? 52 : 44,
-                        height: highlightedId == report.id ? 52 : 44,
+                        width: highlightedId == report.id ? 54 : 48,
+                        height: highlightedId == report.id ? 54 : 48,
                         child: _PriorityMarker(
                           label: report.status == ReportStatus.resolved
                               ? '✓'
                               : 'P${report.priority.level}',
+                          semanticLabel: tr.primary(
+                            '${report.khmerTitle} · P${report.priority.level}',
+                            '${report.englishTitle}, Priority P${report.priority.level}',
+                          ),
                           color: report.status == ReportStatus.resolved
                               ? AppColors.success
                               : AppColors.priorityColor(report.priority.level),
@@ -1306,31 +1407,38 @@ class _MapPageState extends State<MapPage> {
                           trailing: [
                             if (_query.isNotEmpty)
                               IconButton(
+                                tooltip: tr.primary(
+                                  'សម្អាតការស្វែងរក',
+                                  'Clear search',
+                                ),
                                 icon: const Icon(Icons.close, size: 18),
                                 onPressed: () {
                                   _searchController.clear();
                                   setState(() => _query = '');
                                 },
                               ),
-                            IconButton(
-                              key: const Key('map-legend-toggle'),
-                              tooltip: tr.primary(
-                                'កម្រិតអាទិភាព P1–P5',
-                                'Priority legend',
+                            Semantics(
+                              toggled: _showLegend,
+                              child: IconButton(
+                                key: const Key('map-legend-toggle'),
+                                tooltip: tr.primary(
+                                  'កម្រិតអាទិភាព P1–P5',
+                                  'Priority legend',
+                                ),
+                                icon: Icon(
+                                  _showLegend
+                                      ? Icons.info_rounded
+                                      : Icons.info_outline_rounded,
+                                  size: 20,
+                                  color: _showLegend
+                                      ? AppColors.teal
+                                      : AppColors.muted,
+                                ),
+                                onPressed: () {
+                                  HapticFeedback.selectionClick();
+                                  setState(() => _showLegend = !_showLegend);
+                                },
                               ),
-                              icon: Icon(
-                                _showLegend
-                                    ? Icons.info_rounded
-                                    : Icons.info_outline_rounded,
-                                size: 20,
-                                color: _showLegend
-                                    ? AppColors.teal
-                                    : AppColors.muted,
-                              ),
-                              onPressed: () {
-                                HapticFeedback.selectionClick();
-                                setState(() => _showLegend = !_showLegend);
-                              },
                             ),
                           ],
                           elevation: const WidgetStatePropertyAll(3),
@@ -1342,10 +1450,9 @@ class _MapPageState extends State<MapPage> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  SizedBox(
-                    height: 36,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
                       children: [
                         ActionChip(
                           key: const Key('map-province-filter-btn'),
@@ -1465,53 +1572,57 @@ class _MapPageState extends State<MapPage> {
                       ),
                     ),
                   if (_outsideCambodiaDetected && _rawOutsidePoint != null)
-                    Container(
-                      margin: const EdgeInsets.only(top: 10),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.saffronSoft,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: AppColors.saffron.withValues(alpha: 0.6),
+                    Semantics(
+                      container: true,
+                      liveRegion: true,
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 10),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
                         ),
-                        boxShadow: AppColors.cardShadow,
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.public_off_outlined,
-                            color: AppColors.saffronInk,
-                            size: 20,
+                        decoration: BoxDecoration(
+                          color: AppColors.saffronSoft,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: AppColors.saffron.withValues(alpha: 0.6),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              tr.primary(
-                                'GPS ឧបករណ៍នៅក្រៅកម្ពុជា (${_rawOutsidePoint!.latitude.toStringAsFixed(2)}, ${_rawOutsidePoint!.longitude.toStringAsFixed(2)})',
-                                'Emulator / GPS outside Cambodia (${_rawOutsidePoint!.latitude.toStringAsFixed(2)}, ${_rawOutsidePoint!.longitude.toStringAsFixed(2)})',
-                              ),
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.saffronInk,
+                          boxShadow: AppColors.cardShadow,
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.public_off_outlined,
+                              color: AppColors.saffronInk,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                tr.primary(
+                                  'GPS ឧបករណ៍នៅក្រៅកម្ពុជា (${_rawOutsidePoint!.latitude.toStringAsFixed(2)}, ${_rawOutsidePoint!.longitude.toStringAsFixed(2)})',
+                                  'Emulator / GPS outside Cambodia (${_rawOutsidePoint!.latitude.toStringAsFixed(2)}, ${_rawOutsidePoint!.longitude.toStringAsFixed(2)})',
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.saffronInk,
+                                ),
                               ),
                             ),
-                          ),
-                          TextButton(
-                            onPressed: _centerOnPhnomPenh,
-                            child: Text(
-                              tr.primary('ភ្នំពេញ', 'Phnom Penh'),
-                              style: const TextStyle(
-                                color: AppColors.teal,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 12,
+                            TextButton(
+                              onPressed: _centerOnPhnomPenh,
+                              child: Text(
+                                tr.primary('ភ្នំពេញ', 'Phnom Penh'),
+                                style: const TextStyle(
+                                  color: AppColors.teal,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                 ],
@@ -1519,8 +1630,12 @@ class _MapPageState extends State<MapPage> {
             ),
           ),
 
-          // Right-hand Zoom & Locate FAB Stack
-          Positioned(
+          // Right-hand Zoom & Locate FAB Stack (glides smoothly when carousel hides/appears)
+          AnimatedPositioned(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
             right: 16,
             bottom: _customPin != null
                 ? 24
@@ -1536,6 +1651,7 @@ class _MapPageState extends State<MapPage> {
                 children: [
                   FloatingActionButton.small(
                     heroTag: 'map-zoom-in',
+                    tooltip: tr.primary('ពង្រីកផែនទី', 'Zoom in'),
                     backgroundColor: Colors.white,
                     foregroundColor: AppColors.ink,
                     onPressed: () => _setZoom(_zoom + 1),
@@ -1544,6 +1660,7 @@ class _MapPageState extends State<MapPage> {
                   const SizedBox(height: 8),
                   FloatingActionButton.small(
                     heroTag: 'map-zoom-out',
+                    tooltip: tr.primary('បង្រួមផែនទី', 'Zoom out'),
                     backgroundColor: Colors.white,
                     foregroundColor: AppColors.ink,
                     onPressed: () => _setZoom(_zoom - 1),
@@ -1552,6 +1669,7 @@ class _MapPageState extends State<MapPage> {
                   const SizedBox(height: 8),
                   FloatingActionButton.small(
                     heroTag: 'map-locate',
+                    tooltip: tr.primary('ទីតាំងរបស់ខ្ញុំ', 'My location'),
                     backgroundColor: AppColors.teal,
                     foregroundColor: Colors.white,
                     onPressed: _isLocating ? null : () => _locateMe(tr),
@@ -1620,6 +1738,7 @@ class _MapPageState extends State<MapPage> {
                               ),
                             ),
                           IconButton(
+                            tooltip: tr.primary('បិទម្ជុល', 'Dismiss pin'),
                             visualDensity: VisualDensity.compact,
                             icon: const Icon(Icons.close, size: 17),
                             onPressed: () => setState(() => _customPin = null),
@@ -1655,230 +1774,328 @@ class _MapPageState extends State<MapPage> {
                 ),
               ),
             )
-          else if (showBottomCarousel)
+          else
             Positioned(
               left: 0,
               right: 0,
               bottom: 14,
               child: SafeArea(
                 top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Container(
-                        key: const Key('map-viewport-count-pill'),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 11,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.94),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: AppColors.border),
-                          boxShadow: AppColors.cardShadow,
-                        ),
-                        child: Text(
-                          isOverviewZoom
-                              ? tr.primary(
-                                  'ទូទាំងកម្ពុជា · ${viewportReports.length} របាយការណ៍',
-                                  'All Cambodia · ${viewportReports.length} report(s)',
-                                )
-                              : tr.primary(
-                                  'ក្នុងផែនទីនេះ · ${viewportReports.length} របាយការណ៍',
-                                  'In this area · ${viewportReports.length} report(s)',
-                                ),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.ink,
+                child: Builder(
+                  builder: (context) {
+                    final reduceMotion = MediaQuery.disableAnimationsOf(
+                      context,
+                    );
+                    return AnimatedSwitcher(
+                      duration: reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 220),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) {
+                        if (reduceMotion) return child;
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.25),
+                              end: Offset.zero,
+                            ).animate(animation),
+                            child: child,
                           ),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      height: 102,
-                      child: PageView.builder(
-                        key: const Key('map-nearby-carousel'),
-                        controller: _carouselController,
-                        itemCount: viewportReports.length,
-                        onPageChanged: (index) {
-                          if (index < 0 || index >= viewportReports.length) {
-                            return;
-                          }
-                          HapticFeedback.selectionClick();
-                          final report = viewportReports[index];
-                          setState(() => _activeReportId = report.id);
-                          if (_mapReady) {
-                            final targetZoom =
-                                _zoom < MapClusterService.provinceClusterMaxZoom
-                                ? _zoom
-                                : (_zoom >= 13.4 ? _zoom : 15.6);
-                            _mapController.move(report.coordinates, targetZoom);
-                          }
-                        },
-                        itemBuilder: (context, index) {
-                          final report = viewportReports[index];
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            child: InkWell(
-                              onTap: () => _openIncidentSheet(report, tr),
-                              borderRadius: BorderRadius.circular(22),
-                              child: Container(
-                                padding: const EdgeInsets.all(11),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(22),
-                                  border: Border.all(
-                                    color: highlightedId == report.id
-                                        ? AppColors.teal
-                                        : AppColors.border,
-                                    width: highlightedId == report.id ? 1.6 : 1,
-                                  ),
-                                  boxShadow: AppColors.cardShadow,
-                                ),
-                                child: Row(
-                                  children: [
-                                    ReportPhoto(
-                                      category: report.category,
-                                      localPhotoPath: report.localPhotoPath,
-                                      assetPath:
-                                          report.status == ReportStatus.resolved
-                                          ? (report.resolvedAfterAssetPath ??
-                                                report.photoAssetPath)
-                                          : report.photoAssetPath,
-                                      width: 72,
-                                      height: 72,
-                                      borderRadius: 14,
+                        );
+                      },
+                      child: showBottomCarousel
+                          ? Column(
+                              key: const ValueKey('map-carousel-visible'),
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 6),
+                                  child: Container(
+                                    key: const Key('map-viewport-count-pill'),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 11,
+                                      vertical: 4,
                                     ),
-                                    const SizedBox(width: 11),
-                                    Expanded(
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Text(
-                                                report.id,
-                                                style: AppFonts.displayStyle(
-                                                  fontSize: 11.5,
-                                                  color: AppColors.teal,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 6),
-                                              PriorityBadge(
-                                                breakdown: report.priority,
-                                                bilingual: tr,
-                                                compact: true,
-                                              ),
-                                              const Spacer(),
-                                              Text(
-                                                '×${report.affectedCitizens}',
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: AppColors.muted,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 3),
-                                          Text(
-                                            tr.primary(
-                                              report.khmerTitle,
-                                              report.englishTitle,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.94,
+                                      ),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: AppColors.border,
+                                      ),
+                                      boxShadow: AppColors.cardShadow,
+                                    ),
+                                    child: Text(
+                                      isOverviewZoom
+                                          ? tr.primary(
+                                              'ទូទាំងកម្ពុជា · ${viewportReports.length} របាយការណ៍',
+                                              'All Cambodia · ${viewportReports.length} report(s)',
+                                            )
+                                          : tr.primary(
+                                              'ក្នុងផែនទីនេះ · ${viewportReports.length} របាយការណ៍',
+                                              'In this area · ${viewportReports.length} report(s)',
                                             ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 13.5,
-                                            ),
-                                          ),
-                                          Text(
-                                            tr.primary(
-                                              report.khmerLocation,
-                                              report.englishLocation,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              color: AppColors.muted,
-                                            ),
-                                          ),
-                                        ],
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.ink,
                                       ),
                                     ),
-                                  ],
+                                  ),
+                                ),
+                                SizedBox(
+                                  height: MediaQuery.textScalerOf(context)
+                                      .scale(102)
+                                      .clamp(102.0, 172.0),
+                                  child: PageView.builder(
+                                    key: const Key('map-nearby-carousel'),
+                                    controller: _carouselController,
+                                    itemCount: viewportReports.length,
+                                    onPageChanged: (index) {
+                                      if (index < 0 ||
+                                          index >= viewportReports.length) {
+                                        return;
+                                      }
+                                      HapticFeedback.selectionClick();
+                                      final report = viewportReports[index];
+                                      setState(
+                                        () => _activeReportId = report.id,
+                                      );
+                                      if (_mapReady) {
+                                        final targetZoom =
+                                            _zoom <
+                                                MapClusterService
+                                                    .provinceClusterMaxZoom
+                                            ? _zoom
+                                            : (_zoom >= 13.4 ? _zoom : 15.6);
+                                        _mapController.move(
+                                          report.coordinates,
+                                          targetZoom,
+                                        );
+                                      }
+                                    },
+                                    itemBuilder: (context, index) {
+                                      final report = viewportReports[index];
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                        ),
+                                        child: MergeSemantics(
+                                          child: InkWell(
+                                            onTap: () =>
+                                                _openIncidentSheet(report, tr),
+                                            borderRadius: BorderRadius.circular(
+                                              22,
+                                            ),
+                                            child: Container(
+                                              padding: const EdgeInsets.all(11),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                borderRadius:
+                                                    BorderRadius.circular(22),
+                                                border: Border.all(
+                                                  color:
+                                                      highlightedId == report.id
+                                                      ? AppColors.teal
+                                                      : AppColors.border,
+                                                  width:
+                                                      highlightedId == report.id
+                                                      ? 1.6
+                                                      : 1,
+                                                ),
+                                                boxShadow: AppColors.cardShadow,
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  ReportPhoto(
+                                                    category: report.category,
+                                                    localPhotoPath:
+                                                        report.localPhotoPath,
+                                                    assetPath:
+                                                        report.status ==
+                                                            ReportStatus
+                                                                .resolved
+                                                        ? (report.resolvedAfterAssetPath ??
+                                                              report
+                                                                  .photoAssetPath)
+                                                        : report.photoAssetPath,
+                                                    width: 72,
+                                                    height: 72,
+                                                    borderRadius: 14,
+                                                  ),
+                                                  const SizedBox(width: 11),
+                                                  Expanded(
+                                                    child: Column(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Row(
+                                                          children: [
+                                                            Text(
+                                                              report.id,
+                                                              style: AppFonts.displayStyle(
+                                                                fontSize: 11.5,
+                                                                color: AppColors
+                                                                    .teal,
+                                                              ),
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 6,
+                                                            ),
+                                                            PriorityBadge(
+                                                              breakdown: report
+                                                                  .priority,
+                                                              bilingual: tr,
+                                                              compact: true,
+                                                            ),
+                                                            const Spacer(),
+                                                            Semantics(
+                                                              label: tr.primary(
+                                                                '${report.affectedCitizens} នាក់រងផលប៉ះពាល់',
+                                                                '${report.affectedCitizens} affected citizens',
+                                                              ),
+                                                              excludeSemantics:
+                                                                  true,
+                                                              child: Text(
+                                                                '×${report.affectedCitizens}',
+                                                                style: const TextStyle(
+                                                                  fontSize: 11,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w700,
+                                                                  color:
+                                                                      AppColors
+                                                                          .muted,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 3,
+                                                        ),
+                                                        Text(
+                                                          tr.primary(
+                                                            report.khmerTitle,
+                                                            report.englishTitle,
+                                                          ),
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style:
+                                                              const TextStyle(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                                fontSize: 13.5,
+                                                              ),
+                                                        ),
+                                                        Text(
+                                                          tr.primary(
+                                                            report
+                                                                .khmerLocation,
+                                                            report
+                                                                .englishLocation,
+                                                          ),
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 11,
+                                                                color: AppColors
+                                                                    .muted,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            )
+                          : showEmptyAreaBanner
+                          ? Semantics(
+                              container: true,
+                              liveRegion: true,
+                              child: Padding(
+                                key: const ValueKey('map-empty-area-visible'),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 11,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: AppColors.border),
+                                    boxShadow: AppColors.cardShadow,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.explore_outlined,
+                                        color: AppColors.teal,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          tr.primary(
+                                            'គ្មានរបាយការណ៍ក្នុងតំបន់នេះទេ',
+                                            'No reports in this map area',
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.ink,
+                                          ),
+                                        ),
+                                      ),
+                                      TextButton(
+                                        key: const Key(
+                                          'map-empty-area-all-cambodia-btn',
+                                        ),
+                                        onPressed: _flyToAllCambodia,
+                                        child: Text(
+                                          tr.primary(
+                                            'ទូទាំងកម្ពុជា',
+                                            'All Cambodia',
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.teal,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
+                            )
+                          : const SizedBox.shrink(
+                              key: ValueKey('map-bottom-hidden'),
                             ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else if (showEmptyAreaBanner)
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 16,
-              child: SafeArea(
-                top: false,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 11,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.border),
-                    boxShadow: AppColors.cardShadow,
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.explore_outlined,
-                        color: AppColors.teal,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          tr.primary(
-                            'គ្មានរបាយការណ៍ក្នុងតំបន់នេះទេ',
-                            'No reports in this map area',
-                          ),
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.ink,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        key: const Key('map-empty-area-all-cambodia-btn'),
-                        onPressed: _flyToAllCambodia,
-                        child: Text(
-                          tr.primary('ទូទាំងកម្ពុជា', 'All Cambodia'),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.teal,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -1922,6 +2139,7 @@ class _ProvinceClusterBubble extends StatelessWidget {
   const _ProvinceClusterBubble({
     super.key,
     required this.label,
+    required this.semanticLabel,
     required this.count,
     required this.color,
     required this.countForeground,
@@ -1929,6 +2147,7 @@ class _ProvinceClusterBubble extends StatelessWidget {
   });
 
   final String label;
+  final String semanticLabel;
   final int count;
   final Color color;
   final Color countForeground;
@@ -1936,61 +2155,76 @@ class _ProvinceClusterBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: color, width: 2.2),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 7,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
+    return Semantics(
+      button: true,
+      excludeSemantics: true,
+      label: semanticLabel,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: color, width: 2.2),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x33000000),
+                    blurRadius: 7,
+                    offset: Offset(0, 2),
                   ),
-                ),
+                ],
               ),
-              const SizedBox(width: 5),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '$count',
-                  style: AppFonts.displayStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    color: countForeground,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: AppFonts.displayStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: countForeground,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -2001,47 +2235,59 @@ class _ProvinceClusterBubble extends StatelessWidget {
 class _AreaClusterMarker extends StatelessWidget {
   const _AreaClusterMarker({
     required this.count,
+    required this.semanticLabel,
     required this.color,
     required this.foreground,
     required this.onTap,
   });
 
   final int count;
+  final String semanticLabel;
   final Color color;
   final Color foreground;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.24),
-          shape: BoxShape.circle,
-        ),
-        padding: const EdgeInsets.all(5),
-        child: Container(
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2.5),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 6,
-                offset: Offset(0, 2),
+    return Semantics(
+      button: true,
+      excludeSemantics: true,
+      label: semanticLabel,
+      child: Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.24),
+              shape: BoxShape.circle,
+            ),
+            padding: const EdgeInsets.all(5),
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2.5),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x33000000),
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: Text(
-            '$count',
-            style: AppFonts.displayStyle(
-              color: foreground,
-              fontWeight: FontWeight.w700,
-              fontSize: 12.5,
+              child: Text(
+                '$count',
+                style: AppFonts.displayStyle(
+                  color: foreground,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+              ),
             ),
           ),
         ),
@@ -2053,6 +2299,7 @@ class _AreaClusterMarker extends StatelessWidget {
 class _PriorityMarker extends StatelessWidget {
   const _PriorityMarker({
     required this.label,
+    required this.semanticLabel,
     required this.color,
     required this.foreground,
     required this.onTap,
@@ -2060,6 +2307,7 @@ class _PriorityMarker extends StatelessWidget {
   });
 
   final String label;
+  final String semanticLabel;
   final Color color;
   final Color foreground;
   final VoidCallback onTap;
@@ -2067,31 +2315,41 @@ class _PriorityMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: highlighted ? AppColors.ink : Colors.white,
-            width: highlighted ? 3.5 : 3,
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x33000000),
-              blurRadius: 6,
-              offset: Offset(0, 2),
+    return Semantics(
+      button: true,
+      excludeSemantics: true,
+      label: semanticLabel,
+      child: Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: highlighted ? AppColors.ink : Colors.white,
+                width: highlighted ? 3.5 : 3,
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x33000000),
+                  blurRadius: 6,
+                  offset: Offset(0, 2),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Text(
-          label,
-          style: AppFonts.displayStyle(
-            color: foreground,
-            fontWeight: FontWeight.w700,
-            fontSize: 11,
+            child: Text(
+              label,
+              style: AppFonts.displayStyle(
+                color: foreground,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+              ),
+            ),
           ),
         ),
       ),

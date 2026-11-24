@@ -69,8 +69,11 @@ class PriorityBadge extends StatelessWidget {
           );
 
     return Semantics(
-      label:
-          'Priority ${breakdown.level}, ${bilingual.priorityLevelName(breakdown)}',
+      excludeSemantics: true,
+      label: bilingual.primary(
+        'កម្រិតអាទិភាព P${breakdown.level} ${breakdown.khmerLevelName}',
+        'Priority P${breakdown.level}, ${breakdown.englishLevelName}',
+      ),
       child: content,
     );
   }

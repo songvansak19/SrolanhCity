@@ -6,6 +6,8 @@ import 'package:latlong2/latlong.dart';
 import '../../../../data/repositories/report_repository.dart';
 import '../../../../data/services/audio_recorder_service.dart';
 import '../../../../data/services/civic_ai_service.dart';
+import '../../../../data/services/exif_stripper.dart';
+import '../../../../data/services/ip_geolocation_service.dart';
 import '../../../../data/services/location_service.dart';
 import '../../../../data/services/reverse_geocoding_service.dart';
 import '../../../../data/services/voice_input_service.dart';
@@ -13,6 +15,7 @@ import '../../../../domain/models/cambodia_locations.dart';
 import '../../../../domain/models/report_models.dart';
 import '../../../../domain/models/routing_result.dart';
 import '../../../../domain/services/ai_classifier_service.dart';
+import '../../../../domain/services/anti_spoof_service.dart';
 import '../../../../domain/services/gis_routing_service.dart';
 import '../../../../domain/services/priority_calculator.dart';
 
@@ -26,9 +29,12 @@ class ReportWizardViewModel extends ChangeNotifier {
     VoiceInputService? voiceInputService,
     AudioRecorderService? audioRecorderService,
     CivicAiService? civicAiService,
+    IpGeolocationService? ipGeolocationService,
   }) : _voiceService = voiceInputService ?? SpeechToTextVoiceInputService(),
        _audioRecorder = audioRecorderService ?? RecordAudioRecorderService(),
        _civicAiService = civicAiService ?? BackendCivicAiService(),
+       _ipGeoService =
+           ipGeolocationService ?? HttpIpGeolocationService.instance,
        _step = initialDraft != null ? 1 : 0,
        _category = initialDraft?.category ?? initialCategory,
        _severity = initialDraft?.severity ?? 3,
@@ -41,6 +47,8 @@ class ReportWizardViewModel extends ChangeNotifier {
          initialDraft?.localPhotoPaths ?? const <String>[],
        ),
        _voiceTranscript = initialDraft?.voiceTranscript,
+       _voiceAudioPath = initialDraft?.voiceAudioPath,
+       _voiceAudioDurationSeconds = initialDraft?.voiceAudioDurationSeconds,
        _voicePreferEnglish = repository.settings.englishFirst,
        _pinLocation =
            initialCoordinates ??
@@ -61,6 +69,7 @@ class ReportWizardViewModel extends ChangeNotifier {
   final VoiceInputService _voiceService;
   final AudioRecorderService _audioRecorder;
   final CivicAiService _civicAiService;
+  final IpGeolocationService _ipGeoService;
 
   int _step;
   IssueCategory _category;
@@ -70,6 +79,7 @@ class ReportWizardViewModel extends ChangeNotifier {
   String _description;
   bool _descriptionEditedByUser;
   final List<String> _localPhotoPaths;
+  PhotoExifMetadata? _photoExifMetadata;
   PhotoAiAnalysis _photoAi = PhotoAiAnalysis.noPhoto;
   int _photoAnalysisGeneration = 0;
 
@@ -81,6 +91,8 @@ class ReportWizardViewModel extends ChangeNotifier {
   bool _isOutsideCambodia = false;
   LatLng? _rawOutsideGps;
   bool _isLocating = false;
+  String? _ipCountryCode;
+  bool _checkedIpGeo = false;
 
   bool _isInitializingVoice = false;
   bool _isRecordingVoice = false;
@@ -92,9 +104,12 @@ class ReportWizardViewModel extends ChangeNotifier {
   double _peakMicLevel = 0.0;
   int _recordingSeconds = 0;
   String? _voiceTranscript;
+  String? _voiceAudioPath;
+  int? _voiceAudioDurationSeconds;
   String? _voiceFeedbackKhmer;
   String? _voiceFeedbackEnglish;
   bool _showVoiceDemoFallbackAction = false;
+  bool _showVoiceMemoFallbackAction = false;
   bool _receivedSpeechInSession = false;
   Timer? _voiceTimer;
   Timer? _amplitudeTimer;
@@ -117,6 +132,7 @@ class ReportWizardViewModel extends ChangeNotifier {
   int get remainingPhotoSlots =>
       (maxPhotos - _localPhotoPaths.length).clamp(0, maxPhotos);
   bool get canAddMorePhotos => _localPhotoPaths.length < maxPhotos;
+  PhotoExifMetadata? get photoExifMetadata => _photoExifMetadata;
   PhotoAiAnalysis get photoAi => _photoAi;
   bool get isBackendAiAvailable => _civicAiService.isBackendConfigured;
 
@@ -128,6 +144,33 @@ class ReportWizardViewModel extends ChangeNotifier {
   bool get isOutsideCambodia => _isOutsideCambodia;
   LatLng? get rawOutsideGps => _rawOutsideGps;
   bool get isLocating => _isLocating;
+  String? get ipCountryCode => _ipCountryCode;
+
+  /// Layer 4 pre-strip photo EXIF assessment against the current pin.
+  SpoofAssessment get photoExifAssessment => AntiSpoofService.evaluatePhotoExif(
+    exif: _photoExifMetadata,
+    pinnedLocation: _pinLocation,
+  );
+
+  /// Layer 5 non-blocking IP country check against Cambodia.
+  SpoofAssessment get ipIntegrityAssessment =>
+      AntiSpoofService.evaluateIpGeo(ipCountryCode: _ipCountryCode);
+
+  /// Combined Step 3 integrity assessment (EXIF + IP).
+  SpoofAssessment get combinedIntegrityAssessment => AntiSpoofService.combine(
+    <SpoofAssessment>[photoExifAssessment, ipIntegrityAssessment],
+  );
+
+  /// Whether the attached photo has EXIF coordinates inside Cambodia that can
+  /// be applied with 1 tap when the pin mismatches.
+  bool get canApplyPhotoExifLocation {
+    final coords = _photoExifMetadata?.coordinates;
+    if (coords == null) return false;
+    return LocationService.isInsideCambodia(coords) &&
+        photoExifAssessment.reasons.contains(
+          SpoofSignalReason.photoExifLocationMismatch,
+        );
+  }
 
   bool get isInitializingVoice => _isInitializingVoice;
   bool get isRecordingVoice => _isRecordingVoice;
@@ -138,14 +181,20 @@ class ReportWizardViewModel extends ChangeNotifier {
   double get voiceSoundLevel => _voiceSoundLevel;
   int get recordingSeconds => _recordingSeconds;
   String? get voiceTranscript => _voiceTranscript;
+  String? get voiceAudioPath => _voiceAudioPath;
+  int? get voiceAudioDurationSeconds => _voiceAudioDurationSeconds;
+  bool get hasVoiceAudioMemo =>
+      _voiceAudioPath != null && _voiceAudioPath!.isNotEmpty;
   String? get voiceFeedbackKhmer => _voiceFeedbackKhmer;
   String? get voiceFeedbackEnglish => _voiceFeedbackEnglish;
   bool get showVoiceDemoFallbackAction => _showVoiceDemoFallbackAction;
+  bool get showVoiceMemoFallbackAction => _showVoiceMemoFallbackAction;
 
   bool get hasUnsavedChanges =>
       _descriptionEditedByUser ||
       _localPhotoPaths.isNotEmpty ||
       _voiceTranscript != null ||
+      hasVoiceAudioMemo ||
       _severity != 3;
 
   /// Honest text-keyword classification strictly over citizen-entered text.
@@ -193,6 +242,8 @@ class ReportWizardViewModel extends ChangeNotifier {
     isAnonymous: _isAnonymous,
     localPhotoPaths: List<String>.of(_localPhotoPaths),
     voiceTranscript: _voiceTranscript,
+    voiceAudioPath: _voiceAudioPath,
+    voiceAudioDurationSeconds: _voiceAudioDurationSeconds,
   );
 
   void saveDraft() => repository.saveDraft(toDraft());
@@ -201,6 +252,9 @@ class ReportWizardViewModel extends ChangeNotifier {
     if (_step < 2) {
       _step++;
       notifyListeners();
+      if (_step == 2) {
+        unawaited(refreshIpIntegrityCheck());
+      }
     }
   }
 
@@ -275,22 +329,62 @@ class ReportWizardViewModel extends ChangeNotifier {
 
   void toggleVoiceLanguage() => setVoicePreferEnglish(!_voicePreferEnglish);
 
-  bool addLocalPhotoPath(String path) {
+  /// Records pre-strip EXIF metadata extracted in memory from a citizen photo.
+  void setPhotoExifMetadata(PhotoExifMetadata? exif) {
+    if (exif == null || exif.isEmpty) return;
+    _photoExifMetadata = exif;
+    notifyListeners();
+  }
+
+  /// Snaps the Step 3 map pin to the attached photo's original EXIF GPS fix
+  /// when inside Cambodia.
+  LatLng? applyPhotoExifLocation() {
+    final coords = _photoExifMetadata?.coordinates;
+    if (coords == null || !LocationService.isInsideCambodia(coords)) {
+      return null;
+    }
+    setPinLocation(coords, verified: true, fromLiveGps: false);
+    return coords;
+  }
+
+  /// Runs non-blocking Layer 5 IP-country check when online (fails open).
+  Future<void> refreshIpIntegrityCheck({bool force = false}) async {
+    if (!repository.isOnline) return;
+    if (_checkedIpGeo && !force) return;
+    _checkedIpGeo = true;
+    final info = await _ipGeoService.lookupCurrentIp();
+    if (_disposed) return;
+    if (info != null && info.countryCode.isNotEmpty) {
+      _ipCountryCode = info.countryCode;
+      notifyListeners();
+    }
+  }
+
+  bool addLocalPhotoPath(String path, {PhotoExifMetadata? exifMetadata}) {
     if (path.isEmpty) return false;
     if (_localPhotoPaths.length >= maxPhotos) return false;
     _localPhotoPaths.add(path);
+    if (exifMetadata != null && !exifMetadata.isEmpty) {
+      _photoExifMetadata = exifMetadata;
+    }
     notifyListeners();
     unawaited(analyzeLatestPhoto());
     return true;
   }
 
-  int addLocalPhotoPaths(Iterable<String> paths) {
+  int addLocalPhotoPaths(
+    Iterable<String> paths, {
+    PhotoExifMetadata? exifMetadata,
+  }) {
     var added = 0;
     for (final path in paths) {
       if (path.isEmpty) continue;
       if (_localPhotoPaths.length >= maxPhotos) break;
       _localPhotoPaths.add(path);
       added++;
+    }
+    if (exifMetadata != null && !exifMetadata.isEmpty) {
+      _photoExifMetadata = exifMetadata;
     }
     if (added > 0) {
       notifyListeners();
@@ -303,6 +397,7 @@ class ReportWizardViewModel extends ChangeNotifier {
     if (index < 0 || index >= _localPhotoPaths.length) return;
     _localPhotoPaths.removeAt(index);
     if (_localPhotoPaths.isEmpty) {
+      _photoExifMetadata = null;
       _photoAnalysisGeneration++;
       _photoAi = PhotoAiAnalysis.noPhoto;
     } else {
@@ -313,8 +408,6 @@ class ReportWizardViewModel extends ChangeNotifier {
 
   /// Runs backend AI classification (`hackathonshow.md §4 Step 1`) on the
   /// latest user-attached photo combined with any Khmer/English description.
-  /// While no backend server is connected yet, stays cleanly in draft state
-  /// ([PhotoAiStatus.awaitingBackend]) without faking detections.
   Future<void> analyzeLatestPhoto({bool forceRefresh = false}) async {
     final photoPath = latestLocalPhotoPath;
     if (photoPath == null) {
@@ -431,7 +524,7 @@ class ReportWizardViewModel extends ChangeNotifier {
 
   // ---------------------------------------------------------------------------
   // Telegram-style Hold-to-Speak & Tap-to-Toggle Hybrid Khmer/EN Voice Note
-  // (`hackathonshow.md §5`)
+  // (`hackathonshow.md §5`) + Real Offline Voice Memo Recording
   // ---------------------------------------------------------------------------
 
   Future<void> startHoldVoiceRecording() async {
@@ -454,7 +547,8 @@ class ReportWizardViewModel extends ChangeNotifier {
     if (!_isHoldRecording && !_isRecordingVoice) return;
     _isHoldRecording = false;
     _stopAllVoiceTimers();
-    if (_voiceMode == VoiceCaptureMode.backendAudio) {
+    if (_voiceMode == VoiceCaptureMode.backendAudio ||
+        _voiceMode == VoiceCaptureMode.offlineAudioMemo) {
       await _audioRecorder.cancelAndDelete();
     } else if (_voiceMode == VoiceCaptureMode.deviceSpeech) {
       await _voiceService.cancel();
@@ -477,6 +571,21 @@ class ReportWizardViewModel extends ChangeNotifier {
     await _startVoiceSession();
   }
 
+  /// Explicitly starts a local audio voice memo (used both automatically when
+  /// offline and as a 1-tap fallback when Brave blocks Web Speech API online).
+  Future<void> startOfflineVoiceMemoRecording() async {
+    if (_isInitializingVoice || _isRecordingVoice || _isTranscribingVoice) {
+      return;
+    }
+    _isHoldRecording = false;
+    _clearVoiceFeedback();
+    _receivedSpeechInSession = false;
+    _recordingSeconds = 0;
+    _voiceSoundLevel = 0.0;
+    _peakMicLevel = 0.0;
+    await _startLocalAudioMemoSession(isOfflineMode: !repository.isOnline);
+  }
+
   Future<void> _startVoiceSession() async {
     _clearVoiceFeedback();
     _receivedSpeechInSession = false;
@@ -484,12 +593,21 @@ class ReportWizardViewModel extends ChangeNotifier {
     _voiceSoundLevel = 0.0;
     _peakMicLevel = 0.0;
 
+    // Tier 0 (Offline): Live Web Speech requires internet — immediately record
+    // a real local offline voice memo with clear bilingual offline notice!
+    if (!repository.isOnline) {
+      await _startLocalAudioMemoSession(isOfflineMode: true);
+      return;
+    }
+
     // Tier 1: SrolanhCity backend AI transcription when server is connected.
-    if (repository.isOnline && _civicAiService.isBackendConfigured) {
+    if (_civicAiService.isBackendConfigured) {
       _isInitializingVoice = true;
       notifyListeners();
 
-      final started = await _audioRecorder.startRecording();
+      final started = await _audioRecorder.startRecording(
+        persistentMemo: false,
+      );
       if (_disposed) return;
       _isInitializingVoice = false;
 
@@ -509,14 +627,57 @@ class ReportWizardViewModel extends ChangeNotifier {
       // If hardware recorder couldn't start, fall through to on-device STT.
     }
 
-    // Tier 2: On-device speech_to_text while backend is offline / not deployed.
+    // Tier 2: On-device / Web Speech API while backend is not deployed.
     await _startDeviceSpeechSession();
+  }
+
+  Future<void> _startLocalAudioMemoSession({
+    required bool isOfflineMode,
+  }) async {
+    _isInitializingVoice = true;
+    notifyListeners();
+
+    final started = await _audioRecorder.startRecording(persistentMemo: true);
+    if (_disposed) return;
+    _isInitializingVoice = false;
+
+    if (started) {
+      _voiceMode = VoiceCaptureMode.offlineAudioMemo;
+      _isRecordingVoice = true;
+      if (isOfflineMode) {
+        _setVoiceFeedback(
+          khmer: 'គ្មានអ៊ីនធឺណិត — កំពុងថតសំឡេងរក្សាទុកក្រៅបណ្តាញ (នឹងផ្ញើស្វ័យប្រវត្តិពេលមានអ៊ីនធឺណិត)',
+          english: 'Offline — recording local voice memo (auto-syncs when back online).',
+        );
+      }
+      _startDurationTimer(autoStopAtMax: true);
+      _amplitudeTimer?.cancel();
+      _amplitudeTimer = Timer.periodic(
+        const Duration(milliseconds: 120),
+        (_) => unawaited(_pollRecorderAmplitude()),
+      );
+      notifyListeners();
+      return;
+    }
+
+    // Microphone permission denied or unavailable offline.
+    _setVoiceFeedback(
+      khmer: isOfflineMode
+          ? 'ការបំប្លែងសំឡេងជាអក្សរត្រូវការអ៊ីនធឺណិត ហើយមីក្រូហ្វូនមិនអាចបើកបានទេ — សូមវាយអក្សរ ឬជ្រើសស្លាករហ័ស'
+          : 'មិនអាចបើកមីក្រូហ្វូនថតសំឡេងបានទេ — សូមពិនិត្យសិទ្ធិមីក្រូហ្វូន ឬវាយអក្សរផ្ទាល់',
+      english: isOfflineMode
+          ? 'Voice-to-text requires internet and microphone access failed — type your note or tap quick tags offline.'
+          : 'Could not start voice memo recording — check microphone permission or type manually.',
+      offerDemoFallback: true,
+    );
+    notifyListeners();
   }
 
   Future<void> _pollRecorderAmplitude() async {
     if (_disposed ||
         !_isRecordingVoice ||
-        _voiceMode != VoiceCaptureMode.backendAudio) {
+        (_voiceMode != VoiceCaptureMode.backendAudio &&
+            _voiceMode != VoiceCaptureMode.offlineAudioMemo)) {
       return;
     }
     final level = await _audioRecorder.getNormalizedAmplitude();
@@ -559,9 +720,10 @@ class ReportWizardViewModel extends ChangeNotifier {
 
     if (!available) {
       _setVoiceFeedback(
-        khmer: 'ឧបករណ៍នេះមិនមានសេវាស្តាប់សំឡេងទេ — អ្នកអាចវាយអក្សរ ឬចុច "សាកល្បងសំឡេង"',
-        english: 'Device speech recognition is unavailable — type your note or tap "Try Sample".',
+        khmer: 'ឧបករណ៍នេះមិនមានសេវាបំប្លែងសំឡេងជាអក្សរទេ — អ្នកអាចថតសំឡេងផ្ទាល់ វាយអក្សរ ឬសាកល្បងសំឡេង',
+        english: 'Live speech-to-text is unavailable here — record a local Voice Memo, type your note, or tap "Try Sample".',
         offerDemoFallback: true,
+        offerMemoFallback: true,
       );
       notifyListeners();
       return;
@@ -575,9 +737,10 @@ class ReportWizardViewModel extends ChangeNotifier {
 
       if (!resolution.exactLanguageAvailable && !_voicePreferEnglish) {
         _setVoiceFeedback(
-          khmer: 'ឧបករណ៍នេះមិនមានកញ្ចប់សំឡេងខ្មែរទេ — សូមប្តូរទៅ EN ឬចុច "សាកល្បងសំឡេង"',
-          english: 'Khmer speech pack is not installed on this device — switch to EN or tap "Try Sample".',
+          khmer: 'ឧបករណ៍នេះមិនមានកញ្ចប់សំឡេងខ្មែរទេ — សូមប្តូរទៅ EN ថតសំឡេងផ្ទាល់ ឬចុច "សាកល្បងសំឡេង"',
+          english: 'Khmer speech pack is not installed on this device — switch to EN, record a Voice Memo, or tap "Try Sample".',
           offerDemoFallback: true,
+          offerMemoFallback: true,
         );
       }
 
@@ -627,6 +790,7 @@ class ReportWizardViewModel extends ChangeNotifier {
         khmer: 'មិនអាចបើកមីក្រូហ្វូនបានទេ — សូមពិនិត្យសិទ្ធិមីក្រូហ្វូន ឬប្រើសំឡេងសាកល្បង',
         english: 'Could not start microphone — check mic permission or try Sample voice.',
         offerDemoFallback: true,
+        offerMemoFallback: true,
       );
       notifyListeners();
     }
@@ -665,6 +829,11 @@ class ReportWizardViewModel extends ChangeNotifier {
     _amplitudeTimer?.cancel();
     _amplitudeTimer = null;
 
+    if (_voiceMode == VoiceCaptureMode.offlineAudioMemo) {
+      await _finishLocalAudioMemoRecording();
+      return;
+    }
+
     if (_voiceMode == VoiceCaptureMode.backendAudio) {
       await _finishBackendAudioRecording();
       return;
@@ -680,6 +849,36 @@ class ReportWizardViewModel extends ChangeNotifier {
     }
 
     _finishDemoRecording();
+  }
+
+  Future<void> _finishLocalAudioMemoRecording() async {
+    final durationSecs = _recordingSeconds < 1 ? 1 : _recordingSeconds;
+    _isRecordingVoice = false;
+    _isHoldRecording = false;
+    _voiceSoundLevel = 0.0;
+
+    final audioPath = await _audioRecorder.stopRecording();
+    if (_disposed) {
+      return;
+    }
+
+    if (audioPath == null || audioPath.isEmpty) {
+      _setNoSpeechFeedback();
+      notifyListeners();
+      return;
+    }
+
+    _voiceAudioPath = audioPath;
+    _voiceAudioDurationSeconds = durationSecs;
+    _setVoiceFeedback(
+      khmer: repository.isOnline
+          ? 'បានភ្ជាប់កំណត់ត្រាសំឡេង (0:${durationSecs.toString().padLeft(2, '0')}) រួចរាល់!'
+          : 'បានរក្សាទុកសំឡេងក្រៅបណ្តាញ (0:${durationSecs.toString().padLeft(2, '0')}) — នឹងផ្ញើស្វ័យប្រវត្តិពេលមានអ៊ីនធឺណិត',
+      english: repository.isOnline
+          ? 'Attached voice memo (0:${durationSecs.toString().padLeft(2, '0')})!'
+          : 'Saved offline voice memo (0:${durationSecs.toString().padLeft(2, '0')}) — auto-syncs when online.',
+    );
+    notifyListeners();
   }
 
   Future<void> _finishBackendAudioRecording() async {
@@ -812,6 +1011,16 @@ class ReportWizardViewModel extends ChangeNotifier {
 
   void _setVoiceFeedbackForError(String errorMsg) {
     final lower = errorMsg.toLowerCase();
+    if (!repository.isOnline) {
+      _setVoiceFeedback(
+        khmer:
+            'គ្មានអ៊ីនធឺណិត — សូមចុច "ថតសំឡេងផ្ទាល់" វាយអក្សរ ឬជ្រើសស្លាករហ័ស',
+        english: 'Offline — live speech-to-text requires internet. Tap "Record Voice Memo", type, or use quick tags.',
+        offerDemoFallback: true,
+        offerMemoFallback: true,
+      );
+      return;
+    }
     if (lower.contains('permission') || lower.contains('not-allowed')) {
       _setVoiceFeedback(
         khmer: 'ត្រូវការសិទ្ធិមីក្រូហ្វូនដើម្បីរាយការណ៍ជាសំឡេង',
@@ -821,15 +1030,17 @@ class ReportWizardViewModel extends ChangeNotifier {
     } else if (lower.contains('service-not-allowed') ||
         lower.contains('network')) {
       _setVoiceFeedback(
-        khmer: 'កម្មវិធីរុករក (ដូចជា Brave) ឬបណ្តាញបានបិទសេវាសំឡេង — សូមសាកល្បង Chrome/Safari វាយអក្សរ ឬចុច "សាកល្បងសំឡេង"',
-        english: 'Browser/network blocked speech service (e.g., Brave Shields) — try Chrome/Safari, type your note, or tap "Try Sample".',
+        khmer: 'កម្មវិធីរុករក (ដូចជា Brave) ឬបណ្តាញបានបិទសេវាបំប្លែងសំឡេង — ចុច "ថតសំឡេងផ្ទាល់" ដើម្បីថតសំឡេងពិត ឬវាយអក្សរ',
+        english: 'Browser/network blocked speech-to-text (e.g., Brave Shields) — tap "Record Voice Memo" to record real audio, or type your note.',
         offerDemoFallback: true,
+        offerMemoFallback: true,
       );
     } else if (lower.contains('language')) {
       _setVoiceFeedback(
-        khmer: 'ឧបករណ៍នេះមិនគាំទ្រភាសាខ្មែរសម្រាប់សំឡេងទេ — សូមប្តូរទៅ EN ឬចុច "សាកល្បងសំឡេង"',
-        english: 'Selected speech language is unavailable on this device — switch to EN or tap "Try Sample".',
+        khmer: 'ឧបករណ៍នេះមិនគាំទ្រភាសាខ្មែរសម្រាប់សំឡេងទេ — ប្តូរទៅ EN ឬចុច "ថតសំឡេងផ្ទាល់"',
+        english: 'Selected speech language is unavailable on this device — switch to EN or tap "Record Voice Memo".',
         offerDemoFallback: true,
+        offerMemoFallback: true,
       );
     } else {
       _setNoSpeechFeedback();
@@ -840,16 +1051,19 @@ class ReportWizardViewModel extends ChangeNotifier {
     required String khmer,
     required String english,
     bool offerDemoFallback = false,
+    bool offerMemoFallback = false,
   }) {
     _voiceFeedbackKhmer = khmer;
     _voiceFeedbackEnglish = english;
     _showVoiceDemoFallbackAction = offerDemoFallback;
+    _showVoiceMemoFallbackAction = offerMemoFallback;
   }
 
   void _clearVoiceFeedback() {
     _voiceFeedbackKhmer = null;
     _voiceFeedbackEnglish = null;
     _showVoiceDemoFallbackAction = false;
+    _showVoiceMemoFallbackAction = false;
   }
 
   void _stopAllVoiceTimers() {
@@ -867,6 +1081,17 @@ class ReportWizardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearVoiceAudioMemo() {
+    final oldPath = _voiceAudioPath;
+    _voiceAudioPath = null;
+    _voiceAudioDurationSeconds = null;
+    _clearVoiceFeedback();
+    if (oldPath != null && !oldPath.startsWith('data:')) {
+      unawaited(_audioRecorder.deleteFile(oldPath));
+    }
+    notifyListeners();
+  }
+
   ReportSubmissionResult submit({
     bool forceCreateNew = false,
     String? customTitle,
@@ -881,6 +1106,8 @@ class ReportWizardViewModel extends ChangeNotifier {
       localPhotoPath: localPhotoPath,
       additionalLocalPhotoPaths: additionalLocalPhotoPaths,
       voiceTranscript: _voiceTranscript,
+      voiceAudioPath: _voiceAudioPath,
+      voiceAudioDurationSeconds: _voiceAudioDurationSeconds,
       geocodedPlace: _geocodedPlace,
       forceCreateNew: forceCreateNew,
     );

@@ -1,127 +1,67 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
-
 import 'file_helper.dart';
+import 'web_audio_memo_recorder.dart';
 
 /// Injectable microphone audio recorder contract for capturing short citizen
-/// voice reports (`hackathonshow.md §5`) as universally accepted 16 kHz mono WAV
-/// files for Free-Tier Gemini multimodal transcription.
+/// voice reports (`hackathonshow.md §5`) — used both for backend AI audio
+/// transcription and for real offline local voice memos on Web & Mobile.
 abstract class AudioRecorderService {
   Future<bool> hasPermission();
 
-  /// Starts recording into a temporary `.wav` file and returns `true` on success.
-  Future<bool> startRecording();
+  /// Starts recording into a temporary file (for AI transcription) or a
+  /// persistent offline audio memo (data URI on Web / `.m4a` on Native).
+  Future<bool> startRecording({bool persistentMemo = false});
 
   /// Returns current microphone input loudness normalized to `0.0..1.0`.
   Future<double> getNormalizedAmplitude();
 
-  /// Stops recording and returns the path to the recorded `.wav` file (or `null`).
+  /// Stops recording and returns the path/data-URI to the recorded clip.
   Future<String?> stopRecording();
 
-  /// Cancels any active recording and deletes the temporary audio file.
+  /// Cancels any active recording and deletes any temporary audio file.
   Future<void> cancelAndDelete();
 
-  /// Deletes a recorded temporary audio file safely after transcription.
+  /// Deletes a recorded audio file safely.
   Future<void> deleteFile(String? path);
 
   Future<void> dispose();
 }
 
-/// Real device microphone implementation backed by `package:record`.
-///
-/// Instantiates [AudioRecorder] lazily so constructing a ViewModel in widget
-/// tests or screens that never tap the mic never touches platform channels.
+/// Real device microphone implementation supporting both Native (`record`) and
+/// Web PWA (`MediaRecorder` + `AnalyserNode`).
 class RecordAudioRecorderService implements AudioRecorderService {
-  AudioRecorder? _recorder;
-  String? _currentPath;
+  PlatformAudioMemoRecorder? _platform;
 
-  AudioRecorder _ensureRecorder() => _recorder ??= AudioRecorder();
-
-  @override
-  Future<bool> hasPermission() async {
-    try {
-      return await _ensureRecorder().hasPermission().timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => false,
-      );
-    } catch (_) {
-      return false;
-    }
-  }
+  PlatformAudioMemoRecorder _ensurePlatform() =>
+      _platform ??= PlatformAudioMemoRecorder();
 
   @override
-  Future<bool> startRecording() async {
-    if (kIsWeb) return false;
-    try {
-      final permitted = await hasPermission();
-      if (!permitted) return false;
+  Future<bool> hasPermission() => _ensurePlatform().hasPermission();
 
-      final tempDir = await getTemporaryDirectory();
-      final path =
-          '${tempDir.path}/srolanh_voice_${DateTime.now().microsecondsSinceEpoch}.wav';
-      _currentPath = path;
-
-      await _ensureRecorder().start(
-        const RecordConfig(
-          encoder: AudioEncoder.wav,
-          sampleRate: 16000,
-          numChannels: 1,
-        ),
-        path: path,
-      );
-      return true;
-    } catch (_) {
-      await deleteFile(_currentPath);
-      _currentPath = null;
-      return false;
-    }
-  }
+  @override
+  Future<bool> startRecording({bool persistentMemo = false}) =>
+      _ensurePlatform().start(persistentMemo: persistentMemo);
 
   @override
   Future<double> getNormalizedAmplitude() async {
-    final rec = _recorder;
-    if (rec == null) return 0.0;
-    try {
-      final amp = await rec.getAmplitude();
-      // dBFS typically ranges from -60 (digital silence) to 0 (clipping).
-      final db = amp.current;
-      if (!db.isFinite || db <= -55.0) return 0.0;
-      return ((db + 55.0) / 55.0).clamp(0.0, 1.0);
-    } catch (_) {
-      return 0.0;
-    }
+    final p = _platform;
+    if (p == null) return 0.0;
+    return p.getNormalizedAmplitude();
   }
 
   @override
   Future<String?> stopRecording() async {
-    final rec = _recorder;
-    if (rec == null) return null;
-    try {
-      final path = await rec.stop();
-      final resolved = (path != null && path.isNotEmpty) ? path : _currentPath;
-      _currentPath = null;
-      return resolved;
-    } catch (_) {
-      await deleteFile(_currentPath);
-      _currentPath = null;
-      return null;
-    }
+    final p = _platform;
+    if (p == null) return null;
+    return p.stop();
   }
 
   @override
   Future<void> cancelAndDelete() async {
-    final rec = _recorder;
-    final path = _currentPath;
-    _currentPath = null;
-    try {
-      if (rec != null && await rec.isRecording()) {
-        await rec.cancel();
-      }
-    } catch (_) {}
-    await deleteFile(path);
+    final p = _platform;
+    if (p == null) return;
+    await p.cancelAndDelete();
   }
 
   @override
@@ -129,13 +69,10 @@ class RecordAudioRecorderService implements AudioRecorderService {
 
   @override
   Future<void> dispose() async {
-    await cancelAndDelete();
-    final rec = _recorder;
-    _recorder = null;
-    if (rec != null) {
-      try {
-        await rec.dispose();
-      } catch (_) {}
+    final p = _platform;
+    _platform = null;
+    if (p != null) {
+      await p.dispose();
     }
   }
 }

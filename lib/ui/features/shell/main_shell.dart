@@ -5,6 +5,7 @@ import '../../../domain/models/report_models.dart';
 import '../../core/l10n.dart';
 import '../../core/report_scope.dart';
 import '../../core/theme.dart';
+import '../../core/widgets/motion.dart';
 import '../../core/widgets/offline_sync_banner.dart';
 import '../alerts/alerts_page.dart';
 import '../home/home_page.dart';
@@ -41,7 +42,7 @@ class _MainShellState extends State<MainShell> {
   }) async {
     HapticFeedback.mediumImpact();
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
+      SrolanhSlideUpRoute<void>(
         builder: (_) => ReportWizardPage(
           initialCategory: draft?.category ?? initialCategory,
           initialDraft: draft,
@@ -89,6 +90,8 @@ class _MainShellState extends State<MainShell> {
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
 
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+
     Widget buildBodyStack() {
       return Column(
         children: [
@@ -97,7 +100,20 @@ class _MainShellState extends State<MainShell> {
             child: MediaQuery.removePadding(
               context: context,
               removeTop: showBanner,
-              child: IndexedStack(index: _index, children: pages),
+              child: IndexedStack(
+                index: _index,
+                children: [
+                  for (var i = 0; i < pages.length; i++)
+                    AnimatedOpacity(
+                      opacity: _index == i ? 1.0 : 0.0,
+                      duration: reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      child: pages[i],
+                    ),
+                ],
+              ),
             ),
           ),
         ],
@@ -214,8 +230,8 @@ class _SrolanhBottomBar extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: SizedBox(
-          height: 68,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 68),
           child: Row(
             children: [
               _NavSlot(
@@ -223,6 +239,7 @@ class _SrolanhBottomBar extends StatelessWidget {
                 selectedIcon: Icons.home_rounded,
                 label: tr.primary('ទំព័រដើម', 'Home'),
                 selected: selectedIndex == 0,
+                tr: tr,
                 onTap: () => onSelectTab(0),
               ),
               _NavSlot(
@@ -230,31 +247,37 @@ class _SrolanhBottomBar extends StatelessWidget {
                 selectedIcon: Icons.map_rounded,
                 label: tr.primary('ផែនទី', 'Map'),
                 selected: selectedIndex == 1,
+                tr: tr,
                 onTap: () => onSelectTab(1),
               ),
               Expanded(
                 child: Center(
-                  child: Semantics(
-                    button: true,
-                    label: tr.primary('រាយការណ៍បញ្ហា', 'Report issue'),
-                    child: Tooltip(
-                      message: tr.primary('រាយការណ៍បញ្ហា', 'Report issue'),
-                      child: InkWell(
-                        key: const Key('center-report-fab'),
-                        onTap: onTapReport,
-                        customBorder: const CircleBorder(),
-                        child: Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: AppColors.teal,
-                            shape: BoxShape.circle,
-                            boxShadow: AppColors.fabShadow,
-                          ),
-                          child: const Icon(
-                            Icons.add_rounded,
-                            color: Colors.white,
-                            size: 30,
+                  heightFactor: 1.0,
+                  child: Tooltip(
+                    message: tr.primary('រាយការណ៍បញ្ហា', 'Report issue'),
+                    excludeFromSemantics: true,
+                    child: Semantics(
+                      button: true,
+                      excludeSemantics: true,
+                      label: tr.primary('រាយការណ៍បញ្ហា', 'Report issue'),
+                      child: PressableScale(
+                        child: InkWell(
+                          key: const Key('center-report-fab'),
+                          onTap: onTapReport,
+                          customBorder: const CircleBorder(),
+                          child: Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              color: AppColors.teal,
+                              shape: BoxShape.circle,
+                              boxShadow: AppColors.fabShadow,
+                            ),
+                            child: const Icon(
+                              Icons.add_rounded,
+                              color: Colors.white,
+                              size: 30,
+                            ),
                           ),
                         ),
                       ),
@@ -268,6 +291,7 @@ class _SrolanhBottomBar extends StatelessWidget {
                 label: tr.primary('ដំណឹង', 'Alerts'),
                 selected: selectedIndex == 2,
                 badgeCount: unreadCount,
+                tr: tr,
                 onTap: () => onSelectTab(2),
               ),
               _NavSlot(
@@ -275,6 +299,7 @@ class _SrolanhBottomBar extends StatelessWidget {
                 selectedIcon: Icons.person_rounded,
                 label: tr.primary('គណនី', 'Profile'),
                 selected: selectedIndex == 3,
+                tr: tr,
                 onTap: () => onSelectTab(3),
               ),
             ],
@@ -291,6 +316,7 @@ class _NavSlot extends StatelessWidget {
     required this.selectedIcon,
     required this.label,
     required this.selected,
+    required this.tr,
     required this.onTap,
     this.badgeCount = 0,
   });
@@ -299,6 +325,7 @@ class _NavSlot extends StatelessWidget {
   final IconData selectedIcon;
   final String label;
   final bool selected;
+  final Bilingual tr;
   final VoidCallback onTap;
   final int badgeCount;
 
@@ -319,31 +346,65 @@ class _NavSlot extends StatelessWidget {
       );
     }
 
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final semanticLabel = badgeCount > 0
+        ? tr.primary(
+            '$label ($badgeCount មិនទាន់អាន)',
+            '$label ($badgeCount unread)',
+          )
+        : label;
+
     return Expanded(
       child: Semantics(
         button: true,
         selected: selected,
-        label: badgeCount > 0 ? '$label ($badgeCount unread)' : label,
+        excludeSemantics: true,
+        label: semanticLabel,
         child: InkWell(
           onTap: onTap,
-          child: SizedBox(
-            height: 68,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                iconWidget,
-                const SizedBox(height: 3),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 10.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 68),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 190),
+                    curve: Curves.easeOutCubic,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: selected ? 14 : 6,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected ? AppColors.tealSoft : Colors.transparent,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: AnimatedScale(
+                      scale: selected ? 1.06 : 1.0,
+                      duration: reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 190),
+                      curve: Curves.easeOutCubic,
+                      child: iconWidget,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 10.5,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

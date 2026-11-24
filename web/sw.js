@@ -5,7 +5,7 @@
 // fonts, and recently visited OpenStreetMap tiles so the installed PWA launches
 // reliably even in Airplane Mode.
 
-const APP_CACHE = 'srolanhcity-app-v2';
+const APP_CACHE = 'srolanhcity-app-v3';
 const TILE_CACHE = 'srolanhcity-tiles-v1';
 const MAX_CACHED_TILES = 250;
 
@@ -173,9 +173,12 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Never intercept live geocoding or backend API calls.
+  // Never intercept live geocoding, translation, IP-geo, or backend API calls.
   if (
     url.hostname === 'nominatim.openstreetmap.org' ||
+    url.hostname === 'ipwho.is' ||
+    url.hostname === 'translate.googleapis.com' ||
+    url.hostname === 'api.mymemory.translated.net' ||
     url.pathname.includes('/api/')
   ) {
     return;

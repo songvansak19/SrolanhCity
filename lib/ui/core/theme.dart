@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'widgets/motion.dart';
+
 /// Design tokens converted directly from SrolanhCity UX/UI Design Board
 /// (khmer-response-studio.lovable.app).
 abstract final class AppColors {
@@ -10,7 +12,8 @@ abstract final class AppColors {
   static const muted = Color(0xFF596D71); // --muted-foreground
   static const mutedSurface = Color(0xFFF3F0E9); // --muted
   static const secondarySurface = Color(0xFFF3EEE3); // --secondary
-  static const border = Color(0xFFE5E1D9); // --border
+  static const border = Color(0xFFE5E1D9); // --border (subtle card divider)
+  static const inputBorder = Color(0xFF8C867B); // 3.55:1 WCAG AA UI border
   static const device = Color(0xFF132225); // --device (dark viewfinder)
 
   // Brand Primary — Mekong Teal
@@ -25,10 +28,12 @@ abstract final class AppColors {
   static const saffronGradStart = Color(0xFFF4C352);
   static const saffronGradEnd = Color(0xFFF28F29);
 
-  // Semantic
-  static const success = Color(0xFF399D57); // --success
+  // Semantic (WCAG 2.1 AA >= 4.5:1 on white, soft surfaces & muted surface)
+  static const success = Color(0xFF1F7A3E); // 5.38:1 on white
   static const successSoft = Color(0xFFDCF7E1); // --success-soft
-  static const danger = Color(0xFFD7352D); // --destructive
+  static const danger = Color(
+    0xFFC42720,
+  ); // 5.56:1 on white, 4.68:1 on dangerSoft
   static const dangerSoft = Color(0xFFFFE6E2); // --destructive-soft
 
   // Gradients
@@ -78,8 +83,8 @@ abstract final class AppColors {
   };
 
   static Color priorityForeground(int level) => switch (level) {
-    2 || 3 => saffronInk,
-    _ => Colors.white,
+    1 || 2 || 3 || 4 => saffronInk, // >= 5.20:1 WCAG AA contrast on P1–P4 fills
+    _ => Colors.white, // 5.16:1 WCAG AA contrast on P5 fill
   };
 
   static Color priorityBackground(int level) =>
@@ -123,6 +128,16 @@ ThemeData buildSrolanhCityTheme() {
     fontFamily: AppFonts.body,
     colorScheme: scheme,
     scaffoldBackgroundColor: AppColors.paper,
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: <TargetPlatform, PageTransitionsBuilder>{
+        TargetPlatform.android: SrolanhPageTransitionsBuilder(),
+        TargetPlatform.iOS: SrolanhPageTransitionsBuilder(),
+        TargetPlatform.linux: SrolanhPageTransitionsBuilder(),
+        TargetPlatform.macOS: SrolanhPageTransitionsBuilder(),
+        TargetPlatform.windows: SrolanhPageTransitionsBuilder(),
+        TargetPlatform.fuchsia: SrolanhPageTransitionsBuilder(),
+      },
+    ),
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.paper,
       foregroundColor: AppColors.ink,
@@ -161,7 +176,7 @@ ThemeData buildSrolanhCityTheme() {
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.ink,
         backgroundColor: Colors.white,
-        side: const BorderSide(color: AppColors.border, width: 1.2),
+        side: const BorderSide(color: AppColors.inputBorder, width: 1.2),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         textStyle: const TextStyle(
           fontFamily: AppFonts.body,
@@ -181,11 +196,11 @@ ThemeData buildSrolanhCityTheme() {
       fillColor: Colors.white,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: AppColors.border),
+        borderSide: const BorderSide(color: AppColors.inputBorder),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: AppColors.border),
+        borderSide: const BorderSide(color: AppColors.inputBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),

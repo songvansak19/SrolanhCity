@@ -8,6 +8,7 @@ import '../../core/report_scope.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/bilingual_text.dart';
 import '../../core/widgets/live_time_text.dart';
+import '../../core/widgets/motion.dart';
 import '../../core/widgets/offline_sync_banner.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/report_photo.dart';
@@ -85,10 +86,12 @@ class _HomePageState extends State<HomePage> {
                           english: 'Hello, ${profile.englishName}',
                           fontSize: 19,
                           fontWeight: FontWeight.w700,
+                          isHeader: true,
                         ),
                       ),
                       Semantics(
                         button: true,
+                        excludeSemantics: true,
                         label: tr.primary('កែប្រែគណនី', 'Edit profile'),
                         child: InkWell(
                           onTap: () => Navigator.push<void>(
@@ -98,12 +101,18 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                           customBorder: const CircleBorder(),
-                          child: UserAvatar(profile: profile, radius: 22),
+                          child: SizedBox(
+                            width: 48,
+                            height: 48,
+                            child: Center(
+                              child: UserAvatar(profile: profile, radius: 22),
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 4),
                   InkWell(
                     onTap: profile.hasHomeArea
                         ? widget.onOpenMap
@@ -114,45 +123,48 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                     borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.location_on_outlined,
-                            size: 15,
-                            color: AppColors.teal,
-                          ),
-                          const SizedBox(width: 5),
-                          Expanded(
-                            child: Text(
-                              profile.hasHomeArea
-                                  ? tr.paired(
-                                      profile.khmerHomeArea,
-                                      profile.englishHomeArea,
-                                    )
-                                  : tr.paired(
-                                      'កំណត់តំបន់រស់នៅ',
-                                      'Set your home area',
-                                    ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                                fontStyle: profile.hasHomeArea
-                                    ? FontStyle.normal
-                                    : FontStyle.italic,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.location_on_outlined,
+                              size: 15,
+                              color: AppColors.teal,
+                            ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                profile.hasHomeArea
+                                    ? tr.paired(
+                                        profile.khmerHomeArea,
+                                        profile.englishHomeArea,
+                                      )
+                                    : tr.paired(
+                                        'កំណត់តំបន់រស់នៅ',
+                                        'Set your home area',
+                                      ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  fontStyle: profile.hasHomeArea
+                                      ? FontStyle.normal
+                                      : FontStyle.italic,
+                                ),
                               ),
                             ),
-                          ),
-                          const Icon(
-                            Icons.chevron_right,
-                            size: 16,
-                            color: AppColors.muted,
-                          ),
-                        ],
+                            const Icon(
+                              Icons.chevron_right,
+                              size: 16,
+                              color: AppColors.muted,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -243,6 +255,7 @@ class _HomePageState extends State<HomePage> {
                           fontSize: 21,
                           fontWeight: FontWeight.w700,
                           color: Colors.white,
+                          isHeader: true,
                         ),
                         const SizedBox(height: 6),
                         Text(
@@ -251,35 +264,37 @@ class _HomePageState extends State<HomePage> {
                             'AI sorts it for you',
                           ),
                           style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.80),
+                            color: Colors.white.withValues(alpha: 0.85),
                             fontSize: 12,
                           ),
                         ),
                         const SizedBox(height: 16),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 50,
-                          child: FilledButton.icon(
-                            onPressed: () {
-                              HapticFeedback.mediumImpact();
-                              widget.onReport();
-                            },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.saffron,
-                              foregroundColor: AppColors.saffronInk,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(18),
+                        PressableScale(
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: () {
+                                HapticFeedback.mediumImpact();
+                                widget.onReport();
+                              },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppColors.saffron,
+                                foregroundColor: AppColors.saffronInk,
+                                minimumSize: const Size.fromHeight(50),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
                               ),
-                            ),
-                            icon: const Icon(
-                              Icons.camera_alt_outlined,
-                              size: 20,
-                            ),
-                            label: Text(
-                              tr.paired('រាយការណ៍បញ្ហា', 'Report'),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 14,
+                              icon: const Icon(
+                                Icons.camera_alt_outlined,
+                                size: 20,
+                              ),
+                              label: Text(
+                                tr.paired('រាយការណ៍បញ្ហា', 'Report'),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
                               ),
                             ),
                           ),
@@ -333,6 +348,7 @@ class _HomePageState extends State<HomePage> {
                               : 'Area news',
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
+                          isHeader: true,
                         ),
                       ),
                       TextButton(
@@ -491,9 +507,11 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                           style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            minimumSize: const Size(0, 34),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            minimumSize: const Size(48, 44),
                           ),
                           child: Text(
                             tr.primary('ប្តូរខណ្ឌ/សង្កាត់', 'Change district'),
@@ -562,39 +580,47 @@ class _FeedSegmentButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(13),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(13),
-          boxShadow: selected ? AppColors.cardShadow : null,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: selected ? AppColors.teal : AppColors.muted,
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? AppColors.ink : AppColors.muted,
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(13),
+        child: AnimatedContainer(
+          duration: reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 160),
+          constraints: const BoxConstraints(minHeight: 44),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(13),
+            boxShadow: selected ? AppColors.cardShadow : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: selected ? AppColors.teal : AppColors.muted,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: selected ? AppColors.ink : AppColors.muted,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -696,54 +722,57 @@ class _CategoryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
+      excludeSemantics: true,
       label: tr.paired(category.khmerName, category.englishName),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.border),
-            boxShadow: AppColors.cardShadow,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.tealSoft,
-                  borderRadius: BorderRadius.circular(13),
+      child: PressableScale(
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.border),
+              boxShadow: AppColors.cardShadow,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.tealSoft,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Icon(
+                    Bilingual.categoryIcon(category),
+                    color: AppColors.teal,
+                    size: 20,
+                  ),
                 ),
-                child: Icon(
-                  Bilingual.categoryIcon(category),
-                  color: AppColors.teal,
-                  size: 20,
+                const SizedBox(height: 7),
+                Text(
+                  tr.categoryPrimary(category),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ink,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 7),
-              Text(
-                tr.categoryPrimary(category),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
+                Text(
+                  tr.categorySecondary(category),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 9, color: AppColors.muted),
                 ),
-              ),
-              Text(
-                tr.categorySecondary(category),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 9, color: AppColors.muted),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -769,156 +798,160 @@ class _TrackingSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final stage = report.status.stageNumber;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppColors.border),
-          boxShadow: AppColors.cardShadow,
-        ),
-        child: Row(
-          children: [
-            Hero(
-              tag: '$heroPrefix-${report.id}',
-              child: ReportPhoto(
-                category: report.category,
-                localPhotoPath: report.localPhotoPath,
-                assetPath: report.status == ReportStatus.resolved
-                    ? (report.resolvedAfterAssetPath ?? report.photoAssetPath)
-                    : report.photoAssetPath,
-                width: 70,
-                height: 70,
-                borderRadius: 16,
+    return MergeSemantics(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border),
+            boxShadow: AppColors.cardShadow,
+          ),
+          child: Row(
+            children: [
+              Hero(
+                tag: '$heroPrefix-${report.id}',
+                child: ReportPhoto(
+                  category: report.category,
+                  localPhotoPath: report.localPhotoPath,
+                  assetPath: report.status == ReportStatus.resolved
+                      ? (report.resolvedAfterAssetPath ?? report.photoAssetPath)
+                      : report.photoAssetPath,
+                  width: 70,
+                  height: 70,
+                  borderRadius: 16,
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: BilingualText(
-                          bilingual: tr,
-                          khmer: report.khmerTitle,
-                          english:
-                              '${report.englishTitle} · ${report.englishLocation.split('·').first.trim()}',
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                          maxLines: 1,
-                        ),
-                      ),
-                      if (showMineBadge) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 2.5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.tealSoft,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            tr.primary('របស់ខ្ញុំ', 'Mine'),
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.tealDark,
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (report.syncStatus == SyncStatus.pendingSync) ...[
-                        const SizedBox(width: 5),
-                        SyncStatusBadge(
-                          status: report.syncStatus,
-                          bilingual: tr,
-                        ),
-                      ],
-                      const SizedBox(width: 6),
-                      PriorityBadge(
-                        breakdown: report.priority,
-                        bilingual: tr,
-                        compact: true,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Semantics(
-                    label:
-                        'Stage $stage of 4: ${tr.statusPrimary(report.status)}',
-                    child: Row(
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        for (var i = 1; i <= 4; i++) ...[
-                          Expanded(
-                            child: Container(
-                              height: 4.5,
-                              decoration: BoxDecoration(
-                                color: i <= stage
-                                    ? (i == stage &&
-                                              report.status ==
-                                                  ReportStatus.crewDispatched
-                                          ? AppColors.saffron
-                                          : AppColors.teal)
-                                    : AppColors.border,
-                                borderRadius: BorderRadius.circular(999),
+                        Expanded(
+                          child: BilingualText(
+                            bilingual: tr,
+                            khmer: report.khmerTitle,
+                            english:
+                                '${report.englishTitle} · ${report.englishLocation.split('·').first.trim()}',
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            maxLines: 1,
+                          ),
+                        ),
+                        if (showMineBadge) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.tealSoft,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              tr.primary('របស់ខ្ញុំ', 'Mine'),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.tealDark,
                               ),
                             ),
                           ),
-                          if (i < 4) const SizedBox(width: 4),
                         ],
+                        if (report.syncStatus == SyncStatus.pendingSync) ...[
+                          const SizedBox(width: 5),
+                          SyncStatusBadge(
+                            status: report.syncStatus,
+                            bilingual: tr,
+                          ),
+                        ],
+                        const SizedBox(width: 6),
+                        PriorityBadge(
+                          breakdown: report.priority,
+                          bilingual: tr,
+                          compact: true,
+                        ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 7),
-                  Row(
-                    children: [
-                      Icon(
-                        report.status == ReportStatus.crewDispatched
-                            ? Icons.construction_rounded
-                            : Icons.schedule_rounded,
-                        size: 13,
-                        color: AppColors.teal,
+                    const SizedBox(height: 10),
+                    Semantics(
+                      label: tr.primary(
+                        'ដំណាក់កាល $stage នៃ 4៖ ${tr.statusPrimary(report.status)}',
+                        'Stage $stage of 4: ${tr.statusPrimary(report.status)}',
                       ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          tr.primary(
-                            report.status.khmerLabel,
-                            report.status.englishLabel,
+                      child: Row(
+                        children: [
+                          for (var i = 1; i <= 4; i++) ...[
+                            Expanded(
+                              child: Container(
+                                height: 4.5,
+                                decoration: BoxDecoration(
+                                  color: i <= stage
+                                      ? (i == stage &&
+                                                report.status ==
+                                                    ReportStatus.crewDispatched
+                                            ? AppColors.saffron
+                                            : AppColors.teal)
+                                      : AppColors.border,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                            ),
+                            if (i < 4) const SizedBox(width: 4),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        Icon(
+                          report.status == ReportStatus.crewDispatched
+                              ? Icons.construction_rounded
+                              : Icons.schedule_rounded,
+                          size: 13,
+                          color: AppColors.teal,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            tr.primary(
+                              report.status.khmerLabel,
+                              report.status.englishLabel,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.teal,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(width: 6),
+                        LiveRelativeTimeText(
+                          timestamp: report.createdAt,
+                          englishFirst: tr.englishFirst,
                           style: const TextStyle(
-                            color: AppColors.teal,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
+                            color: AppColors.muted,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      LiveRelativeTimeText(
-                        timestamp: report.createdAt,
-                        englishFirst: tr.englishFirst,
-                        style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

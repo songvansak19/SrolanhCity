@@ -4,7 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 /// Which voice recognition engine is active during citizen voice reporting.
-enum VoiceCaptureMode { backendAudio, deviceSpeech, demoFallback }
+enum VoiceCaptureMode {
+  backendAudio,
+  deviceSpeech,
+  offlineAudioMemo,
+  demoFallback,
+}
 
 /// Resolved device speech locale plus whether the requested language pack
 /// (e.g., `km_KH` vs `en_US`) is actually installed on the device.

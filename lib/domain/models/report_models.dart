@@ -424,6 +424,8 @@ class ReportDraft {
     required this.isAnonymous,
     required this.localPhotoPaths,
     this.voiceTranscript,
+    this.voiceAudioPath,
+    this.voiceAudioDurationSeconds,
   });
 
   final IssueCategory category;
@@ -432,6 +434,8 @@ class ReportDraft {
   final bool isAnonymous;
   final List<String> localPhotoPaths;
   final String? voiceTranscript;
+  final String? voiceAudioPath;
+  final int? voiceAudioDurationSeconds;
 
   Map<String, dynamic> toJson() => {
     'category': category.name,
@@ -440,6 +444,9 @@ class ReportDraft {
     'isAnonymous': isAnonymous,
     'localPhotoPaths': localPhotoPaths,
     'voiceTranscript': voiceTranscript,
+    if (voiceAudioPath != null) 'voiceAudioPath': voiceAudioPath,
+    if (voiceAudioDurationSeconds != null)
+      'voiceAudioDurationSeconds': voiceAudioDurationSeconds,
   };
 
   factory ReportDraft.fromJson(Map<String, dynamic> json) {
@@ -454,6 +461,9 @@ class ReportDraft {
       isAnonymous: (json['isAnonymous'] as bool?) ?? false,
       localPhotoPaths: paths,
       voiceTranscript: json['voiceTranscript'] as String?,
+      voiceAudioPath: json['voiceAudioPath'] as String?,
+      voiceAudioDurationSeconds: (json['voiceAudioDurationSeconds'] as num?)
+          ?.toInt(),
     );
   }
 }
@@ -542,6 +552,8 @@ class CitizenComment {
     this.isAnonymous = false,
     this.severity,
     this.voiceTranscript,
+    this.voiceAudioPath,
+    this.voiceAudioDurationSeconds,
   });
 
   final String id;
@@ -552,6 +564,8 @@ class CitizenComment {
   final bool isAnonymous;
   final int? severity;
   final String? voiceTranscript;
+  final String? voiceAudioPath;
+  final int? voiceAudioDurationSeconds;
 
   bool get hasText => text.trim().isNotEmpty;
 
@@ -563,6 +577,8 @@ class CitizenComment {
     bool? isAnonymous,
     int? severity,
     String? voiceTranscript,
+    String? voiceAudioPath,
+    int? voiceAudioDurationSeconds,
   }) {
     return CitizenComment(
       id: id,
@@ -573,6 +589,9 @@ class CitizenComment {
       isAnonymous: isAnonymous ?? this.isAnonymous,
       severity: severity ?? this.severity,
       voiceTranscript: voiceTranscript ?? this.voiceTranscript,
+      voiceAudioPath: voiceAudioPath ?? this.voiceAudioPath,
+      voiceAudioDurationSeconds:
+          voiceAudioDurationSeconds ?? this.voiceAudioDurationSeconds,
     );
   }
 
@@ -585,6 +604,9 @@ class CitizenComment {
     'isAnonymous': isAnonymous,
     if (severity != null) 'severity': severity,
     if (voiceTranscript != null) 'voiceTranscript': voiceTranscript,
+    if (voiceAudioPath != null) 'voiceAudioPath': voiceAudioPath,
+    if (voiceAudioDurationSeconds != null)
+      'voiceAudioDurationSeconds': voiceAudioDurationSeconds,
   };
 
   factory CitizenComment.fromJson(Map<String, dynamic> json) {
@@ -599,6 +621,9 @@ class CitizenComment {
       isAnonymous: (json['isAnonymous'] as bool?) ?? false,
       severity: (json['severity'] as num?)?.toInt(),
       voiceTranscript: json['voiceTranscript'] as String?,
+      voiceAudioPath: json['voiceAudioPath'] as String?,
+      voiceAudioDurationSeconds: (json['voiceAudioDurationSeconds'] as num?)
+          ?.toInt(),
     );
   }
 }
@@ -644,6 +669,8 @@ class CivicReport {
     this.syncStatus = SyncStatus.synced,
     this.crewCode,
     this.voiceTranscript,
+    this.voiceAudioPath,
+    this.voiceAudioDurationSeconds,
     this.citizenRating,
     this.beforeDateLabel = '20 Nov',
     this.afterDateLabel = '22 Nov',
@@ -682,6 +709,8 @@ class CivicReport {
   final SyncStatus syncStatus;
   final String? crewCode;
   final String? voiceTranscript;
+  final String? voiceAudioPath;
+  final int? voiceAudioDurationSeconds;
   final int? citizenRating;
   final String beforeDateLabel;
   final String afterDateLabel;
@@ -796,6 +825,8 @@ class CivicReport {
     SyncStatus? syncStatus,
     String? crewCode,
     String? voiceTranscript,
+    String? voiceAudioPath,
+    int? voiceAudioDurationSeconds,
     int? citizenRating,
     String? beforeDateLabel,
     String? afterDateLabel,
@@ -843,6 +874,9 @@ class CivicReport {
       syncStatus: syncStatus ?? this.syncStatus,
       crewCode: crewCode ?? this.crewCode,
       voiceTranscript: voiceTranscript ?? this.voiceTranscript,
+      voiceAudioPath: voiceAudioPath ?? this.voiceAudioPath,
+      voiceAudioDurationSeconds:
+          voiceAudioDurationSeconds ?? this.voiceAudioDurationSeconds,
       citizenRating: citizenRating ?? this.citizenRating,
       beforeDateLabel: beforeDateLabel ?? this.beforeDateLabel,
       afterDateLabel: afterDateLabel ?? this.afterDateLabel,
@@ -887,6 +921,9 @@ class CivicReport {
     'syncStatus': syncStatus.name,
     'crewCode': crewCode,
     'voiceTranscript': voiceTranscript,
+    if (voiceAudioPath != null) 'voiceAudioPath': voiceAudioPath,
+    if (voiceAudioDurationSeconds != null)
+      'voiceAudioDurationSeconds': voiceAudioDurationSeconds,
     'citizenRating': citizenRating,
     'beforeDateLabel': beforeDateLabel,
     'afterDateLabel': afterDateLabel,
@@ -969,6 +1006,9 @@ class CivicReport {
       syncStatus: SyncStatus.fromName(json['syncStatus'] as String?),
       crewCode: json['crewCode'] as String?,
       voiceTranscript: json['voiceTranscript'] as String?,
+      voiceAudioPath: json['voiceAudioPath'] as String?,
+      voiceAudioDurationSeconds: (json['voiceAudioDurationSeconds'] as num?)
+          ?.toInt(),
       citizenRating: (json['citizenRating'] as num?)?.toInt(),
       beforeDateLabel: (json['beforeDateLabel'] as String?) ?? '20 Nov',
       afterDateLabel: (json['afterDateLabel'] as String?) ?? '22 Nov',
