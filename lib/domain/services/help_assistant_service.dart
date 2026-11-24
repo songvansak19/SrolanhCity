@@ -433,12 +433,12 @@ class HelpAssistantService {
         success: true,
         text: preferEnglish
             ? 'Reporting takes 3 quick steps:\n'
-                  '1. Capture or choose up to 3 photos\n'
+                  '1. Capture or choose 1–3 real issue photos (required)\n'
                   '2. Pick severity & add a text or voice note (Khmer/EN)\n'
                   '3. Confirm the map pin and submit!\n'
                   'Tap below to open the Report Wizard now.'
             : 'ការរាយការណ៍មានតែ ៣ ជំហានខ្លីៗប៉ុណ្ណោះ៖\n'
-                  '១. ថត ឬជ្រើសរូបភាពរហូតដល់ ៣ សន្លឹក\n'
+                  '១. ថត ឬជ្រើសរូបភាពបញ្ហាពិត ១–៣ សន្លឹក (ចាំបាច់)\n'
                   '២. ជ្រើសកម្រិតគ្រោះថ្នាក់ និងបន្ថែមអក្សរ ឬសំឡេង (ខ្មែរ/EN)\n'
                   '៣. បញ្ជាក់ទីតាំងលើផែនទី រួចដាក់ស្នើ!\n'
                   'ចុចខាងក្រោមដើម្បីចាប់ផ្តើមរាយការណ៍ភ្លាម។',

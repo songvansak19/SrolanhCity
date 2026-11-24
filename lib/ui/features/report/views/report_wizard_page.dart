@@ -30,6 +30,7 @@ import '../../../core/widgets/bilingual_text.dart';
 import '../../../core/widgets/photo_lightbox_page.dart';
 import '../../../core/widgets/priority_badge.dart';
 import '../../../core/widgets/report_photo.dart';
+import '../../../core/widgets/voice_memo_player_card.dart';
 import '../../../core/widgets/voice_waveform.dart';
 import '../../profile/edit_profile_page.dart';
 import '../../tracking/tracking_page.dart';
@@ -43,6 +44,7 @@ class ReportWizardPage extends StatefulWidget {
     this.initialCategory = IssueCategory.pothole,
     this.initialCoordinates,
     this.initialDraft,
+    this.initialPhotoPaths = const [],
     this.initialPhotoExif,
     this.initialPhotoAnchor,
     this.locationService = const LocationService(),
@@ -57,6 +59,7 @@ class ReportWizardPage extends StatefulWidget {
   final IssueCategory initialCategory;
   final LatLng? initialCoordinates;
   final ReportDraft? initialDraft;
+  final List<String> initialPhotoPaths;
   final PhotoExifMetadata? initialPhotoExif;
   final PhotoLocationAnchor? initialPhotoAnchor;
   final LocationService locationService;
@@ -75,12 +78,10 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
   ReportWizardViewModel? _viewModel;
   late final TextEditingController _descriptionController;
   late final ReverseGeocodingService _geocodingService;
-  late final AudioPlayerService _audioPlayer;
   final MapController _mapController = MapController();
   Timer? _dragDebounce;
   bool _mapReady = false;
   bool _isDraggingMap = false;
-  bool _isPlayingVoiceMemo = false;
   bool _autoGpsRequested = false;
   int _previousStep = 0;
 
@@ -89,8 +90,6 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
     super.initState();
     _descriptionController = TextEditingController();
     _geocodingService = widget.geocodingService ?? ReverseGeocodingService();
-    _audioPlayer =
-        widget.audioPlayerService ?? AudioPlayerService.createDefault();
   }
 
   @override
@@ -103,6 +102,7 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
         initialCategory: widget.initialCategory,
         initialCoordinates: widget.initialCoordinates,
         initialDraft: widget.initialDraft,
+        initialPhotoPaths: widget.initialPhotoPaths,
         voiceInputService: widget.voiceInputService,
         audioRecorderService: widget.audioRecorderService,
         civicAiService: widget.civicAiService,
@@ -125,47 +125,7 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
     _viewModel?.dispose();
     _descriptionController.dispose();
     _mapController.dispose();
-    if (widget.audioPlayerService == null) {
-      unawaited(_audioPlayer.dispose());
-    } else {
-      unawaited(_audioPlayer.stop());
-    }
     super.dispose();
-  }
-
-  Future<void> _toggleStep2VoiceMemoPlayback(
-    ReportWizardViewModel vm,
-    Bilingual tr,
-  ) async {
-    final path = vm.voiceAudioPath;
-    if (path == null || path.isEmpty) return;
-    HapticFeedback.selectionClick();
-    if (_isPlayingVoiceMemo) {
-      await _audioPlayer.stop();
-      if (mounted) setState(() => _isPlayingVoiceMemo = false);
-      return;
-    }
-    final started = await _audioPlayer.play(
-      path,
-      onCompleted: () {
-        if (mounted) setState(() => _isPlayingVoiceMemo = false);
-      },
-    );
-    if (!mounted) return;
-    if (started) {
-      setState(() => _isPlayingVoiceMemo = true);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            tr.primary(
-              'កំណត់ត្រាសំឡេងត្រូវបានរក្សាទុកហើយ នឹងភ្ជាប់ជាមួយរបាយការណ៍',
-              'Voice memo saved and ready to submit with your report.',
-            ),
-          ),
-        ),
-      );
-    }
   }
 
   void _syncDescriptionController(String text) {
@@ -720,7 +680,10 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
     Navigator.pushReplacement<void, void>(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => ReportSubmittedPage(result: result),
+        builder: (_) => ReportSubmittedPage(
+          result: result,
+          audioPlayerService: widget.audioPlayerService,
+        ),
       ),
     );
   }
@@ -1185,8 +1148,8 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                   'EXIF stripped · ${vm.localPhotoPaths.length}/${ReportWizardViewModel.maxPhotos} photo(s) attached',
                                 )
                               : tr.paired(
-                                  'ដាក់បញ្ហានៅកណ្តាលស៊ុម ឬបន្តដោយជ្រើសប្រភេទខាងក្រោម',
-                                  'Capture the issue or pick a category below',
+                                  'សូមថត ឬជ្រើសរូបភាពបញ្ហាយ៉ាងតិច ១ សន្លឹកដើម្បីបន្ត',
+                                  'Take or pick at least 1 issue photo to continue',
                                 ),
                           textAlign: TextAlign.center,
                           style: TextStyle(
@@ -1288,26 +1251,46 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                           ),
                         ),
                       ),
-                      FilledButton.icon(
-                        onPressed: () {
-                          HapticFeedback.selectionClick();
-                          vm.nextStep();
-                        },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.teal,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
+                      Tooltip(
+                        message: vm.hasRequiredPhoto
+                            ? tr.primary(
+                                'ទៅជំហានបន្ទាប់',
+                                'Continue to details',
+                              )
+                            : tr.primary(
+                                'ត្រូវការរូបភាពបញ្ហាយ៉ាងតិច ១ សន្លឹក',
+                                'At least 1 issue photo is required',
+                              ),
+                        child: FilledButton.icon(
+                          key: const Key('step1-next-btn'),
+                          onPressed: vm.hasRequiredPhoto
+                              ? () {
+                                  HapticFeedback.selectionClick();
+                                  vm.nextStep();
+                                }
+                              : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.teal,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.white.withValues(
+                              alpha: 0.16,
+                            ),
+                            disabledForegroundColor: Colors.white.withValues(
+                              alpha: 0.50,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(999),
+                            ),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(999),
+                          icon: Text(tr.primary('បន្ទាប់', 'Next')),
+                          label: const Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 18,
                           ),
-                        ),
-                        icon: Text(tr.primary('បន្ទាប់', 'Next')),
-                        label: const Icon(
-                          Icons.arrow_forward_rounded,
-                          size: 18,
                         ),
                       ),
                     ],
@@ -1564,12 +1547,14 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                         horizontal: 10,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: Colors.white,
+                                        color: vm.localPhotoPaths.isEmpty
+                                            ? AppColors.dangerSoft
+                                            : Colors.white,
                                         borderRadius: BorderRadius.circular(18),
                                         border: Border.all(
                                           color: vm.localPhotoPaths.isEmpty
-                                              ? AppColors.teal.withValues(
-                                                  alpha: 0.45,
+                                              ? AppColors.danger.withValues(
+                                                  alpha: 0.65,
                                                 )
                                               : AppColors.border,
                                           width: 1.6,
@@ -1583,22 +1568,22 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                             Icons.add_a_photo_outlined,
                                             size: 21,
                                             color: vm.localPhotoPaths.isEmpty
-                                                ? AppColors.teal
+                                                ? AppColors.danger
                                                 : AppColors.muted,
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
                                             vm.localPhotoPaths.isEmpty
                                                 ? tr.primary(
-                                                    'បន្ថែមរូបភាព (0/3)',
-                                                    'Add photo (0/3)',
+                                                    'បន្ថែមរូបភាព (ចាំបាច់)',
+                                                    'Add photo (Required)',
                                                   )
                                                 : '${tr.primary('បន្ថែម', 'Add')} (${vm.localPhotoPaths.length}/${ReportWizardViewModel.maxPhotos})',
                                             textAlign: TextAlign.center,
                                             style: TextStyle(
                                               fontSize: 10.5,
                                               color: vm.localPhotoPaths.isEmpty
-                                                  ? AppColors.tealDark
+                                                  ? AppColors.ink
                                                   : AppColors.muted,
                                               fontWeight: FontWeight.w700,
                                             ),
@@ -1610,6 +1595,53 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                               ],
                             ),
                           ),
+                          if (!vm.hasRequiredPhoto) ...[
+                            const SizedBox(height: 10),
+                            Semantics(
+                              container: true,
+                              liveRegion: true,
+                              child: Container(
+                                key: const Key('step2-photo-required-banner'),
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 11,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.dangerSoft,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: AppColors.danger.withValues(
+                                      alpha: 0.45,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.photo_camera_outlined,
+                                      size: 16,
+                                      color: AppColors.danger,
+                                    ),
+                                    const SizedBox(width: 7),
+                                    Expanded(
+                                      child: Text(
+                                        tr.primary(
+                                          'ត្រូវការរូបភាពបញ្ហាយ៉ាងតិច ១ សន្លឹក ដើម្បីបន្តទៅជំហានបន្ទាប់',
+                                          'At least 1 issue photo is required to continue',
+                                        ),
+                                        style: const TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.ink,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 10),
                           Row(
                             children: [
@@ -1770,12 +1802,17 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                       width: double.infinity,
                       height: 54,
                       child: FilledButton(
-                        onPressed: () {
-                          HapticFeedback.selectionClick();
-                          vm.nextStep();
-                          _reverseGeocodeCurrentPin(vm.pinLocation);
-                          _maybeTriggerAutoGps(tr);
-                        },
+                        key: const Key('step2-confirm-location-btn'),
+                        onPressed: vm.hasRequiredPhoto
+                            ? () async {
+                                HapticFeedback.selectionClick();
+                                await vm.stopVoiceRecordingIfActive();
+                                if (!mounted || !vm.hasRequiredPhoto) return;
+                                vm.nextStep();
+                                _reverseGeocodeCurrentPin(vm.pinLocation);
+                                _maybeTriggerAutoGps(tr);
+                              }
+                            : null,
                         child: Text(
                           tr.paired(
                             'បន្ទាប់ · បញ្ជាក់ទីតាំង',
@@ -2374,83 +2411,16 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
           ),
           if (vm.hasVoiceAudioMemo) ...[
             const SizedBox(height: 10),
-            Container(
+            VoiceMemoPlayerCard(
               key: const Key('step2-voice-memo-player'),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(13),
-                border: Border.all(
-                  color: AppColors.teal.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Semantics(
-                    button: true,
-                    excludeSemantics: true,
-                    label: _isPlayingVoiceMemo
-                        ? tr.primary('ផ្អាកសំឡេង', 'Pause voice memo')
-                        : tr.primary('ចាក់ស្តាប់សំឡេង', 'Play voice memo'),
-                    child: InkWell(
-                      key: const Key('step2-voice-memo-play-btn'),
-                      onTap: () => _toggleStep2VoiceMemoPlayback(vm, tr),
-                      customBorder: const CircleBorder(),
-                      child: SizedBox(
-                        width: 48,
-                        height: 48,
-                        child: Center(
-                          child: CircleAvatar(
-                            radius: 16,
-                            backgroundColor: AppColors.teal,
-                            child: Icon(
-                              _isPlayingVoiceMemo
-                                  ? Icons.stop_rounded
-                                  : Icons.play_arrow_rounded,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      tr.primary(
-                        'កំណត់ត្រាសំឡេង (0:${(vm.voiceAudioDurationSeconds ?? 1).toString().padLeft(2, '0')})',
-                        'Voice Memo (0:${(vm.voiceAudioDurationSeconds ?? 1).toString().padLeft(2, '0')})',
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.tealDark,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    key: const Key('step2-voice-memo-delete-btn'),
-                    tooltip: tr.primary(
-                      'លុបកំណត់ត្រាសំឡេង',
-                      'Remove voice memo',
-                    ),
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(
-                      Icons.close_rounded,
-                      size: 18,
-                      color: AppColors.muted,
-                    ),
-                    onPressed: () {
-                      unawaited(_audioPlayer.stop());
-                      setState(() => _isPlayingVoiceMemo = false);
-                      vm.clearVoiceAudioMemo();
-                    },
-                  ),
-                ],
-              ),
+              playButtonKey: const Key('step2-voice-memo-play-btn'),
+              deleteButtonKey: const Key('step2-voice-memo-delete-btn'),
+              audioPath: vm.voiceAudioPath!,
+              durationSeconds: vm.voiceAudioDurationSeconds,
+              bilingual: tr,
+              compact: true,
+              audioPlayerService: widget.audioPlayerService,
+              onDelete: vm.clearVoiceAudioMemo,
             ),
           ],
           if (hasFeedback) ...[
@@ -2801,7 +2771,12 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                   const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
-                                      vm.usedLiveGps
+                                      vm.activePhotoAnchor != null
+                                          ? tr.primary(
+                                              'អូសក្នុងរង្វង់ 250m ពីរូបថត · ពិនិត្យស្ទួន 100m',
+                                              'Drag within 250 m of photo · 100 m duplicate check',
+                                            )
+                                          : vm.usedLiveGps
                                           ? tr.primary(
                                               'GPS ពិតប្រាកដ · ±${(vm.gpsAccuracyMeters ?? 5).round()}m · រង្វង់ 100m',
                                               'Real GPS verified · ±${(vm.gpsAccuracyMeters ?? 5).round()}m · 100m match',
@@ -2886,7 +2861,9 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                         ],
                       ),
                     ),
-                  if (vm.isOutsideCambodia && vm.rawOutsideGps != null)
+                  if (vm.isOutsideCambodia &&
+                      vm.rawOutsideGps != null &&
+                      vm.locationEligibility is! ReportLocationEligible)
                     Container(
                       margin: const EdgeInsets.only(top: 10),
                       padding: const EdgeInsets.symmetric(
@@ -2922,24 +2899,25 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                               ),
                             ),
                           ),
-                          TextButton(
-                            onPressed: () {
-                              vm.usePhnomPenhCenter();
-                              if (_mapReady) {
-                                _mapController.move(
-                                  LocationService.phnomPenhCenter,
-                                  MapTileConfig.streetFocusZoom,
-                                );
-                              }
-                            },
-                            child: Text(
-                              tr.primary('ភ្នំពេញ', 'Phnom Penh'),
-                              style: const TextStyle(
-                                color: AppColors.teal,
-                                fontWeight: FontWeight.w800,
+                          if (vm.activePhotoAnchor == null)
+                            TextButton(
+                              onPressed: () {
+                                vm.usePhnomPenhCenter();
+                                if (_mapReady) {
+                                  _mapController.move(
+                                    LocationService.phnomPenhCenter,
+                                    MapTileConfig.streetFocusZoom,
+                                  );
+                                }
+                              },
+                              child: Text(
+                                tr.primary('ភ្នំពេញ', 'Phnom Penh'),
+                                style: const TextStyle(
+                                  color: AppColors.teal,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
-                          ),
                         ],
                       ),
                     ),
@@ -3592,10 +3570,6 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                           ),
                         ],
                       ),
-                      if (vm.canApplyPhotoExifLocation) ...[
-                        const SizedBox(height: 4),
-                        buildUsePhotoButton(),
-                      ],
                     ],
                   ),
                 ),
@@ -3714,8 +3688,8 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                     Expanded(
                       child: Text(
                         tr.primary(
-                          'ទីតាំង GPS របស់អ្នកនៅឆ្ងាយប្រហែល $distLabel$provinceSuffixKh។ អ្នកអាចរាយការណ៍បានតែក្នុងចម្ងាយ 15 គ.ម ក្នុងតំបន់រស់នៅ ឬភ្ជាប់រូបថតដែលថតនៅទីតាំងនេះ។',
-                          'Your GPS is ~$distLabel away$provinceSuffixEn. You can submit within 15 km of your location, in your Home District, or with a photo taken at this spot.',
+                          'ទីតាំង GPS របស់អ្នកនៅឆ្ងាយប្រហែល $distLabel$provinceSuffixKh។ រូបថតនេះគ្មានទិន្នន័យ GPS — សូមផ្លាស់ទីក្នុងចម្ងាយ 15 គ.ម ជ្រើសតំបន់រស់នៅ ឬភ្ជាប់រូបថតដែលថតនៅទីតាំងនេះ។',
+                          'Your GPS is ~$distLabel away$provinceSuffixEn. This photo has no GPS tag — move within 15 km, set your Home District, or replace with a geotagged photo.',
                         ),
                         style: const TextStyle(
                           fontSize: 11.5,
@@ -3768,7 +3742,6 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                         ),
                       ),
                     ),
-                    if (vm.canApplyPhotoExifLocation) buildUsePhotoButton(),
                     if (!hasHomeArea) buildSetHomeButton(),
                   ],
                 ),
@@ -3826,21 +3799,21 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
         final reasonText = serviceDisabled
             ? tr.primary(
                 'សូមបើក GPS ដើម្បីផ្ទៀងផ្ទាត់ថាអ្នកនៅក្នុងចម្ងាយ 15 គ.ម ឬកំណត់តំបន់រស់នៅរបស់អ្នក។',
-                'Enable GPS to verify you are within 15 km, attach a photo taken here, or set your Home District.',
+                'Enable GPS to verify you are within 15 km, set your Home District, or use a photo with GPS tags.',
               )
             : permissionDenied
             ? tr.primary(
-                'ត្រូវការសិទ្ធិ GPS ដើម្បីផ្ទៀងផ្ទាត់តំបន់រាយការណ៍ (ឬកំណត់តំបន់រស់នៅ / រូបថតមាន GPS)។',
-                'Location permission is required to verify your area (or set your Home District / attach a geotagged photo).',
+                'ត្រូវការសិទ្ធិ GPS ដើម្បីផ្ទៀងផ្ទាត់តំបន់រាយការណ៍ (ឬកំណត់តំបន់រស់នៅ / ប្រើរូបថតមាន GPS)។',
+                'Location permission is required to verify your area (or set your Home District / use a geotagged photo).',
               )
             : outsideCambodia
             ? tr.primary(
-                'GPS ឧបករណ៍នៅក្រៅកម្ពុជា — សូមកំណត់តំបន់រស់នៅ ឬភ្ជាប់រូបថតដែលថតនៅកម្ពុជា។',
-                'Device GPS is outside Cambodia — set your Home District or attach a photo taken at this spot.',
+                'GPS ឧបករណ៍នៅក្រៅកម្ពុជា — សូមកំណត់តំបន់រស់នៅ ឬប្រើរូបថតដែលមាន GPS នៅកម្ពុជា។',
+                'Device GPS is outside Cambodia — set your Home District or use a photo with Cambodia GPS tags.',
               )
             : tr.primary(
                 'មិនអាចផ្ទៀងផ្ទាត់ GPS បានទេ — ចុចផ្ទៀងផ្ទាត់ម្តងទៀត ឬកំណត់តំបន់រស់នៅ។',
-                'Could not verify GPS — retry GPS, attach a photo taken here, or set your Home District.',
+                'Could not verify GPS — retry GPS, set your Home District, or use a geotagged photo.',
               );
 
         return Semantics(
@@ -3937,7 +3910,6 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                           ),
                         ),
                       ),
-                    if (vm.canApplyPhotoExifLocation) buildUsePhotoButton(),
                     if (!hasHomeArea) buildSetHomeButton(),
                   ],
                 ),

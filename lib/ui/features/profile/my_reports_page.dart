@@ -12,6 +12,7 @@ import '../../core/widgets/live_time_text.dart';
 import '../../core/widgets/offline_sync_banner.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/report_photo.dart';
+import '../../core/widgets/voice_memo_player_card.dart';
 import '../news/area_news_page.dart';
 import '../report/views/report_wizard_page.dart';
 import '../tracking/tracking_page.dart';
@@ -525,6 +526,11 @@ class _MyReportCard extends StatelessWidget {
                                 child: Text(
                                   report.hasDescription
                                       ? report.description.trim()
+                                      : report.hasVoiceAudioMemo
+                                      ? tr.primary(
+                                          'កំណត់ត្រាសំឡេង (${VoiceMemoPlayerCard.formatDuration(report.voiceAudioDurationSeconds)})',
+                                          'Voice Memo (${VoiceMemoPlayerCard.formatDuration(report.voiceAudioDurationSeconds)})',
+                                        )
                                       : tr.primary(
                                           'គ្មានមតិបន្ថែម',
                                           'No comment',
@@ -533,15 +539,54 @@ class _MyReportCard extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontSize: 11.5,
-                                    fontStyle: report.hasDescription
+                                    fontStyle:
+                                        (report.hasDescription ||
+                                            report.hasVoiceAudioMemo)
                                         ? FontStyle.normal
                                         : FontStyle.italic,
-                                    color: report.hasDescription
+                                    color:
+                                        (report.hasDescription ||
+                                            report.hasVoiceAudioMemo)
                                         ? AppColors.ink.withValues(alpha: 0.78)
                                         : AppColors.muted,
                                   ),
                                 ),
                               ),
+                              if (report.hasVoiceAudioMemo) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  key: Key('my-report-voice-pill-${report.id}'),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1.5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.tealSoft,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.mic_rounded,
+                                        size: 10.5,
+                                        color: AppColors.tealDark,
+                                      ),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        VoiceMemoPlayerCard.formatDuration(
+                                          report.voiceAudioDurationSeconds,
+                                        ),
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.tealDark,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                               if (report.extraCommentCount > 0) ...[
                                 const SizedBox(width: 6),
                                 Container(

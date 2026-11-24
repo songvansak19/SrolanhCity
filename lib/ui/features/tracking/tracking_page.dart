@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -23,6 +21,7 @@ import '../../core/widgets/photo_lightbox_page.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/priority_donut_chart.dart';
 import '../../core/widgets/report_photo.dart';
+import '../../core/widgets/voice_memo_player_card.dart';
 import '../map/map_page.dart';
 
 class TrackingPage extends StatefulWidget {
@@ -46,48 +45,22 @@ class TrackingPage extends StatefulWidget {
 class _TrackingPageState extends State<TrackingPage> {
   bool _isCheckingSupportLocation = false;
   bool _useCompareSlider = false;
-  late final AudioPlayerService _audioPlayer =
-      widget.audioPlayerService ?? AudioPlayerService.createDefault();
-  bool _isPlayingVoiceMemo = false;
 
-  @override
-  void dispose() {
-    if (widget.audioPlayerService == null) {
-      unawaited(_audioPlayer.dispose());
-    } else {
-      unawaited(_audioPlayer.stop());
-    }
-    super.dispose();
-  }
-
-  Future<void> _toggleVoiceMemoPlayback(String path, Bilingual tr) async {
-    HapticFeedback.selectionClick();
-    if (_isPlayingVoiceMemo) {
-      await _audioPlayer.stop();
-      if (mounted) setState(() => _isPlayingVoiceMemo = false);
-      return;
-    }
-    final started = await _audioPlayer.play(
-      path,
-      onCompleted: () {
-        if (mounted) setState(() => _isPlayingVoiceMemo = false);
-      },
+  Widget _buildReportVoiceMemoCard(CivicReport report, Bilingual tr) {
+    return VoiceMemoPlayerCard(
+      key: const Key('tracking-voice-memo-card'),
+      playButtonKey: const Key('tracking-voice-memo-play'),
+      audioPath: report.voiceAudioPath!,
+      durationSeconds: report.voiceAudioDurationSeconds,
+      bilingual: tr,
+      subtitle: report.syncStatus == SyncStatus.pendingSync
+          ? tr.primary(
+              'រក្សាទុកក្រៅបណ្តាញ · រង់ចាំផ្ញើស្វ័យប្រវត្តិ',
+              'Saved offline · queued for auto-sync',
+            )
+          : tr.primary('បានភ្ជាប់ជាមួយរបាយការណ៍', 'Attached to civic report'),
+      audioPlayerService: widget.audioPlayerService,
     );
-    if (!mounted) return;
-    if (started) {
-      setState(() => _isPlayingVoiceMemo = true);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            tr.primary(
-              'បានភ្ជាប់សំឡេងរួចរាល់ — នឹងបញ្ជូនជាមួយរបាយការណ៍',
-              'Voice memo is attached and queued with this report.',
-            ),
-          ),
-        ),
-      );
-    }
   }
 
   Future<void> _shareResolvedReport(CivicReport report, Bilingual tr) async {
@@ -388,16 +361,18 @@ class _TrackingPageState extends State<TrackingPage> {
                                 assetPath: report.photoAssetPath,
                                 badgeLabel: tr.paired('មុន', 'Before'),
                                 dateLabel: report.beforeDateLabel,
-                                onTap: () => PhotoLightboxPage.open(
-                                  context,
-                                  category: report.category,
-                                  bilingual: tr,
-                                  localPhotoPath: report.localPhotoPath,
-                                  assetPath: report.photoAssetPath,
-                                  title: tr.paired('មុន', 'Before'),
-                                  subtitle:
-                                      '${report.id} · ${report.beforeDateLabel}',
-                                ),
+                                onTap: report.hasPhoto
+                                    ? () => PhotoLightboxPage.open(
+                                        context,
+                                        category: report.category,
+                                        bilingual: tr,
+                                        localPhotoPath: report.localPhotoPath,
+                                        assetPath: report.photoAssetPath,
+                                        title: tr.paired('មុន', 'Before'),
+                                        subtitle:
+                                            '${report.id} · ${report.beforeDateLabel}',
+                                      )
+                                    : null,
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -477,12 +452,17 @@ class _TrackingPageState extends State<TrackingPage> {
                           ],
                         ),
                       ),
+                      if (report.hasVoiceAudioMemo) ...[
+                        const SizedBox(height: 12),
+                        _buildReportVoiceMemoCard(report, tr),
+                      ],
                       const SizedBox(height: 12),
                       _CitizenCommentsCard(
                         report: report,
                         tr: tr,
                         allowAddNote: false,
                         translationService: widget.translationService,
+                        audioPlayerService: widget.audioPlayerService,
                       ),
                       const SizedBox(height: 18),
 
@@ -665,26 +645,33 @@ class _TrackingPageState extends State<TrackingPage> {
                         child: Row(
                           children: [
                             Semantics(
-                              button: true,
-                              excludeSemantics: true,
-                              label: tr.primary(
-                                'មើលរូបភាពពេញអេក្រង់',
-                                'View full photo',
-                              ),
+                              button: report.hasPhoto,
+                              excludeSemantics: report.hasPhoto,
+                              label: report.hasPhoto
+                                  ? tr.primary(
+                                      'មើលរូបភាពពេញអេក្រង់',
+                                      'View full photo',
+                                    )
+                                  : tr.primary(
+                                      'គ្មានរូបភាពភ្ជាប់',
+                                      'No photo attached',
+                                    ),
                               child: InkWell(
-                                onTap: () => PhotoLightboxPage.open(
-                                  context,
-                                  category: report.category,
-                                  bilingual: tr,
-                                  localPhotoPath: report.localPhotoPath,
-                                  assetPath: report.photoAssetPath,
-                                  title: tr.primary(
-                                    report.khmerTitle,
-                                    report.englishTitle,
-                                  ),
-                                  subtitle: report.id,
-                                  heroTag: 'report-photo-${report.id}',
-                                ),
+                                onTap: report.hasPhoto
+                                    ? () => PhotoLightboxPage.open(
+                                        context,
+                                        category: report.category,
+                                        bilingual: tr,
+                                        localPhotoPath: report.localPhotoPath,
+                                        assetPath: report.photoAssetPath,
+                                        title: tr.primary(
+                                          report.khmerTitle,
+                                          report.englishTitle,
+                                        ),
+                                        subtitle: report.id,
+                                        heroTag: 'report-photo-${report.id}',
+                                      )
+                                    : null,
                                 borderRadius: BorderRadius.circular(16),
                                 child: Hero(
                                   tag: 'report-photo-${report.id}',
@@ -695,6 +682,7 @@ class _TrackingPageState extends State<TrackingPage> {
                                     width: 72,
                                     height: 72,
                                     borderRadius: 16,
+                                    bilingual: tr,
                                   ),
                                 ),
                               ),
@@ -876,12 +864,17 @@ class _TrackingPageState extends State<TrackingPage> {
                           ],
                         ),
                       ),
+                      if (report.hasVoiceAudioMemo) ...[
+                        const SizedBox(height: 12),
+                        _buildReportVoiceMemoCard(report, tr),
+                      ],
                       const SizedBox(height: 12),
                       _CitizenCommentsCard(
                         report: report,
                         tr: tr,
                         allowAddNote: true,
                         translationService: widget.translationService,
+                        audioPlayerService: widget.audioPlayerService,
                       ),
                       if (allPhotos.length > 1) ...[
                         const SizedBox(height: 12),
@@ -1240,106 +1233,6 @@ class _TrackingPageState extends State<TrackingPage> {
                               report.status == ReportStatus.crewDispatched,
                         ),
 
-                      if (report.voiceAudioPath != null &&
-                          report.voiceAudioPath!.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          key: const Key('tracking-voice-memo-card'),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.tealSoft,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: AppColors.teal.withValues(alpha: 0.28),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Semantics(
-                                button: true,
-                                excludeSemantics: true,
-                                label: _isPlayingVoiceMemo
-                                    ? tr.primary(
-                                        'ផ្អាកកំណត់ត្រាសំឡេង',
-                                        'Pause voice memo',
-                                      )
-                                    : tr.primary(
-                                        'ចាក់ស្តាប់កំណត់ត្រាសំឡេង',
-                                        'Play voice memo',
-                                      ),
-                                child: InkWell(
-                                  key: const Key('tracking-voice-memo-play'),
-                                  onTap: () => _toggleVoiceMemoPlayback(
-                                    report.voiceAudioPath!,
-                                    tr,
-                                  ),
-                                  customBorder: const CircleBorder(),
-                                  child: SizedBox(
-                                    width: 48,
-                                    height: 48,
-                                    child: Center(
-                                      child: CircleAvatar(
-                                        radius: 19,
-                                        backgroundColor: AppColors.teal,
-                                        child: Icon(
-                                          _isPlayingVoiceMemo
-                                              ? Icons.stop_rounded
-                                              : Icons.play_arrow_rounded,
-                                          color: Colors.white,
-                                          size: 20,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      tr.primary(
-                                        'កំណត់ត្រាសំឡេង (0:${(report.voiceAudioDurationSeconds ?? 1).toString().padLeft(2, '0')})',
-                                        'Voice Memo (0:${(report.voiceAudioDurationSeconds ?? 1).toString().padLeft(2, '0')})',
-                                      ),
-                                      style: const TextStyle(
-                                        fontSize: 12.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.tealDark,
-                                      ),
-                                    ),
-                                    Text(
-                                      report.syncStatus ==
-                                              SyncStatus.pendingSync
-                                          ? tr.primary(
-                                              'រក្សាទុកក្រៅបណ្តាញ · រង់ចាំផ្ញើស្វ័យប្រវត្តិ',
-                                              'Saved offline · queued for auto-sync',
-                                            )
-                                          : tr.primary(
-                                              'បានភ្ជាប់ជាមួយរបាយការណ៍',
-                                              'Attached to civic report',
-                                            ),
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        color: AppColors.muted,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const Icon(
-                                Icons.graphic_eq_rounded,
-                                color: AppColors.teal,
-                                size: 20,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
                       if (report.voiceTranscript != null) ...[
                         const SizedBox(height: 10),
                         Container(
@@ -1516,15 +1409,15 @@ class _BeforeAfterPhotoCard extends StatelessWidget {
   final IssueCategory category;
   final String badgeLabel;
   final String dateLabel;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final String? localPhotoPath;
   final String? assetPath;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      button: true,
-      excludeSemantics: true,
+      button: onTap != null,
+      excludeSemantics: onTap != null,
       label: '$badgeLabel · $dateLabel',
       child: InkWell(
         onTap: onTap,
@@ -1653,12 +1546,14 @@ class _CitizenCommentsCard extends StatefulWidget {
     required this.tr,
     required this.allowAddNote,
     this.translationService,
+    this.audioPlayerService,
   });
 
   final CivicReport report;
   final Bilingual tr;
   final bool allowAddNote;
   final CommentTranslationService? translationService;
+  final AudioPlayerService? audioPlayerService;
 
   @override
   State<_CitizenCommentsCard> createState() => _CitizenCommentsCardState();
@@ -1898,6 +1793,11 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
                     onToggleTranslate: visibleComments[i].hasText
                         ? () => _toggleTranslateComment(visibleComments[i], tr)
                         : null,
+                    showInlineVoiceMemo:
+                        visibleComments[i].hasVoiceAudioMemo &&
+                        visibleComments[i].voiceAudioPath !=
+                            widget.report.voiceAudioPath,
+                    audioPlayerService: widget.audioPlayerService,
                     onDelete:
                         (visibleComments[i].isCurrentUser &&
                             !visibleComments[i].isOriginalReporter &&
@@ -2000,6 +1900,8 @@ class _CitizenCommentTile extends StatelessWidget {
     this.isTranslating = false,
     this.translationError,
     this.onToggleTranslate,
+    this.showInlineVoiceMemo = false,
+    this.audioPlayerService,
     this.onDelete,
   });
 
@@ -2010,6 +1912,8 @@ class _CitizenCommentTile extends StatelessWidget {
   final bool isTranslating;
   final String? translationError;
   final VoidCallback? onToggleTranslate;
+  final bool showInlineVoiceMemo;
+  final AudioPlayerService? audioPlayerService;
   final VoidCallback? onDelete;
 
   @override
@@ -2142,14 +2046,34 @@ class _CitizenCommentTile extends StatelessWidget {
           Text(
             comment.hasText
                 ? comment.text.trim()
+                : comment.hasVoiceAudioMemo
+                ? tr.primary(
+                    'បានភ្ជាប់កំណត់ត្រាសំឡេង (${VoiceMemoPlayerCard.formatDuration(comment.voiceAudioDurationSeconds)})',
+                    'Voice memo attached (${VoiceMemoPlayerCard.formatDuration(comment.voiceAudioDurationSeconds)})',
+                  )
                 : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
             style: TextStyle(
               fontSize: 13,
               height: 1.42,
-              color: comment.hasText ? AppColors.ink : AppColors.muted,
-              fontStyle: comment.hasText ? FontStyle.normal : FontStyle.italic,
+              color: (comment.hasText || comment.hasVoiceAudioMemo)
+                  ? AppColors.ink
+                  : AppColors.muted,
+              fontStyle: (comment.hasText || comment.hasVoiceAudioMemo)
+                  ? FontStyle.normal
+                  : FontStyle.italic,
             ),
           ),
+          if (showInlineVoiceMemo && comment.hasVoiceAudioMemo) ...[
+            const SizedBox(height: 8),
+            VoiceMemoPlayerCard(
+              key: Key('comment-voice-memo-${comment.id}'),
+              audioPath: comment.voiceAudioPath!,
+              durationSeconds: comment.voiceAudioDurationSeconds,
+              bilingual: tr,
+              compact: true,
+              audioPlayerService: audioPlayerService,
+            ),
+          ],
           if (onToggleTranslate != null) ...[
             const SizedBox(height: 6),
             Builder(

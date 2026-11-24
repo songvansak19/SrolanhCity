@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../data/services/audio_player_service.dart';
 import '../../../../domain/models/report_models.dart';
 import '../../../../domain/models/routing_result.dart';
 import '../../../core/l10n.dart';
@@ -8,13 +9,19 @@ import '../../../core/theme.dart';
 import '../../../core/widgets/bilingual_text.dart';
 import '../../../core/widgets/offline_sync_banner.dart';
 import '../../../core/widgets/priority_badge.dart';
+import '../../../core/widgets/voice_memo_player_card.dart';
 import '../../tracking/tracking_page.dart';
 
 /// Screen 2.5 / Slide 05: Full-Screen Submitted & Routed Confirmation.
 class ReportSubmittedPage extends StatelessWidget {
-  const ReportSubmittedPage({super.key, required this.result});
+  const ReportSubmittedPage({
+    super.key,
+    required this.result,
+    this.audioPlayerService,
+  });
 
   final ReportSubmissionResult result;
+  final AudioPlayerService? audioPlayerService;
 
   @override
   Widget build(BuildContext context) {
@@ -170,28 +177,93 @@ class ReportSubmittedPage extends StatelessWidget {
                                     final hasComment = submittedDesc.isNotEmpty;
                                     final totalNotes =
                                         report.effectiveComments.length;
-                                    return _SummaryRow(
-                                      key: const Key(
-                                        'submitted-description-row',
-                                      ),
-                                      icon: Icons.notes_rounded,
-                                      label: tr.paired(
-                                        'ពិពណ៌នា',
-                                        'Description',
-                                      ),
-                                      value: hasComment
-                                          ? submittedDesc
-                                          : tr.primary(
-                                              'គ្មានមតិបន្ថែម',
-                                              'No comment',
+                                    // Prefer the newly joined citizen's voice
+                                    // memo if merged, else the report's memo.
+                                    final latestCommentWithAudio = report
+                                        .effectiveComments
+                                        .cast<CitizenComment?>()
+                                        .lastWhere(
+                                          (c) =>
+                                              c != null &&
+                                              c.hasVoiceAudioMemo &&
+                                              c.isCurrentUser,
+                                          orElse: () => null,
+                                        );
+                                    final voicePath =
+                                        latestCommentWithAudio
+                                            ?.voiceAudioPath ??
+                                        report.voiceAudioPath;
+                                    final voiceSecs =
+                                        latestCommentWithAudio
+                                            ?.voiceAudioDurationSeconds ??
+                                        report.voiceAudioDurationSeconds;
+                                    final hasVoiceMemo =
+                                        voicePath != null &&
+                                        voicePath.isNotEmpty;
+                                    final formattedDur =
+                                        VoiceMemoPlayerCard.formatDuration(
+                                          voiceSecs,
+                                        );
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        _SummaryRow(
+                                          key: const Key(
+                                            'submitted-description-row',
+                                          ),
+                                          icon: hasVoiceMemo && !hasComment
+                                              ? Icons.mic_rounded
+                                              : Icons.notes_rounded,
+                                          label: tr.paired(
+                                            'ពិពណ៌នា',
+                                            'Description',
+                                          ),
+                                          value: hasComment
+                                              ? submittedDesc
+                                              : hasVoiceMemo
+                                              ? tr.primary(
+                                                  'បានភ្ជាប់កំណត់ត្រាសំឡេង ($formattedDur)',
+                                                  'Voice memo attached ($formattedDur)',
+                                                )
+                                              : tr.primary(
+                                                  'គ្មានមតិបន្ថែម',
+                                                  'No comment',
+                                                ),
+                                          subValue: result.mergedIntoExisting
+                                              ? tr.primary(
+                                                  'បានរួមបញ្ចូលមតិប្រជាពលរដ្ឋសរុប $totalNotes',
+                                                  'Combined $totalNotes citizen report notes on this incident',
+                                                )
+                                              : null,
+                                          mutedValue:
+                                              !hasComment && !hasVoiceMemo,
+                                        ),
+                                        if (hasVoiceMemo) ...[
+                                          const SizedBox(height: 10),
+                                          VoiceMemoPlayerCard(
+                                            key: const Key(
+                                              'submitted-voice-memo-card',
                                             ),
-                                      subValue: result.mergedIntoExisting
-                                          ? tr.primary(
-                                              'បានរួមបញ្ចូលមតិប្រជាពលរដ្ឋសរុប $totalNotes',
-                                              'Combined $totalNotes citizen report notes on this incident',
-                                            )
-                                          : null,
-                                      mutedValue: !hasComment,
+                                            playButtonKey: const Key(
+                                              'submitted-voice-memo-play',
+                                            ),
+                                            audioPath: voicePath,
+                                            durationSeconds: voiceSecs,
+                                            bilingual: tr,
+                                            subtitle:
+                                                report.syncStatus ==
+                                                    SyncStatus.pendingSync
+                                                ? tr.primary(
+                                                    'រក្សាទុកក្រៅបណ្តាញ — នឹងផ្ញើស្វ័យប្រវត្តិពេលមានសេវា',
+                                                    'Saved offline — auto-syncs when online',
+                                                  )
+                                                : null,
+                                            audioPlayerService:
+                                                audioPlayerService,
+                                          ),
+                                        ],
+                                      ],
                                     );
                                   },
                                 ),

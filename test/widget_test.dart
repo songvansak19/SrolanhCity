@@ -33,6 +33,9 @@ import 'package:my_app/ui/features/shell/main_shell.dart';
 import 'package:my_app/ui/features/staff/staff_console_page.dart';
 import 'package:my_app/ui/features/tracking/tracking_page.dart';
 
+const String _testPhotoDataUri =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
 Widget _wrapWithScope(ReportRepository repo, Widget child) {
   return ReportScope(
     repository: repo,
@@ -226,8 +229,28 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const Key('step1-ai-detected-pill')), findsNothing);
+      // Next is disabled until at least 1 photo is attached
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('step1-next-btn')))
+            .onPressed,
+        isNull,
+      );
 
-      await tester.tap(find.text('Next'));
+      // Re-mount with a captured photo to verify Step 2 voice feedback & Try Sample
+      await tester.pumpWidget(
+        _wrapWithScope(
+          repo,
+          ReportWizardPage(
+            key: const ValueKey('wizard-with-photo-voice-test'),
+            initialCategory: IssueCategory.drain,
+            initialPhotoPaths: const [_testPhotoDataUri],
+            voiceInputService: _UnavailableTestVoiceService(),
+            civicAiService: _UnconfiguredTestAiService(),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const Key('step1-next-btn')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
@@ -503,13 +526,11 @@ void main() {
       final tileLayer = tester.widget<TileLayer>(find.byType(TileLayer));
       expect(
         tileLayer.urlTemplate,
-        equals(
-          'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-        ),
+        equals('https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
       );
       expect(tileLayer.panBuffer, equals(0));
       expect(tileLayer.fallbackUrl, isNull);
-      expect(find.text('© OpenStreetMap · CARTO'), findsOneWidget);
+      expect(find.text('© OpenStreetMap'), findsOneWidget);
 
       // Verify ProfilePage keeps a clean citizen UI with zero API-key/developer settings
       await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
@@ -888,6 +909,7 @@ void main() {
           ReportWizardPage(
             initialCategory: seededMine.category,
             initialCoordinates: seededMine.coordinates,
+            initialPhotoPaths: const [_testPhotoDataUri],
             locationService: _FakeLocationService(
               LocationSuccess(
                 point: seededMine.coordinates,
@@ -1070,6 +1092,7 @@ void main() {
           ReportWizardPage(
             initialCategory: neighbor.category,
             initialCoordinates: neighbor.coordinates,
+            initialPhotoPaths: const [_testPhotoDataUri],
             locationService: _FakeLocationService(
               LocationSuccess(
                 point: neighbor.coordinates,
@@ -1169,6 +1192,7 @@ void main() {
           repo,
           ReportWizardPage(
             initialCategory: IssueCategory.pothole,
+            initialPhotoPaths: const [_testPhotoDataUri],
             voiceInputService: _UnavailableTestVoiceService(),
             civicAiService: _UnconfiguredTestAiService(),
           ),
@@ -1256,6 +1280,7 @@ void main() {
           repo,
           ReportWizardPage(
             initialCoordinates: const LatLng(11.5318, 104.9044),
+            initialPhotoPaths: const [_testPhotoDataUri],
             initialPhotoExif: PhotoExifMetadata(
               coordinates: const LatLng(11.5319, 104.9045),
               capturedAt: DateTime.now().subtract(const Duration(minutes: 5)),
@@ -1284,6 +1309,7 @@ void main() {
           ReportWizardPage(
             key: const ValueKey('wizard-mismatch'),
             initialCoordinates: const LatLng(11.5318, 104.9044),
+            initialPhotoPaths: const [_testPhotoDataUri],
             initialPhotoExif: PhotoExifMetadata(
               coordinates: const LatLng(13.3633, 103.8564),
               capturedAt: DateTime.now().subtract(const Duration(minutes: 10)),
@@ -1353,6 +1379,7 @@ void main() {
           ReportWizardPage(
             initialCategory: IssueCategory.pothole,
             initialCoordinates: const LatLng(11.5318, 104.9044),
+            initialPhotoPaths: const [_testPhotoDataUri],
             locationService: const _FakeLocationService(
               LocationSuccess(
                 point: LatLng(11.5319, 104.9044),
@@ -1399,7 +1426,14 @@ void main() {
       expect(created.syncStatus, equals(SyncStatus.pendingSync));
       expect(created.voiceAudioPath, equals('data:audio/webm;base64,AAAA'));
 
-      // Verify TrackingPage renders Voice Memo card cleanly in a fresh MaterialApp
+      // Immediately visible on ReportSubmittedPage (never says "No comment")
+      expect(
+        find.byKey(const Key('submitted-voice-memo-card')),
+        findsOneWidget,
+      );
+      expect(find.text('No comment'), findsNothing);
+
+      // Verify TrackingPage renders Voice Memo card right at the top (no scroll needed)
       await tester.pumpWidget(
         ReportScope(
           key: const ValueKey('tracking-memo-scope'),
@@ -1414,17 +1448,23 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.byKey(const Key('tracking-voice-memo-card')),
-        250,
-        scrollable: find
-            .descendant(
-              of: find.byType(TrackingPage),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
       expect(find.byKey(const Key('tracking-voice-memo-card')), findsOneWidget);
+
+      // Verify StaffConsolePage also displays playable Voice Memo card
+      await tester.pumpWidget(
+        ReportScope(
+          key: const ValueKey('staff-memo-scope'),
+          repository: repo,
+          child: MaterialApp(
+            theme: buildSrolanhCityTheme(),
+            home: const StaffConsolePage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, created.id);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('staff-voice-memo-card')), findsOneWidget);
     },
   );
 
@@ -1978,6 +2018,7 @@ void main() {
             ReportWizardPage(
               initialCategory: IssueCategory.pothole,
               initialCoordinates: phnomPenhSpot,
+              initialPhotoPaths: const [_testPhotoDataUri],
               locationService: const _FakeLocationService(
                 LocationSuccess(
                   point: siemReapGps,
@@ -2056,6 +2097,7 @@ void main() {
               key: const ValueKey('wizard-exif-override'),
               initialCategory: IssueCategory.pothole,
               initialCoordinates: phnomPenhSpot,
+              initialPhotoPaths: const [_testPhotoDataUri],
               initialPhotoExif: PhotoExifMetadata(
                 coordinates: phnomPenhSpot,
                 capturedAt: DateTime.now().subtract(const Duration(hours: 2)),
@@ -2109,6 +2151,7 @@ void main() {
               key: const ValueKey('wizard-home-override'),
               initialCategory: IssueCategory.trash,
               initialCoordinates: const LatLng(11.5680, 104.9225), // Daun Penh
+              initialPhotoPaths: const [_testPhotoDataUri],
               locationService: const _FakeLocationService(
                 LocationSuccess(
                   point: siemReapGps,
@@ -2163,6 +2206,7 @@ void main() {
             ReportWizardPage(
               initialCategory: master.category,
               initialCoordinates: draggedPin,
+              initialPhotoPaths: const [_testPhotoDataUri],
               initialPhotoExif: PhotoExifMetadata(
                 coordinates: master.coordinates,
                 capturedAt: DateTime.now().subtract(const Duration(minutes: 2)),
@@ -2213,6 +2257,7 @@ void main() {
             ReportWizardPage(
               initialCategory: IssueCategory.pothole,
               initialCoordinates: farPin,
+              initialPhotoPaths: const [_testPhotoDataUri],
               initialPhotoAnchor: PhotoLocationAnchor(
                 point: cameraSpot,
                 source: PhotoAnchorSource.liveCameraCapture,
@@ -2360,6 +2405,122 @@ void main() {
           find.byKey(const Key('staff-unverified-photo-chip')),
           findsOneWidget,
         );
+      },
+    );
+
+    testWidgets(
+      'ReportWizard enforces mandatory >= 1 photo on Step 1 & Step 2 and passes WCAG 2.1 AA guidelines',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+
+        // Step 1 without photo -> Next disabled
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            ReportWizardPage(
+              initialCategory: IssueCategory.pothole,
+              voiceInputService: _UnavailableTestVoiceService(),
+              civicAiService: _UnconfiguredTestAiService(),
+              ipGeolocationService: const _TestIpGeoService(null),
+            ),
+          ),
+        );
+        expect(
+          tester
+              .widget<FilledButton>(find.byKey(const Key('step1-next-btn')))
+              .onPressed,
+          isNull,
+        );
+
+        // With 1 photo -> advances to Step 2; deleting last photo blocks Step 2
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            ReportWizardPage(
+              key: const ValueKey('wizard-mandatory-photo-step2'),
+              initialCategory: IssueCategory.pothole,
+              initialPhotoPaths: const [_testPhotoDataUri],
+              voiceInputService: _UnavailableTestVoiceService(),
+              civicAiService: _UnconfiguredTestAiService(),
+              ipGeolocationService: const _TestIpGeoService(null),
+            ),
+          ),
+        );
+        await tester.tap(find.byKey(const Key('step1-next-btn')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('step2-confirm-location-btn')),
+              )
+              .onPressed,
+          isNotNull,
+        );
+
+        // Remove the only attached photo -> red banner + Confirm location disabled
+        await tester.tap(find.byTooltip('Remove photo'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
+
+        expect(
+          find.byKey(const Key('step2-photo-required-banner')),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('step2-confirm-location-btn')),
+              )
+              .onPressed,
+          isNull,
+        );
+
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'TrackingPage renders clean placeholder (never a fake stock image) for photo-less repository reports',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        final res = repo.submitReport(
+          category: IssueCategory.pothole,
+          description: 'Legacy text-only report',
+          severity: 3,
+          coordinates: const LatLng(11.5395, 104.9095),
+          isAnonymous: false,
+        );
+
+        expect(res.report.localPhotoPath, isNull);
+        expect(res.report.photoAssetPath, isNull);
+        expect(res.report.hasPhoto, isFalse);
+
+        await tester.pumpWidget(
+          ReportScope(
+            key: const ValueKey('tracking-nophoto-scope'),
+            repository: repo,
+            child: MaterialApp(
+              theme: buildSrolanhCityTheme(),
+              home: TrackingPage(reportId: res.report.id),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('report-photo-placeholder')),
+          findsOneWidget,
+        );
+        expect(find.byType(Image), findsNothing);
       },
     );
   });

@@ -43,7 +43,6 @@ enum IssueCategory {
   pothole(
     khmerName: 'រណ្តៅផ្លូវ',
     englishName: 'Pothole',
-    defaultAssetPath: 'assets/pothole-before.jpg',
     defaultKhmerTitle: 'រណ្តៅផ្លូវជ្រៅ',
     defaultEnglishTitle: 'Deep Pothole',
     sampleKhmerDescription:
@@ -53,7 +52,6 @@ enum IssueCategory {
   streetlight(
     khmerName: 'ភ្លើងផ្លូវខូច',
     englishName: 'Streetlight',
-    defaultAssetPath: 'assets/streetlight.jpg',
     defaultKhmerTitle: 'ភ្លើងផ្លូវមិនភ្លឺ',
     defaultEnglishTitle: 'Broken Streetlight',
     sampleKhmerDescription:
@@ -64,7 +62,6 @@ enum IssueCategory {
   drain(
     khmerName: 'លូស្ទះ',
     englishName: 'Blocked Drain',
-    defaultAssetPath: 'assets/drain.jpg',
     defaultKhmerTitle: 'លូស្ទះ និងលិចទឹក',
     defaultEnglishTitle: 'Blocked & Flooded Drain',
     sampleKhmerDescription: 'លូស្ទះសំរាម ទឹកដក់លិចផ្លូវរៀងរាល់ពេលភ្លៀងធ្លាក់',
@@ -74,7 +71,6 @@ enum IssueCategory {
   trash(
     khmerName: 'សំរាមខុសច្បាប់',
     englishName: 'Illegal Waste',
-    defaultAssetPath: 'assets/trash.jpg',
     defaultKhmerTitle: 'គំនរសំរាមខុសច្បាប់',
     defaultEnglishTitle: 'Illegal Waste Dumping',
     sampleKhmerDescription:
@@ -84,7 +80,6 @@ enum IssueCategory {
   other(
     khmerName: 'បញ្ហាផ្សេងៗ',
     englishName: 'Other Issue',
-    defaultAssetPath: null,
     defaultKhmerTitle: 'បញ្ហាហេដ្ឋារចនាសម្ព័ន្ធផ្សេងៗ',
     defaultEnglishTitle: 'Other Street Issue',
     sampleKhmerDescription: 'មានបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈត្រូវការជួសជុល',
@@ -103,7 +98,6 @@ enum IssueCategory {
   const IssueCategory({
     required this.khmerName,
     required this.englishName,
-    required this.defaultAssetPath,
     required this.defaultKhmerTitle,
     required this.defaultEnglishTitle,
     required this.sampleKhmerDescription,
@@ -112,7 +106,6 @@ enum IssueCategory {
 
   final String khmerName;
   final String englishName;
-  final String? defaultAssetPath;
   final String defaultKhmerTitle;
   final String defaultEnglishTitle;
   final String sampleKhmerDescription;
@@ -426,6 +419,10 @@ class ReportDraft {
     this.voiceTranscript,
     this.voiceAudioPath,
     this.voiceAudioDurationSeconds,
+    this.photoAnchorLat,
+    this.photoAnchorLng,
+    this.photoAnchorSource,
+    this.photoAnchorCapturedAt,
   });
 
   final IssueCategory category;
@@ -436,6 +433,16 @@ class ReportDraft {
   final String? voiceTranscript;
   final String? voiceAudioPath;
   final int? voiceAudioDurationSeconds;
+  final double? photoAnchorLat;
+  final double? photoAnchorLng;
+  final String? photoAnchorSource;
+  final DateTime? photoAnchorCapturedAt;
+
+  bool get hasPhotoAnchor =>
+      photoAnchorLat != null &&
+      photoAnchorLng != null &&
+      photoAnchorSource != null &&
+      photoAnchorSource!.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
     'category': category.name,
@@ -447,6 +454,11 @@ class ReportDraft {
     if (voiceAudioPath != null) 'voiceAudioPath': voiceAudioPath,
     if (voiceAudioDurationSeconds != null)
       'voiceAudioDurationSeconds': voiceAudioDurationSeconds,
+    if (photoAnchorLat != null) 'photoAnchorLat': photoAnchorLat,
+    if (photoAnchorLng != null) 'photoAnchorLng': photoAnchorLng,
+    if (photoAnchorSource != null) 'photoAnchorSource': photoAnchorSource,
+    if (photoAnchorCapturedAt != null)
+      'photoAnchorCapturedAt': photoAnchorCapturedAt!.toIso8601String(),
   };
 
   factory ReportDraft.fromJson(Map<String, dynamic> json) {
@@ -454,6 +466,7 @@ class ReportDraft {
     final paths = rawPaths is List
         ? rawPaths.whereType<String>().toList()
         : const <String>[];
+    final rawCapturedAt = json['photoAnchorCapturedAt'] as String?;
     return ReportDraft(
       category: IssueCategory.fromName(json['category'] as String?),
       severity: (json['severity'] as num?)?.toInt() ?? 3,
@@ -464,6 +477,12 @@ class ReportDraft {
       voiceAudioPath: json['voiceAudioPath'] as String?,
       voiceAudioDurationSeconds: (json['voiceAudioDurationSeconds'] as num?)
           ?.toInt(),
+      photoAnchorLat: (json['photoAnchorLat'] as num?)?.toDouble(),
+      photoAnchorLng: (json['photoAnchorLng'] as num?)?.toDouble(),
+      photoAnchorSource: json['photoAnchorSource'] as String?,
+      photoAnchorCapturedAt: rawCapturedAt == null
+          ? null
+          : DateTime.tryParse(rawCapturedAt),
     );
   }
 }
@@ -595,6 +614,9 @@ class CitizenComment {
   final int? voiceAudioDurationSeconds;
 
   bool get hasText => text.trim().isNotEmpty;
+
+  bool get hasVoiceAudioMemo =>
+      voiceAudioPath != null && voiceAudioPath!.isNotEmpty;
 
   CitizenComment copyWith({
     String? text,
@@ -766,6 +788,8 @@ class CivicReport {
         isAnonymous: isAnonymous,
         severity: severity,
         voiceTranscript: voiceTranscript,
+        voiceAudioPath: voiceAudioPath,
+        voiceAudioDurationSeconds: voiceAudioDurationSeconds,
       ),
     ];
   }
@@ -784,6 +808,16 @@ class CivicReport {
     if (localPhotoPath != null && localPhotoPath!.isNotEmpty) localPhotoPath!,
     ...additionalLocalPhotoPaths,
   ];
+
+  /// True when this report has either a citizen-captured photo or an explicit
+  /// seeded/resolved photo asset (false for photo-less citizen submissions).
+  bool get hasPhoto =>
+      (localPhotoPath != null && localPhotoPath!.isNotEmpty) ||
+      (photoAssetPath != null && photoAssetPath!.isNotEmpty);
+
+  /// True when this report has an attached offline/local voice memo recording.
+  bool get hasVoiceAudioMemo =>
+      voiceAudioPath != null && voiceAudioPath!.isNotEmpty;
 
   PriorityBreakdown get priority => PriorityCalculator.calculate(
     trafficScore: roadClass.trafficScore,
@@ -1030,7 +1064,7 @@ class CivicReport {
       englishAgency: (json['englishAgency'] as String?) ?? '',
       photoAssetPath: (rawPhotoAsset != null && rawPhotoAsset.isNotEmpty)
           ? rawPhotoAsset
-          : rawCategory.defaultAssetPath,
+          : null,
       localPhotoPath: json['localPhotoPath'] as String?,
       additionalLocalPhotoPaths: extras,
       resolvedAfterAssetPath: json['resolvedAfterAssetPath'] as String?,

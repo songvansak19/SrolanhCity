@@ -5,8 +5,10 @@ import '../l10n.dart';
 import '../theme.dart';
 import 'platform_image.dart';
 
-/// Renders a report photo from a user-captured file, a bundled asset, or a
-/// clean vector placeholder when no photo asset exists for a category.
+/// Renders a report photo from a user-captured file, an explicitly supplied
+/// asset, or a clean vector placeholder when no photo was attached.
+///
+/// Never fabricates a category stock sample photo for photo-less submissions.
 class ReportPhoto extends StatelessWidget {
   const ReportPhoto({
     super.key,
@@ -33,9 +35,12 @@ class ReportPhoto extends StatelessWidget {
   Widget build(BuildContext context) {
     final effectiveAsset = (assetPath != null && assetPath!.isNotEmpty)
         ? assetPath
-        : category.defaultAssetPath;
+        : null;
+    final hasLocalPhoto = localPhotoPath != null && localPhotoPath!.isNotEmpty;
+    final hasAnyPhoto = hasLocalPhoto || effectiveAsset != null;
+
     Widget imageWidget;
-    if (localPhotoPath != null && localPhotoPath!.isNotEmpty) {
+    if (hasLocalPhoto) {
       imageWidget = buildLocalImageWidget(
         path: localPhotoPath!,
         width: width,
@@ -51,7 +56,7 @@ class ReportPhoto extends StatelessWidget {
               )
             : _placeholder(),
       );
-    } else if (effectiveAsset != null && effectiveAsset.isNotEmpty) {
+    } else if (effectiveAsset != null) {
       imageWidget = Image.asset(
         effectiveAsset,
         width: width,
@@ -69,7 +74,7 @@ class ReportPhoto extends StatelessWidget {
         fit: StackFit.passthrough,
         children: [
           imageWidget,
-          if (showExifBadge)
+          if (showExifBadge && hasAnyPhoto)
             Positioned(
               left: 10,
               bottom: 10,
@@ -110,7 +115,9 @@ class ReportPhoto extends StatelessWidget {
   }
 
   Widget _placeholder() {
+    final isLarge = height == null || height! >= 110;
     return Container(
+      key: const Key('report-photo-placeholder'),
       width: width,
       height: height,
       decoration: const BoxDecoration(
@@ -121,11 +128,35 @@ class ReportPhoto extends StatelessWidget {
         ),
       ),
       child: Center(
-        child: Icon(
-          Bilingual.categoryIcon(category),
-          size: (height != null && height! < 90) ? 28 : 48,
-          color: AppColors.teal,
-        ),
+        child: isLarge
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Bilingual.categoryIcon(category),
+                    size: 40,
+                    color: AppColors.teal,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    bilingual?.primary(
+                          'គ្មានរូបភាពភ្ជាប់',
+                          'No photo attached',
+                        ) ??
+                        'No photo attached',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.tealDark,
+                    ),
+                  ),
+                ],
+              )
+            : Icon(
+                Bilingual.categoryIcon(category),
+                size: (height != null && height! < 90) ? 28 : 38,
+                color: AppColors.teal,
+              ),
       ),
     );
   }

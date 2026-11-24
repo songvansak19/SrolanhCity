@@ -5,18 +5,19 @@ import 'theme.dart';
 
 /// Shared map basemap tile configuration tuned for fast mobile & PWA loading.
 ///
-/// Uses CARTO Voyager raster tiles served over HTTP/2 via Fastly CDN with
-/// 30-day immutable browser caching (`cache-control: public, max-age=2592000,
-/// immutable`) and CORS headers, eliminating the `no-cache` revalidation and
-/// rate-limiting bottlenecks of `tile.openstreetmap.org`.
-///
-/// Intentionally omits `TileLayer.fallbackUrl` because `flutter_map` disables
-/// in-memory `ImageCache` deduplication whenever a `fallbackUrl` is set.
+/// Uses OpenStreetMap standard raster tiles (`tile.openstreetmap.org`) with
+/// Khmer & English Cambodia street labels over HTTP/2 Fastly CDN, paired with:
+/// - `panBuffer: 0` so only visible viewport tiles download first,
+/// - crisp integer zooms (`14.0` city / `16.0` street) shared across MapPage
+///   and Report Wizard Step 3 (eliminating double-fetches & enabling cache reuse),
+/// - cache-first PWA Service Worker tile caching (`web/sw.js`), and
+/// - `fallbackUrl: null` so `flutter_map` keeps Flutter's in-memory `ImageCache`
+///   deduplication enabled.
 abstract final class MapTileConfig {
-  /// Primary CDN tile URL template (single apex hostname for HTTP/2
-  /// multiplexing and single DNS/TLS preconnect).
+  /// Primary OpenStreetMap raster tile URL template (zero API keys, full Khmer
+  /// street & Sangkat labels across Cambodia).
   static const String tileUrlTemplate =
-      'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+      'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
   /// Package identifier passed to `TileLayer.userAgentPackageName` on native.
   static const String userAgentPackageName = 'com.srolanhcity.app';
@@ -29,17 +30,11 @@ abstract final class MapTileConfig {
   /// fetch when GPS locks.
   static const double streetFocusZoom = 16.0;
 
-  /// Warm sand/ivory canvas background matching CARTO Voyager land tones so
-  /// tiles blend smoothly as they arrive instead of flashing blank white/grey.
+  /// Warm sand/ivory canvas background so tiles blend smoothly as they arrive
+  /// instead of flashing blank white/grey blocks.
   static const Color mapBackgroundColor = AppColors.mutedSurface;
 
   /// Builds a performance-tuned [TileLayer] for SrolanhCity maps.
-  ///
-  /// - `panBuffer: 0` fetches only the visible viewport tiles first instead of
-  ///   queueing an extra offscreen ring on open.
-  /// - `keepBuffer: 2` retains recently visited tiles in memory while panning.
-  /// - `evictErrorTileStrategy` retries transiently failed tiles automatically
-  ///   after flaky mobile connections recover.
   static TileLayer buildTileLayer() {
     return TileLayer(
       urlTemplate: tileUrlTemplate,
@@ -56,7 +51,7 @@ abstract final class MapTileConfig {
     );
   }
 
-  /// Compact, high-contrast OpenStreetMap + CARTO basemap attribution badge.
+  /// Compact, high-contrast OpenStreetMap attribution badge.
   static Widget buildAttributionBadge() {
     return IgnorePointer(
       child: Align(
@@ -75,7 +70,7 @@ abstract final class MapTileConfig {
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 child: Text(
-                  '© OpenStreetMap · CARTO',
+                  '© OpenStreetMap',
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w600,

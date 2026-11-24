@@ -56,8 +56,9 @@ Future<void> writeLocalState(String fileName, Map<String, dynamic> data) async {
   try {
     web.window.localStorage.setItem(fileName, jsonEncode(data));
   } catch (_) {
-    // Quota exceeded — retry once after trimming large base64 attachments from
-    // older synced reports while preserving profile, settings, and metadata.
+    // Quota exceeded — trim large base64 photo attachments ONLY from already-
+    // synced reports first so queued offline (`pendingSync`) reports strictly
+    // preserve their required photo and offline voice memo until synced.
     try {
       final slim = Map<String, dynamic>.from(data);
       final rawReports = slim['reports'];
@@ -65,6 +66,9 @@ Future<void> writeLocalState(String fileName, Map<String, dynamic> data) async {
         slim['reports'] = rawReports.map((entry) {
           if (entry is! Map<String, dynamic>) return entry;
           final copy = Map<String, dynamic>.from(entry);
+          if (copy['syncStatus'] == 'pendingSync') {
+            return copy;
+          }
           final local = copy['localPhotoPath'] as String?;
           if (local != null &&
               local.startsWith('data:') &&

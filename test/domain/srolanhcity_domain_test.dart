@@ -540,15 +540,15 @@ void main() {
       expect(restoredSettings.newsKhanEnglish, equals('Toul Kork'));
       expect(restoredSettings.newsSangkatEnglish, equals('Boeung Kak 1'));
 
-      // Every primary issue category has a real bundled photo asset (including Illegal Waste)
-      for (final category in IssueCategory.primaryCategories) {
-        expect(category.defaultAssetPath, isNotNull);
-        expect(category.defaultAssetPath, isNotEmpty);
+      // Seeded demo reports carry explicit photo assets while photo-less citizen
+      // records keep photoAssetPath null (never fabricating stock images).
+      final repo = ReportRepository();
+      for (final seeded in repo.reports) {
+        expect(seeded.photoAssetPath, isNotNull);
+        expect(seeded.photoAssetPath, isNotEmpty);
       }
-      expect(IssueCategory.other.defaultAssetPath, isNull);
 
       // Area News includes uploaded My Reports + multi-district community reports
-      final repo = ReportRepository();
       final daunPenh = CambodiaLocationCatalog.findKhanByEnglish('Daun Penh')!;
       final phsarThmei = CambodiaLocationCatalog.findSangkatInKhan(
         daunPenh,
@@ -1500,18 +1500,18 @@ void main() {
       expect(indexHtml, contains("register('sw.js'"));
       expect(
         indexHtml,
-        contains('rel="preconnect" href="https://basemaps.cartocdn.com"'),
+        contains('rel="preconnect" href="https://tile.openstreetmap.org"'),
       );
       expect(indexHtml, isNot(contains('my_app')));
 
       // Offline-first PWA service worker & custom bootstrap
       final swJs = File('web/sw.js').readAsStringSync();
       final bootstrapJs = File('web/flutter_bootstrap.js').readAsStringSync();
-      expect(swJs, contains('srolanhcity-app-v4'));
-      expect(swJs, contains('srolanhcity-tiles-v2'));
+      expect(swJs, contains('srolanhcity-app-v5'));
+      expect(swJs, contains('srolanhcity-tiles-v3'));
       expect(swJs, contains('canvaskit/canvaskit.wasm'));
-      expect(swJs, contains('basemaps.cartocdn.com'));
       expect(swJs, contains('tile.openstreetmap.org'));
+      expect(swJs, isNot(contains('basemaps.cartocdn.com')));
       expect(swJs, contains('WARM_TILE_URLS'));
       expect(bootstrapJs, contains('_flutter.loader.load()'));
       expect(bootstrapJs, isNot(contains('serviceWorkerSettings')));
@@ -2335,6 +2335,123 @@ void main() {
       final legacyRestored = CivicReport.fromJson(legacyJson);
       expect(legacyRestored.locationVerificationTier, isNull);
       expect(legacyRestored.photoLocationUnverified, isFalse);
+
+      // Submitting WITHOUT a photo never attaches a fake sample asset photo
+      final noPhotoRes = repo.submitReport(
+        category: IssueCategory.pothole,
+        description: 'Text-only report without picture',
+        severity: 3,
+        coordinates: const LatLng(11.5390, 104.9090),
+        isAnonymous: false,
+      );
+      expect(noPhotoRes.report.localPhotoPath, isNull);
+      expect(noPhotoRes.report.photoAssetPath, isNull);
+      expect(noPhotoRes.report.hasPhoto, isFalse);
+      expect(noPhotoRes.report.exifStripped, isFalse);
+      final reloadedNoPhoto = CivicReport.fromJson(noPhotoRes.report.toJson());
+      expect(reloadedNoPhoto.photoAssetPath, isNull);
+      expect(reloadedNoPhoto.hasPhoto, isFalse);
+    });
+
+    test('ReportWizardViewModel enforces mandatory >= 1 photo gate, preserves photoAnchor in ReportDraft, and resumes legacy photo-less draft at Step 0', () {
+      final repo = ReportRepository();
+      const spot = LatLng(11.5318, 104.9044);
+
+      final vm = ReportWizardViewModel(
+        repository: repo,
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: const _FakeIpGeoService(null),
+      );
+      vm.recordLiveGpsResult(
+        const LocationSuccess(
+          point: spot,
+          accuracyMeters: 8,
+          isOutsideCambodia: false,
+        ),
+      );
+
+      // 0 photos -> cannot advance or submit
+      expect(vm.hasRequiredPhoto, isFalse);
+      expect(vm.canSubmitAtCurrentPin, isFalse);
+      vm.nextStep();
+      expect(vm.step, equals(0));
+
+      // Add geotagged photo -> unlocks Step 1 -> Step 2 & saves anchor in draft
+      vm.addLocalPhotoPath(
+        'data:image/png;base64,AAA',
+        exifMetadata: PhotoExifMetadata(
+          coordinates: spot,
+          capturedAt: DateTime(2026, 11, 24, 19, 0),
+        ),
+      );
+      expect(vm.hasRequiredPhoto, isTrue);
+      vm.nextStep();
+      expect(vm.step, equals(1));
+      expect(vm.canSubmitAtCurrentPin, isTrue);
+
+      final savedDraft = vm.toDraft();
+      final restoredDraft = ReportDraft.fromJson(savedDraft.toJson());
+      expect(restoredDraft.hasPhotoAnchor, isTrue);
+      expect(restoredDraft.photoAnchorLat, closeTo(spot.latitude, 0.0001));
+      expect(restoredDraft.photoAnchorSource, equals('photoExif'));
+
+      // Resumed VM starts on Step 1 with photo anchor intact
+      final resumedVm = ReportWizardViewModel(
+        repository: repo,
+        initialDraft: restoredDraft,
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: const _FakeIpGeoService(null),
+      );
+      expect(resumedVm.step, equals(1));
+      expect(resumedVm.activePhotoAnchor?.point, equals(spot));
+      expect(resumedVm.isGalleryPhotoWithoutLocationAnchor, isFalse);
+
+      // Removing last photo re-locks advancement and submission
+      resumedVm.removeLocalPhotoAt(0);
+      expect(resumedVm.hasRequiredPhoto, isFalse);
+      expect(resumedVm.canSubmitAtCurrentPin, isFalse);
+      resumedVm.nextStep();
+      expect(resumedVm.step, equals(1));
+
+      // Legacy photo-less draft resumes on Step 0 (Photo)
+      const legacyDraft = ReportDraft(
+        category: IssueCategory.pothole,
+        severity: 3,
+        description: 'Old draft before photo requirement',
+        isAnonymous: false,
+        localPhotoPaths: <String>[],
+      );
+      final legacyVm = ReportWizardViewModel(
+        repository: repo,
+        initialDraft: legacyDraft,
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: const _FakeIpGeoService(null),
+      );
+      expect(legacyVm.step, equals(0));
+    });
+
+    test('ReportWizardViewModel.stopVoiceRecordingIfActive finalizes an in-progress offline audio memo before leaving Step 2', () async {
+      final repo = ReportRepository();
+      repo.setOnlineStatus(false);
+      final fakeRecorder = _FakeAudioRecorderService(amplitude: 0.7);
+      final vm = ReportWizardViewModel(
+        repository: repo,
+        initialPhotoPaths: const ['data:image/png;base64,AAA'],
+        voiceInputService: _FakeVoiceInputService(available: false),
+        audioRecorderService: fakeRecorder,
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: const _FakeIpGeoService(null),
+      );
+
+      await vm.toggleVoiceRecording();
+      expect(vm.isRecordingVoice, isTrue);
+      expect(vm.hasVoiceAudioMemo, isFalse);
+
+      await vm.stopVoiceRecordingIfActive();
+      expect(vm.isRecordingVoice, isFalse);
+      expect(vm.hasVoiceAudioMemo, isTrue);
+      expect(vm.voiceAudioPath, equals('data:audio/webm;base64,AAAA'));
+      vm.dispose();
     });
   });
 }

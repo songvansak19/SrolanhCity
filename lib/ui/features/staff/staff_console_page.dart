@@ -9,6 +9,7 @@ import '../../core/widgets/bilingual_text.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/priority_donut_chart.dart';
 import '../../core/widgets/report_photo.dart';
+import '../../core/widgets/voice_memo_player_card.dart';
 
 /// Section 04 / Slide 03 & 07: Interactive Staff Review Console Demo.
 ///
@@ -511,6 +512,22 @@ class _StaffInspector extends StatelessWidget {
             Chip(label: Text(tr.statusPrimary(live.status))),
           ],
         ),
+        if (live.hasVoiceAudioMemo) ...[
+          const SizedBox(height: 12),
+          VoiceMemoPlayerCard(
+            key: const Key('staff-voice-memo-card'),
+            playButtonKey: const Key('staff-voice-memo-play'),
+            audioPath: live.voiceAudioPath!,
+            durationSeconds: live.voiceAudioDurationSeconds,
+            bilingual: tr,
+            subtitle: live.syncStatus == SyncStatus.pendingSync
+                ? tr.primary(
+                    'រក្សាទុកក្រៅបណ្តាញ',
+                    'Recorded offline · pending sync',
+                  )
+                : null,
+          ),
+        ],
         const SizedBox(height: 14),
 
         // Priority Score Breakdown Card (Section 04)

@@ -27,6 +27,7 @@ class ReportWizardViewModel extends ChangeNotifier {
     IssueCategory initialCategory = IssueCategory.pothole,
     LatLng? initialCoordinates,
     ReportDraft? initialDraft,
+    List<String> initialPhotoPaths = const [],
     VoiceInputService? voiceInputService,
     AudioRecorderService? audioRecorderService,
     CivicAiService? civicAiService,
@@ -36,7 +37,9 @@ class ReportWizardViewModel extends ChangeNotifier {
        _civicAiService = civicAiService ?? BackendCivicAiService(),
        _ipGeoService =
            ipGeolocationService ?? HttpIpGeolocationService.instance,
-       _step = initialDraft != null ? 1 : 0,
+       _step = (initialDraft != null && initialDraft.localPhotoPaths.isNotEmpty)
+           ? 1
+           : 0,
        _category = initialDraft?.category ?? initialCategory,
        _severity = initialDraft?.severity ?? 3,
        _isAnonymous =
@@ -45,15 +48,27 @@ class ReportWizardViewModel extends ChangeNotifier {
        _descriptionEditedByUser =
            initialDraft != null && initialDraft.description.trim().isNotEmpty,
        _localPhotoPaths = List<String>.of(
-         initialDraft?.localPhotoPaths ?? const <String>[],
+         initialDraft != null
+             ? initialDraft.localPhotoPaths
+             : initialPhotoPaths.where((p) => p.isNotEmpty).take(maxPhotos),
        ),
        _photoExifEntries = List<PhotoExifMetadata?>.filled(
-         initialDraft?.localPhotoPaths.length ?? 0,
+         initialDraft != null
+             ? initialDraft.localPhotoPaths.length
+             : initialPhotoPaths
+                   .where((p) => p.isNotEmpty)
+                   .take(maxPhotos)
+                   .length,
          null,
          growable: true,
        ),
        _photoAnchors = List<PhotoLocationAnchor?>.filled(
-         initialDraft?.localPhotoPaths.length ?? 0,
+         initialDraft != null
+             ? initialDraft.localPhotoPaths.length
+             : initialPhotoPaths
+                   .where((p) => p.isNotEmpty)
+                   .take(maxPhotos)
+                   .length,
          null,
          growable: true,
        ),
@@ -71,7 +86,35 @@ class ReportWizardViewModel extends ChangeNotifier {
                    provinceCode: repository.profile.homeProvinceCode,
                  ).province.center
                : LocationService.phnomPenhCenter),
-       _locationVerified = initialCoordinates != null;
+       _locationVerified = initialCoordinates != null {
+    if (initialDraft != null && initialDraft.hasPhotoAnchor) {
+      final point = LatLng(
+        initialDraft.photoAnchorLat!,
+        initialDraft.photoAnchorLng!,
+      );
+      if (LocationService.isInsideCambodia(point)) {
+        final source =
+            initialDraft.photoAnchorSource ==
+                PhotoAnchorSource.liveCameraCapture.name
+            ? PhotoAnchorSource.liveCameraCapture
+            : PhotoAnchorSource.photoExif;
+        final restoredAnchor = PhotoLocationAnchor(
+          point: point,
+          source: source,
+          capturedAt: initialDraft.photoAnchorCapturedAt,
+        );
+        if (_photoAnchors.isNotEmpty) {
+          _photoAnchors[0] = restoredAnchor;
+        } else {
+          _explicitPhotoAnchor = restoredAnchor;
+        }
+        if (!_hasExplicitInitialCoordinates) {
+          _pinLocation = point;
+          _locationVerified = true;
+        }
+      }
+    }
+  }
 
   static const int maxPhotos = 3;
   static const int maxVoiceSeconds = 30;
@@ -150,6 +193,9 @@ class ReportWizardViewModel extends ChangeNotifier {
   int get remainingPhotoSlots =>
       (maxPhotos - _localPhotoPaths.length).clamp(0, maxPhotos);
   bool get canAddMorePhotos => _localPhotoPaths.length < maxPhotos;
+
+  /// Every new report requires at least 1 real photo (Camera or Gallery).
+  bool get hasRequiredPhoto => _localPhotoPaths.isNotEmpty;
 
   /// Best available pre-strip EXIF metadata across attached photos (or an
   /// explicitly supplied initial EXIF payload).
@@ -247,7 +293,8 @@ class ReportWizardViewModel extends ChangeNotifier {
       );
 
   /// Whether the citizen is currently permitted to submit at [pinLocation].
-  bool get canSubmitAtCurrentPin => locationEligibility.isAllowed;
+  bool get canSubmitAtCurrentPin =>
+      hasRequiredPhoto && locationEligibility.isAllowed;
 
   /// Layer 4 pre-strip photo EXIF assessment against the current pin.
   SpoofAssessment get photoExifAssessment => AntiSpoofService.evaluatePhotoExif(
@@ -263,17 +310,6 @@ class ReportWizardViewModel extends ChangeNotifier {
   SpoofAssessment get combinedIntegrityAssessment => AntiSpoofService.combine(
     <SpoofAssessment>[photoExifAssessment, ipIntegrityAssessment],
   );
-
-  /// Whether the attached photo has an in-Cambodia location anchor (EXIF or
-  /// live camera capture) that can be snapped to in 1 tap.
-  bool get canApplyPhotoExifLocation {
-    final anchor = activePhotoAnchor;
-    if (anchor == null) return false;
-    return locationEligibility is ReportLocationDeniedPhotoAnchorMismatch ||
-        photoExifAssessment.reasons.contains(
-          SpoofSignalReason.photoExifLocationMismatch,
-        );
-  }
 
   bool get isInitializingVoice => _isInitializingVoice;
   bool get isRecordingVoice => _isRecordingVoice;
@@ -304,7 +340,6 @@ class ReportWizardViewModel extends ChangeNotifier {
   AiClassificationResult get classification => AiClassifierService.classify(
     description: _description,
     selectedCategory: _category,
-    hasCustomPhoto: _localPhotoPaths.isNotEmpty,
   );
 
   GisRoutingResult get gisRouting => GisRoutingService.resolve(
@@ -339,20 +374,28 @@ class ReportWizardViewModel extends ChangeNotifier {
     );
   }
 
-  ReportDraft toDraft() => ReportDraft(
-    category: _category,
-    severity: _severity,
-    description: _description,
-    isAnonymous: _isAnonymous,
-    localPhotoPaths: List<String>.of(_localPhotoPaths),
-    voiceTranscript: _voiceTranscript,
-    voiceAudioPath: _voiceAudioPath,
-    voiceAudioDurationSeconds: _voiceAudioDurationSeconds,
-  );
+  ReportDraft toDraft() {
+    final anchor = activePhotoAnchor;
+    return ReportDraft(
+      category: _category,
+      severity: _severity,
+      description: _description,
+      isAnonymous: _isAnonymous,
+      localPhotoPaths: List<String>.of(_localPhotoPaths),
+      voiceTranscript: _voiceTranscript,
+      voiceAudioPath: _voiceAudioPath,
+      voiceAudioDurationSeconds: _voiceAudioDurationSeconds,
+      photoAnchorLat: anchor?.point.latitude,
+      photoAnchorLng: anchor?.point.longitude,
+      photoAnchorSource: anchor?.source.name,
+      photoAnchorCapturedAt: anchor?.capturedAt,
+    );
+  }
 
   void saveDraft() => repository.saveDraft(toDraft());
 
   void nextStep() {
+    if (!hasRequiredPhoto) return;
     if (_step < 2) {
       _step++;
       notifyListeners();
@@ -503,9 +546,6 @@ class ReportWizardViewModel extends ChangeNotifier {
     notifyListeners();
     return anchor.point;
   }
-
-  /// Alias for [snapToPhotoAnchor] preserved for existing callers.
-  LatLng? applyPhotoExifLocation() => snapToPhotoAnchor();
 
   /// Runs non-blocking Layer 5 IP-country check when online (fails open).
   Future<void> refreshIpIntegrityCheck({bool force = false}) async {
@@ -805,6 +845,14 @@ class ReportWizardViewModel extends ChangeNotifier {
     }
     _isHoldRecording = false;
     await _startVoiceSession();
+  }
+
+  /// Finalizes and persists any active voice recording before the citizen
+  /// leaves Step 2 so offline voice memos are never dropped on navigation.
+  Future<void> stopVoiceRecordingIfActive() async {
+    if (!_isRecordingVoice) return;
+    _isHoldRecording = false;
+    await _stopVoiceRecording();
   }
 
   /// Explicitly starts a local audio voice memo (used both automatically when

@@ -22,6 +22,7 @@ import '../../core/widgets/bilingual_text.dart';
 import '../../core/widgets/photo_lightbox_page.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/report_photo.dart';
+import '../../core/widgets/voice_memo_player_card.dart';
 import '../report/views/fake_gps_page.dart';
 import '../report/views/report_wizard_page.dart';
 import '../tracking/tracking_page.dart';
@@ -786,25 +787,32 @@ class _MapPageState extends State<MapPage> {
                         Row(
                           children: [
                             Semantics(
-                              button: true,
-                              excludeSemantics: true,
-                              label: tr.primary(
-                                'មើលរូបភាពពេញអេក្រង់',
-                                'View full photo',
-                              ),
+                              button: live.hasPhoto,
+                              excludeSemantics: live.hasPhoto,
+                              label: live.hasPhoto
+                                  ? tr.primary(
+                                      'មើលរូបភាពពេញអេក្រង់',
+                                      'View full photo',
+                                    )
+                                  : tr.primary(
+                                      'គ្មានរូបភាពភ្ជាប់',
+                                      'No photo attached',
+                                    ),
                               child: InkWell(
-                                onTap: () => PhotoLightboxPage.open(
-                                  context,
-                                  category: live.category,
-                                  bilingual: tr,
-                                  localPhotoPath: live.localPhotoPath,
-                                  assetPath: live.photoAssetPath,
-                                  title: tr.primary(
-                                    live.khmerTitle,
-                                    live.englishTitle,
-                                  ),
-                                  subtitle: live.id,
-                                ),
+                                onTap: live.hasPhoto
+                                    ? () => PhotoLightboxPage.open(
+                                        context,
+                                        category: live.category,
+                                        bilingual: tr,
+                                        localPhotoPath: live.localPhotoPath,
+                                        assetPath: live.photoAssetPath,
+                                        title: tr.primary(
+                                          live.khmerTitle,
+                                          live.englishTitle,
+                                        ),
+                                        subtitle: live.id,
+                                      )
+                                    : null,
                                 borderRadius: BorderRadius.circular(16),
                                 child: ReportPhoto(
                                   category: live.category,
@@ -813,6 +821,7 @@ class _MapPageState extends State<MapPage> {
                                   width: 76,
                                   height: 76,
                                   borderRadius: 16,
+                                  bilingual: tr,
                                 ),
                               ),
                             ),
@@ -896,6 +905,11 @@ class _MapPageState extends State<MapPage> {
                                     Text(
                                       live.hasDescription
                                           ? live.description.trim()
+                                          : live.hasVoiceAudioMemo
+                                          ? tr.primary(
+                                              'បានភ្ជាប់កំណត់ត្រាសំឡេង (${VoiceMemoPlayerCard.formatDuration(live.voiceAudioDurationSeconds)})',
+                                              'Voice memo attached (${VoiceMemoPlayerCard.formatDuration(live.voiceAudioDurationSeconds)})',
+                                            )
                                           : tr.primary(
                                               'គ្មានមតិបន្ថែម',
                                               'No comment',
@@ -905,10 +919,14 @@ class _MapPageState extends State<MapPage> {
                                       style: TextStyle(
                                         fontSize: 12.5,
                                         height: 1.4,
-                                        color: live.hasDescription
+                                        color:
+                                            (live.hasDescription ||
+                                                live.hasVoiceAudioMemo)
                                             ? AppColors.ink
                                             : AppColors.muted,
-                                        fontStyle: live.hasDescription
+                                        fontStyle:
+                                            (live.hasDescription ||
+                                                live.hasVoiceAudioMemo)
                                             ? FontStyle.normal
                                             : FontStyle.italic,
                                       ),
@@ -948,6 +966,16 @@ class _MapPageState extends State<MapPage> {
                             ],
                           ),
                         ),
+                        if (live.hasVoiceAudioMemo) ...[
+                          const SizedBox(height: 8),
+                          VoiceMemoPlayerCard(
+                            key: const Key('map-sheet-voice-memo-card'),
+                            audioPath: live.voiceAudioPath!,
+                            durationSeconds: live.voiceAudioDurationSeconds,
+                            bilingual: tr,
+                            compact: true,
+                          ),
+                        ],
                         const SizedBox(height: 10),
                         Wrap(
                           spacing: 8,

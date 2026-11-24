@@ -74,7 +74,6 @@ abstract final class AiClassifierService {
   static AiClassificationResult classify({
     required String description,
     required IssueCategory selectedCategory,
-    bool hasCustomPhoto = false,
   }) {
     // Remove common landmark phrases that cause false positives.
     final normalized = description

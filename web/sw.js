@@ -2,11 +2,11 @@
 
 // SrolanhCity Offline-First PWA Service Worker
 // Caches the Flutter Web app shell, local CanvasKit, bundled assets, Khmer/English
-// fonts, and recently visited map tiles (CARTO Voyager CDN + OSM fallback) so
-// the installed PWA launches fast and reliably even in Airplane Mode.
+// fonts, and recently visited OpenStreetMap tiles (cache-first) so the installed
+// PWA launches fast and reliably even in Airplane Mode.
 
-const APP_CACHE = 'srolanhcity-app-v4';
-const TILE_CACHE = 'srolanhcity-tiles-v2';
+const APP_CACHE = 'srolanhcity-app-v5';
+const TILE_CACHE = 'srolanhcity-tiles-v3';
 const MAX_CACHED_TILES = 400;
 const TILE_PRUNE_BATCH = 25;
 
@@ -44,14 +44,14 @@ const PRECACHE_URLS = [
 // Opportunistic non-blocking warm-up tiles for Cambodia overview (z7) and
 // Phnom Penh default view (z14) so first Map tab open renders immediately.
 const WARM_TILE_URLS = [
-  'https://basemaps.cartocdn.com/rastertiles/voyager/7/100/58.png',
-  'https://basemaps.cartocdn.com/rastertiles/voyager/7/101/58.png',
-  'https://basemaps.cartocdn.com/rastertiles/voyager/7/100/59.png',
-  'https://basemaps.cartocdn.com/rastertiles/voyager/7/101/59.png',
-  'https://basemaps.cartocdn.com/rastertiles/voyager/14/12966/7661.png',
-  'https://basemaps.cartocdn.com/rastertiles/voyager/14/12967/7661.png',
-  'https://basemaps.cartocdn.com/rastertiles/voyager/14/12966/7662.png',
-  'https://basemaps.cartocdn.com/rastertiles/voyager/14/12967/7662.png',
+  'https://tile.openstreetmap.org/7/100/58.png',
+  'https://tile.openstreetmap.org/7/101/58.png',
+  'https://tile.openstreetmap.org/7/100/59.png',
+  'https://tile.openstreetmap.org/7/101/59.png',
+  'https://tile.openstreetmap.org/14/12966/7661.png',
+  'https://tile.openstreetmap.org/14/12967/7661.png',
+  'https://tile.openstreetmap.org/14/12966/7662.png',
+  'https://tile.openstreetmap.org/14/12967/7662.png',
 ];
 
 const NETWORK_FIRST_PATHS = [
@@ -63,11 +63,7 @@ const NETWORK_FIRST_PATHS = [
 ];
 
 function isMapTileHost(hostname) {
-  return (
-    hostname === 'basemaps.cartocdn.com' ||
-    hostname.endsWith('.basemaps.cartocdn.com') ||
-    hostname === 'tile.openstreetmap.org'
-  );
+  return hostname === 'tile.openstreetmap.org';
 }
 
 async function warmDefaultTiles() {
@@ -195,9 +191,9 @@ async function pruneTileCache(cache) {
 
 async function cacheTile(request) {
   const cache = await caches.open(TILE_CACHE);
-  // True cache-first: CARTO Voyager tiles are immutable CDN assets (max-age=30d),
-  // so skip background network fetches on cache hits to prevent connection
-  // saturation and keep repeat map opens instant.
+  // True cache-first: serve cached map tiles immediately without triggering
+  // redundant background fetches that saturate mobile connections or trip OSM
+  // rate limits.
   const cached = await cache.match(request);
   if (cached) {
     return cached;
@@ -242,7 +238,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Map tiles (cache-first offline tile cache for CARTO CDN + OSM)
+  // 2. OpenStreetMap map tiles (cache-first offline tile cache)
   if (isMapTileHost(url.hostname)) {
     event.respondWith(cacheTile(request));
     return;
