@@ -778,6 +778,98 @@ class _TrackingPageState extends State<TrackingPage> {
                                       ],
                                     ],
                                   ),
+                                  if (report.photoLocationUnverified) ...[
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      key: const Key(
+                                        'tracking-unverified-photo-badge',
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.saffronSoft,
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.policy_outlined,
+                                            size: 12,
+                                            color: AppColors.saffronInk,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Flexible(
+                                            child: Text(
+                                              tr.primary(
+                                                'ទីតាំងរូបថតរង់ចាំផ្ទៀងផ្ទាត់',
+                                                'Photo location unverified · Under review',
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w700,
+                                                color: AppColors.saffronInk,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ] else if (report.locationVerificationTier ==
+                                          ReportLocationVerificationTier
+                                              .photoExifVerified ||
+                                      report.locationVerificationTier ==
+                                          ReportLocationVerificationTier
+                                              .liveCameraVerified) ...[
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      key: const Key(
+                                        'tracking-photo-verified-badge',
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.successSoft,
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.verified_rounded,
+                                            size: 12,
+                                            color: AppColors.success,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Flexible(
+                                            child: Text(
+                                              tr.primary(
+                                                'ផ្ទៀងផ្ទាត់ GPS រូបថត',
+                                                'Photo GPS verified',
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w700,
+                                                color: AppColors.tealDark,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),

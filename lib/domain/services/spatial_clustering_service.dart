@@ -33,13 +33,60 @@ abstract final class SpatialClusteringService {
 
   /// Finds the nearest open Master Incident matching [category] within
   /// [radiusMeters] (or within [sameRoadRadiusMeters] if on the same road),
-  /// or returns `null` if no duplicate exists nearby.
+  /// checking both the dragged [point] and an optional [secondaryAnchorPoint]
+  /// (photo EXIF or live camera capture coordinates) so sliding a pin 150–240 m
+  /// down the road cannot silently bypass an existing Master Incident.
   static DuplicateMatch? findNearestDuplicate({
     required LatLng point,
     required IssueCategory category,
     required Iterable<CivicReport> existingReports,
     double radiusMeters = defaultRadiusMeters,
     String? roadName,
+    LatLng? secondaryAnchorPoint,
+  }) {
+    final pinMatch = _findNearestForSinglePoint(
+      point: point,
+      category: category,
+      existingReports: existingReports,
+      radiusMeters: radiusMeters,
+      roadName: roadName,
+      matchedViaPhotoAnchor: false,
+    );
+
+    if (secondaryAnchorPoint == null) return pinMatch;
+
+    final anchorMatch = _findNearestForSinglePoint(
+      point: secondaryAnchorPoint,
+      category: category,
+      existingReports: existingReports,
+      radiusMeters: radiusMeters,
+      roadName: roadName,
+      matchedViaPhotoAnchor: true,
+    );
+
+    if (anchorMatch == null) return pinMatch;
+    if (pinMatch == null) return anchorMatch;
+    if (pinMatch.masterReport.id == anchorMatch.masterReport.id) {
+      return DuplicateMatch(
+        masterReport: pinMatch.masterReport,
+        distanceMeters: pinMatch.distanceMeters <= anchorMatch.distanceMeters
+            ? pinMatch.distanceMeters
+            : anchorMatch.distanceMeters,
+        matchedViaPhotoAnchor: false,
+      );
+    }
+    return anchorMatch.distanceMeters < pinMatch.distanceMeters
+        ? anchorMatch
+        : pinMatch;
+  }
+
+  static DuplicateMatch? _findNearestForSinglePoint({
+    required LatLng point,
+    required IssueCategory category,
+    required Iterable<CivicReport> existingReports,
+    required double radiusMeters,
+    required String? roadName,
+    required bool matchedViaPhotoAnchor,
   }) {
     final normalizedTargetRoad = _normalizeRoad(roadName);
     DuplicateMatch? closest;
@@ -68,7 +115,11 @@ abstract final class SpatialClusteringService {
 
       if ((withinDirectRadius || withinSameRoadRadius) &&
           (closest == null || meters < closest.distanceMeters)) {
-        closest = DuplicateMatch(masterReport: report, distanceMeters: meters);
+        closest = DuplicateMatch(
+          masterReport: report,
+          distanceMeters: meters,
+          matchedViaPhotoAnchor: matchedViaPhotoAnchor,
+        );
       }
     }
 

@@ -13,6 +13,7 @@ import 'package:my_app/data/services/location_service.dart';
 import 'package:my_app/data/services/photo_media_types.dart';
 import 'package:my_app/data/services/voice_input_service.dart';
 import 'package:my_app/domain/models/report_models.dart';
+import 'package:my_app/domain/services/report_location_eligibility_service.dart';
 import 'package:my_app/main.dart';
 import 'package:my_app/ui/core/report_scope.dart';
 import 'package:my_app/ui/core/theme.dart';
@@ -29,6 +30,7 @@ import 'package:my_app/ui/features/profile/profile_page.dart';
 import 'package:my_app/ui/features/report/views/fake_gps_page.dart';
 import 'package:my_app/ui/features/report/views/report_wizard_page.dart';
 import 'package:my_app/ui/features/shell/main_shell.dart';
+import 'package:my_app/ui/features/staff/staff_console_page.dart';
 import 'package:my_app/ui/features/tracking/tracking_page.dart';
 
 Widget _wrapWithScope(ReportRepository repo, Widget child) {
@@ -485,18 +487,29 @@ void main() {
         initialSettings: const AppSettings(englishFirst: true),
       );
 
-      // Verify MapPage configures Cambodia bounds & zoom limits
+      // Verify MapPage configures Cambodia bounds, zoom limits, and fast CDN tile layer
       await tester.pumpWidget(_wrapWithScope(repo, const MapPage()));
       await tester.pump();
       final mapWidget = tester.widget<FlutterMap>(find.byType(FlutterMap));
       expect(mapWidget.options.minZoom, equals(LocationService.minMapZoom));
       expect(mapWidget.options.maxZoom, equals(LocationService.maxMapZoom));
+      expect(mapWidget.options.backgroundColor, equals(AppColors.mutedSurface));
       expect(
         mapWidget.options.cameraConstraint,
         equals(
           CameraConstraint.contain(bounds: LocationService.cambodiaMapBounds),
         ),
       );
+      final tileLayer = tester.widget<TileLayer>(find.byType(TileLayer));
+      expect(
+        tileLayer.urlTemplate,
+        equals(
+          'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+        ),
+      );
+      expect(tileLayer.panBuffer, equals(0));
+      expect(tileLayer.fallbackUrl, isNull);
+      expect(find.text('© OpenStreetMap · CARTO'), findsOneWidget);
 
       // Verify ProfilePage keeps a clean citizen UI with zero API-key/developer settings
       await tester.pumpWidget(_wrapWithScope(repo, const MainShell()));
@@ -875,6 +888,13 @@ void main() {
           ReportWizardPage(
             initialCategory: seededMine.category,
             initialCoordinates: seededMine.coordinates,
+            locationService: _FakeLocationService(
+              LocationSuccess(
+                point: seededMine.coordinates,
+                accuracyMeters: 8,
+                isOutsideCambodia: false,
+              ),
+            ),
             voiceInputService: _UnavailableTestVoiceService(),
             civicAiService: _UnconfiguredTestAiService(),
           ),
@@ -1050,6 +1070,13 @@ void main() {
           ReportWizardPage(
             initialCategory: neighbor.category,
             initialCoordinates: neighbor.coordinates,
+            locationService: _FakeLocationService(
+              LocationSuccess(
+                point: neighbor.coordinates,
+                accuracyMeters: 10,
+                isOutsideCambodia: false,
+              ),
+            ),
             voiceInputService: _UnavailableTestVoiceService(),
             civicAiService: _UnconfiguredTestAiService(),
           ),
@@ -1217,13 +1244,13 @@ void main() {
   );
 
   testWidgets(
-    'ReportWizard Step 3 displays Photo GPS verified pill when EXIF matches and warning banner with Use photo location when EXIF is far away',
+    'ReportWizard Step 3 displays Photo GPS verified pill when EXIF matches and hard-blocks with Snap to photo location when EXIF is > 250 m away',
     (tester) async {
       final repo = ReportRepository(
         initialSettings: const AppSettings(englishFirst: true),
       );
 
-      // Case 1: Matching Phnom Penh EXIF (non-duplicate spot) -> green verified pill
+      // Case 1: Matching Phnom Penh EXIF (<= 250 m) -> green verified pill
       await tester.pumpWidget(
         _wrapWithScope(
           repo,
@@ -1247,12 +1274,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.byKey(const Key('step3-exif-verified-pill')), findsOneWidget);
-      expect(
-        find.byKey(const Key('step3-integrity-warning-banner')),
-        findsNothing,
-      );
+      expect(find.byKey(const Key('step3-photo-anchor-blocker')), findsNothing);
 
-      // Case 2: EXIF in Siem Reap while pinned in Phnom Penh -> saffron warning + 1-tap button
+      // Case 2: EXIF in Siem Reap while pinned in Phnom Penh (even with local PP GPS)
+      // -> hard-blocked by 250 m Photo-Anchored Fence + 1-tap Snap to photo location
       await tester.pumpWidget(
         _wrapWithScope(
           repo,
@@ -1262,6 +1287,13 @@ void main() {
             initialPhotoExif: PhotoExifMetadata(
               coordinates: const LatLng(13.3633, 103.8564),
               capturedAt: DateTime.now().subtract(const Duration(minutes: 10)),
+            ),
+            locationService: const _FakeLocationService(
+              LocationSuccess(
+                point: LatLng(11.5320, 104.9045),
+                accuracyMeters: 10,
+                isOutsideCambodia: false,
+              ),
             ),
             voiceInputService: _UnavailableTestVoiceService(),
             civicAiService: _UnconfiguredTestAiService(),
@@ -1277,10 +1309,33 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(
-        find.byKey(const Key('step3-integrity-warning-banner')),
+        find.byKey(const Key('step3-photo-anchor-blocker')),
         findsOneWidget,
       );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const Key('step3-submit-report-btn')),
+            )
+            .onPressed,
+        isNull,
+      );
       expect(find.byKey(const Key('step3-use-photo-gps-btn')), findsOneWidget);
+
+      // 1-tap "Snap to photo location" moves pin to photo EXIF and enables Submit
+      await tester.tap(find.byKey(const Key('step3-use-photo-gps-btn')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byKey(const Key('step3-exif-verified-pill')), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const Key('step3-submit-report-btn')),
+            )
+            .onPressed,
+        isNotNull,
+      );
     },
   );
 
@@ -1298,6 +1353,13 @@ void main() {
           ReportWizardPage(
             initialCategory: IssueCategory.pothole,
             initialCoordinates: const LatLng(11.5318, 104.9044),
+            locationService: const _FakeLocationService(
+              LocationSuccess(
+                point: LatLng(11.5319, 104.9044),
+                accuracyMeters: 9,
+                isOutsideCambodia: false,
+              ),
+            ),
             voiceInputService: _UnavailableTestVoiceService(),
             audioRecorderService: _WidgetFakeAudioRecorderService(),
             audioPlayerService: _WidgetFakeAudioPlayerService(),
@@ -1895,6 +1957,409 @@ void main() {
 
         expect(find.byType(HelpCenterPage), findsOneWidget);
         expect(find.text('How is P5 priority calculated?'), findsOneWidget);
+      },
+    );
+  });
+
+  group('ReportWizard Step 3 Smart Distance Gate (Rule #1)', () {
+    testWidgets(
+      'Blocks Siem Reap GPS from submitting in Phnom Penh, and Jump to my GPS unblocks submission',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        const siemReapGps = LatLng(13.3633, 103.8564);
+        const phnomPenhSpot = LatLng(11.5318, 104.9044);
+
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            ReportWizardPage(
+              initialCategory: IssueCategory.pothole,
+              initialCoordinates: phnomPenhSpot,
+              locationService: const _FakeLocationService(
+                LocationSuccess(
+                  point: siemReapGps,
+                  accuracyMeters: 12,
+                  isOutsideCambodia: false,
+                ),
+              ),
+              voiceInputService: _UnavailableTestVoiceService(),
+              civicAiService: _UnconfiguredTestAiService(),
+              ipGeolocationService: const _TestIpGeoService(null),
+            ),
+          ),
+        );
+
+        // Step 1 -> Step 2 -> Step 3
+        await tester.tap(find.text('Next'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.textContaining('Confirm location'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        // Blocked banner shown & Submit disabled
+        expect(
+          find.byKey(const Key('step3-location-blocked-banner')),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Siem Reap'), findsWidgets);
+        final submitBtn = tester.widget<FilledButton>(
+          find.byKey(const Key('step3-submit-report-btn')),
+        );
+        expect(submitBtn.onPressed, isNull);
+
+        // Verify blocked state meets labeled tap target & contrast guidelines
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+        // Tap Jump to my GPS -> moves pin to Siem Reap & enables Submit
+        final jumpBtn = find.byKey(const Key('step3-jump-live-gps-btn'));
+        await tester.ensureVisible(jumpBtn);
+        await tester.tap(jumpBtn);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(
+          find.byKey(const Key('step3-location-blocked-banner')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('step3-location-verified-pill')),
+          findsOneWidget,
+        );
+        final enabledSubmit = tester.widget<FilledButton>(
+          find.byKey(const Key('step3-submit-report-btn')),
+        );
+        expect(enabledSubmit.onPressed, isNotNull);
+
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'Allows Siem Reap GPS to submit in Phnom Penh when matching Photo EXIF or saved Home District verifies the pin',
+      (tester) async {
+        const siemReapGps = LatLng(13.3633, 103.8564);
+        const phnomPenhSpot = LatLng(11.5318, 104.9044);
+
+        // 1. Fresh Photo EXIF at Phnom Penh pin overrides distance block
+        final exifRepo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        await tester.pumpWidget(
+          _wrapWithScope(
+            exifRepo,
+            ReportWizardPage(
+              key: const ValueKey('wizard-exif-override'),
+              initialCategory: IssueCategory.pothole,
+              initialCoordinates: phnomPenhSpot,
+              initialPhotoExif: PhotoExifMetadata(
+                coordinates: phnomPenhSpot,
+                capturedAt: DateTime.now().subtract(const Duration(hours: 2)),
+              ),
+              locationService: const _FakeLocationService(
+                LocationSuccess(
+                  point: siemReapGps,
+                  accuracyMeters: 12,
+                  isOutsideCambodia: false,
+                ),
+              ),
+              voiceInputService: _UnavailableTestVoiceService(),
+              civicAiService: _UnconfiguredTestAiService(),
+              ipGeolocationService: const _TestIpGeoService(null),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Next'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.textContaining('Confirm location'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(
+          find.byKey(const Key('step3-exif-verified-pill')),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('step3-submit-report-btn')),
+              )
+              .onPressed,
+          isNotNull,
+        );
+
+        // 2. Saved Home District (Daun Penh) allows reporting from Siem Reap
+        final homeRepo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+          initialProfile: const UserProfile(
+            homeProvinceCode: 'PP',
+            khmerHomeArea: 'ផ្សារថ្មី, ខណ្ឌដូនពេញ',
+            englishHomeArea: 'Phsar Thmei, Daun Penh',
+          ),
+        );
+        await tester.pumpWidget(
+          _wrapWithScope(
+            homeRepo,
+            ReportWizardPage(
+              key: const ValueKey('wizard-home-override'),
+              initialCategory: IssueCategory.trash,
+              initialCoordinates: const LatLng(11.5680, 104.9225), // Daun Penh
+              locationService: const _FakeLocationService(
+                LocationSuccess(
+                  point: siemReapGps,
+                  accuracyMeters: 12,
+                  isOutsideCambodia: false,
+                ),
+              ),
+              voiceInputService: _UnavailableTestVoiceService(),
+              civicAiService: _UnconfiguredTestAiService(),
+              ipGeolocationService: const _TestIpGeoService(null),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Next'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.textContaining('Confirm location'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(
+          find.byKey(const Key('step3-location-verified-pill')),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Saved Home District'), findsOneWidget);
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('step3-submit-report-btn')),
+              )
+              .onPressed,
+          isNotNull,
+        );
+      },
+    );
+
+    testWidgets(
+      'Dual Master Incident Check still detects neighbor Master Incident #SC-20519 when pin is placed 180 m away from photo capture location',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        final master = repo.findById('#SC-20519')!;
+        final draggedPin = LatLng(
+          master.coordinates.latitude + 0.0014,
+          master.coordinates.longitude + 0.0010,
+        );
+
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            ReportWizardPage(
+              initialCategory: master.category,
+              initialCoordinates: draggedPin,
+              initialPhotoExif: PhotoExifMetadata(
+                coordinates: master.coordinates,
+                capturedAt: DateTime.now().subtract(const Duration(minutes: 2)),
+              ),
+              locationService: _FakeLocationService(
+                LocationSuccess(
+                  point: master.coordinates,
+                  accuracyMeters: 10,
+                  isOutsideCambodia: false,
+                ),
+              ),
+              voiceInputService: _UnavailableTestVoiceService(),
+              civicAiService: _UnconfiguredTestAiService(),
+              ipGeolocationService: const _TestIpGeoService(null),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Next'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.textContaining('Confirm location'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(
+          find.textContaining('from where this photo was taken'),
+          findsOneWidget,
+        );
+        expect(find.text(master.id), findsOneWidget);
+        expect(find.byKey(const Key('step3-join-report-btn')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Live camera anchor hard-blocks pins > 250 m away, passes WCAG 2.1 AA, and unblocks on Snap to photo location',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        const cameraSpot = LatLng(11.5318, 104.9044);
+        const farPin = LatLng(11.5356, 104.9044); // ~420 m away
+
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            ReportWizardPage(
+              initialCategory: IssueCategory.pothole,
+              initialCoordinates: farPin,
+              initialPhotoAnchor: PhotoLocationAnchor(
+                point: cameraSpot,
+                source: PhotoAnchorSource.liveCameraCapture,
+                capturedAt: DateTime.now(),
+              ),
+              locationService: const _FakeLocationService(
+                LocationSuccess(
+                  point: farPin,
+                  accuracyMeters: 9,
+                  isOutsideCambodia: false,
+                ),
+              ),
+              voiceInputService: _UnavailableTestVoiceService(),
+              civicAiService: _UnconfiguredTestAiService(),
+              ipGeolocationService: const _TestIpGeoService(null),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Next'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.textContaining('Confirm location'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(
+          find.byKey(const Key('step3-photo-anchor-blocker')),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('step3-submit-report-btn')),
+              )
+              .onPressed,
+          isNull,
+        );
+
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+        await tester.tap(find.byKey(const Key('step3-use-photo-gps-btn')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(find.textContaining('Live camera GPS verified'), findsOneWidget);
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const Key('step3-submit-report-btn')),
+              )
+              .onPressed,
+          isNotNull,
+        );
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'Gallery photo without EXIF stays allowed under Rule #1 and surfaces municipal review badges on Step 3, TrackingPage, and StaffConsolePage',
+      (tester) async {
+        const tinyPngDataUri =
+            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+        const spot = LatLng(11.5318, 104.9044);
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            ReportWizardPage(
+              initialCoordinates: spot,
+              initialDraft: const ReportDraft(
+                category: IssueCategory.pothole,
+                severity: 4,
+                description: 'Forwarded gallery photo of road crater',
+                isAnonymous: false,
+                localPhotoPaths: [tinyPngDataUri],
+              ),
+              locationService: const _FakeLocationService(
+                LocationSuccess(
+                  point: spot,
+                  accuracyMeters: 10,
+                  isOutsideCambodia: false,
+                ),
+              ),
+              voiceInputService: _UnavailableTestVoiceService(),
+              civicAiService: _UnconfiguredTestAiService(),
+              ipGeolocationService: const _TestIpGeoService(null),
+            ),
+          ),
+        );
+
+        // Draft starts on Step 2 -> advance directly to Step 3
+        await tester.tap(find.textContaining('Confirm location'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(
+          find.byKey(const Key('step3-unverified-photo-pill')),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const Key('step3-submit-report-btn')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        final created = repo.reports.first;
+        expect(created.photoLocationUnverified, isTrue);
+
+        // Verify TrackingPage renders the unverified photo badge in a fresh MaterialApp
+        await tester.pumpWidget(
+          ReportScope(
+            key: const ValueKey('tracking-unverified-scope'),
+            repository: repo,
+            child: MaterialApp(
+              theme: buildSrolanhCityTheme(),
+              home: TrackingPage(reportId: created.id),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('tracking-unverified-photo-badge')),
+          findsOneWidget,
+        );
+
+        // Verify StaffConsolePage renders "Verify photo spot" chip on split view
+        await tester.pumpWidget(
+          ReportScope(
+            key: const ValueKey('staff-unverified-scope'),
+            repository: repo,
+            child: MaterialApp(
+              theme: buildSrolanhCityTheme(),
+              home: const StaffConsolePage(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField).first, created.id);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('staff-unverified-photo-chip')),
+          findsOneWidget,
+        );
       },
     );
   });

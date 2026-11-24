@@ -559,12 +559,15 @@ class ReportRepository extends ChangeNotifier {
   }
 
   /// Checks whether an open Master Incident of the same [category] exists
-  /// within the 50 m spatial clustering radius (or 120 m on the same road).
+  /// within the 100 m spatial clustering radius (or 150 m on the same road),
+  /// evaluating both [point] and an optional [photoAnchorPoint] (EXIF / live
+  /// camera coordinates) so sliding a pin away cannot bypass deduplication.
   DuplicateMatch? findDuplicateNearby({
     required LatLng point,
     required IssueCategory category,
     double radiusMeters = SpatialClusteringService.defaultRadiusMeters,
     String? roadName,
+    LatLng? photoAnchorPoint,
   }) {
     return SpatialClusteringService.findNearestDuplicate(
       point: point,
@@ -572,12 +575,14 @@ class ReportRepository extends ChangeNotifier {
       existingReports: _reports,
       radiusMeters: radiusMeters,
       roadName: roadName,
+      secondaryAnchorPoint: photoAnchorPoint,
     );
   }
 
   /// Submits a citizen report. Merges into an existing Master Incident if an
-  /// open same-category incident lies within 50 m (or 120 m on the same road)
-  /// unless [forceCreateNew] is set ("It's a different problem").
+  /// open same-category incident lies within 100 m (or 150 m on the same road)
+  /// of either [coordinates] or [photoAnchorCoordinates], unless
+  /// [forceCreateNew] is set ("It's a different problem").
   ReportSubmissionResult submitReport({
     required IssueCategory category,
     required String description,
@@ -591,6 +596,9 @@ class ReportRepository extends ChangeNotifier {
     String? voiceAudioPath,
     int? voiceAudioDurationSeconds,
     GeocodedPlace? geocodedPlace,
+    LatLng? photoAnchorCoordinates,
+    ReportLocationVerificationTier? locationVerificationTier,
+    bool photoLocationUnverified = false,
     bool forceCreateNew = false,
     DateTime? now,
   }) {
@@ -600,6 +608,7 @@ class ReportRepository extends ChangeNotifier {
       point: coordinates,
       category: category,
       roadName: geocodedPlace?.roadName,
+      photoAnchorPoint: photoAnchorCoordinates,
     );
 
     // Block the same user from duplicating or self-inflating a report they
@@ -750,6 +759,8 @@ class ReportRepository extends ChangeNotifier {
       exifStripped: true,
       isMine: true,
       createdByCurrentUser: true,
+      locationVerificationTier: locationVerificationTier,
+      photoLocationUnverified: photoLocationUnverified,
       syncStatus: _isOnline ? SyncStatus.synced : SyncStatus.pendingSync,
       voiceTranscript: voiceTranscript,
       voiceAudioPath: voiceAudioPath,

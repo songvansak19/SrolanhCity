@@ -61,10 +61,15 @@ class DuplicateMatch {
   const DuplicateMatch({
     required this.masterReport,
     required this.distanceMeters,
+    this.matchedViaPhotoAnchor = false,
   });
 
   final CivicReport masterReport;
   final double distanceMeters;
+
+  /// True when the match was triggered by the attached photo's capture
+  /// coordinates after the user dragged the map pin outside the 100 m radius.
+  final bool matchedViaPhotoAnchor;
 }
 
 /// Outcome of submitting a citizen report (created new vs merged into Master).

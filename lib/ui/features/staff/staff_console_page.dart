@@ -464,14 +464,50 @@ class _StaffInspector extends StatelessWidget {
               ),
               label: Text('AI 96% ${live.category.englishName}'),
             ),
-            Chip(
-              avatar: const Icon(
-                Icons.verified_outlined,
-                size: 15,
-                color: AppColors.success,
+            if (live.photoLocationUnverified)
+              Chip(
+                key: const Key('staff-unverified-photo-chip'),
+                backgroundColor: AppColors.saffronSoft,
+                side: BorderSide(
+                  color: AppColors.saffron.withValues(alpha: 0.7),
+                ),
+                avatar: const Icon(
+                  Icons.policy_outlined,
+                  size: 15,
+                  color: AppColors.saffronInk,
+                ),
+                label: Text(
+                  tr.primary('ត្រូវពិនិត្យទីតាំងរូបថត', 'Verify photo spot'),
+                  style: const TextStyle(
+                    color: AppColors.saffronInk,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              )
+            else if (live.locationVerificationTier ==
+                    ReportLocationVerificationTier.photoExifVerified ||
+                live.locationVerificationTier ==
+                    ReportLocationVerificationTier.liveCameraVerified)
+              Chip(
+                key: const Key('staff-photo-verified-chip'),
+                avatar: const Icon(
+                  Icons.verified_outlined,
+                  size: 15,
+                  color: AppColors.success,
+                ),
+                label: Text(
+                  tr.primary('ផ្ទៀងផ្ទាត់ GPS រូបថត', 'Photo GPS verified'),
+                ),
+              )
+            else
+              Chip(
+                avatar: const Icon(
+                  Icons.verified_outlined,
+                  size: 15,
+                  color: AppColors.success,
+                ),
+                label: Text('GPS OK ×${live.affectedCitizens}'),
               ),
-              label: Text('GPS OK ×${live.affectedCitizens}'),
-            ),
             Chip(label: Text(tr.statusPrimary(live.status))),
           ],
         ),

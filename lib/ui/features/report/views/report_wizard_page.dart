@@ -18,9 +18,12 @@ import '../../../../data/services/voice_input_service.dart';
 import '../../../../domain/models/report_models.dart';
 import '../../../../domain/models/routing_result.dart';
 import '../../../../domain/services/anti_spoof_service.dart';
+import '../../../../domain/services/report_location_eligibility_service.dart';
 import '../../../../domain/services/spatial_clustering_service.dart';
+import '../../../../domain/services/support_eligibility_service.dart';
 import '../../../core/assistant/assistant_bubble_suppressor.dart';
 import '../../../core/l10n.dart';
+import '../../../core/map_tile_config.dart';
 import '../../../core/report_scope.dart';
 import '../../../core/theme.dart';
 import '../../../core/widgets/bilingual_text.dart';
@@ -28,6 +31,7 @@ import '../../../core/widgets/photo_lightbox_page.dart';
 import '../../../core/widgets/priority_badge.dart';
 import '../../../core/widgets/report_photo.dart';
 import '../../../core/widgets/voice_waveform.dart';
+import '../../profile/edit_profile_page.dart';
 import '../../tracking/tracking_page.dart';
 import '../view_models/report_wizard_view_model.dart';
 import 'fake_gps_page.dart';
@@ -40,6 +44,7 @@ class ReportWizardPage extends StatefulWidget {
     this.initialCoordinates,
     this.initialDraft,
     this.initialPhotoExif,
+    this.initialPhotoAnchor,
     this.locationService = const LocationService(),
     this.geocodingService,
     this.voiceInputService,
@@ -53,6 +58,7 @@ class ReportWizardPage extends StatefulWidget {
   final LatLng? initialCoordinates;
   final ReportDraft? initialDraft;
   final PhotoExifMetadata? initialPhotoExif;
+  final PhotoLocationAnchor? initialPhotoAnchor;
   final LocationService locationService;
   final ReverseGeocodingService? geocodingService;
   final VoiceInputService? voiceInputService;
@@ -75,6 +81,7 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
   bool _mapReady = false;
   bool _isDraggingMap = false;
   bool _isPlayingVoiceMemo = false;
+  bool _autoGpsRequested = false;
   int _previousStep = 0;
 
   @override
@@ -103,6 +110,9 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
       );
       if (widget.initialPhotoExif != null) {
         _viewModel!.setPhotoExifMetadata(widget.initialPhotoExif);
+      }
+      if (widget.initialPhotoAnchor != null) {
+        _viewModel!.setPhotoLocationAnchor(widget.initialPhotoAnchor);
       }
       _previousStep = _viewModel!.step;
       _descriptionController.text = _viewModel!.description;
@@ -229,21 +239,24 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
         );
         if (!mounted || results.isEmpty) return;
         final validPaths = <String>[];
-        PhotoExifMetadata? bestExif;
+        final perPhotoExif = <PhotoExifMetadata?>[];
         var hadUnsupported = false;
         for (final item in results) {
           if (item.isValid) {
             validPaths.add(item.path);
-            if (!item.exifMetadata.isEmpty) {
-              bestExif ??= item.exifMetadata;
-            }
+            perPhotoExif.add(
+              item.exifMetadata.isEmpty ? null : item.exifMetadata,
+            );
           } else if (item.unsupportedFormat) {
             hadUnsupported = true;
           }
         }
         if (validPaths.isNotEmpty) {
           HapticFeedback.selectionClick();
-          _viewModel?.addLocalPhotoPaths(validPaths, exifMetadata: bestExif);
+          _viewModel?.addLocalPhotoPaths(
+            validPaths,
+            perPhotoExif: perPhotoExif,
+          );
         }
         if (hadUnsupported && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -280,10 +293,17 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
         return;
       }
       HapticFeedback.selectionClick();
-      _viewModel?.addLocalPhotoPath(
+      final added = vm.addLocalPhotoPath(
         result.path,
         exifMetadata: result.exifMetadata,
       );
+      final hasInCambodiaExif =
+          result.exifMetadata.coordinates != null &&
+          LocationService.isInsideCambodia(result.exifMetadata.coordinates!);
+      if (added && source == ImageSource.camera && !hasInCambodiaExif) {
+        final photoIndex = vm.localPhotoPaths.length - 1;
+        unawaited(_captureLiveCameraAnchor(vm, photoIndex, tr));
+      }
     } on PlatformException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -411,14 +431,113 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
     );
   }
 
-  Future<void> _verifyGpsLocation(Bilingual tr) async {
+  /// Captures a fast, anti-spoof-verified live GPS anchor when the citizen
+  /// shoots a photo directly with the in-app camera and the OS/browser strips
+  /// EXIF GPS metadata.
+  Future<void> _captureLiveCameraAnchor(
+    ReportWizardViewModel vm,
+    int photoIndex,
+    Bilingual tr,
+  ) async {
+    final result = await widget.locationService.getCurrentLocation(
+      fastFix: true,
+    );
+    if (!mounted) return;
+    switch (result) {
+      case LocationSuccess(:final point, :final isOutsideCambodia):
+        if (isOutsideCambodia) return;
+        final spoofCheck = AntiSpoofService.evaluateGpsFix(
+          current: result.toReadingSample(),
+          lastCheckpoint: vm.repository.lastVerifiedGpsCheckpoint,
+        );
+        if (spoofCheck.isBlocked) {
+          vm.recordLiveGpsResult(
+            LocationMockDetected(
+              point: point,
+              detectedLabel:
+                  spoofCheck.detectedLabel ?? 'Mock GPS / Spoofing Provider',
+              reasonKhmer: spoofCheck.khmerSummary,
+              reasonEnglish: spoofCheck.englishSummary,
+            ),
+          );
+          await Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => FakeGpsPage(
+                detectedAppLabel:
+                    spoofCheck.detectedLabel ?? 'Mock GPS / Spoofing Provider',
+                detailKhmer: spoofCheck.khmerSummary,
+                detailEnglish: spoofCheck.englishSummary,
+                onOpenSettings: widget.locationService.openLocationSettings,
+                onTryAgain: () {
+                  Navigator.pop(context);
+                  _verifyGpsLocation(tr);
+                },
+              ),
+            ),
+          );
+          return;
+        }
+        vm.repository.recordVerifiedGpsCheckpoint(
+          point,
+          timestamp: result.timestamp,
+        );
+        vm.recordLiveGpsResult(result, movePinToGps: false);
+        vm.attachLiveCameraAnchorToPhotoAt(
+          photoIndex,
+          PhotoLocationAnchor(
+            point: point,
+            source: PhotoAnchorSource.liveCameraCapture,
+            capturedAt: result.timestamp,
+          ),
+        );
+      case LocationMockDetected(
+        :final detectedLabel,
+        :final reasonKhmer,
+        :final reasonEnglish,
+      ):
+        vm.recordLiveGpsResult(result);
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => FakeGpsPage(
+              detectedAppLabel: detectedLabel,
+              detailKhmer: reasonKhmer,
+              detailEnglish: reasonEnglish,
+              onOpenSettings: widget.locationService.openLocationSettings,
+              onTryAgain: () {
+                Navigator.pop(context);
+                _verifyGpsLocation(tr);
+              },
+            ),
+          ),
+        );
+      default:
+        break;
+    }
+  }
+
+  void _maybeTriggerAutoGps(Bilingual tr) {
+    if (_autoGpsRequested) return;
+    _autoGpsRequested = true;
+    unawaited(_verifyGpsLocation(tr, autoRequest: true));
+  }
+
+  Future<void> _verifyGpsLocation(
+    Bilingual tr, {
+    bool autoRequest = false,
+  }) async {
     final vm = _viewModel;
     if (vm == null || vm.isLocating) return;
 
-    HapticFeedback.selectionClick();
+    if (!autoRequest) {
+      HapticFeedback.selectionClick();
+    }
     vm.setLocating(true);
     try {
-      final result = await widget.locationService.getCurrentLocation();
+      final result = await widget.locationService.getCurrentLocation(
+        fastFix: autoRequest,
+      );
       if (!mounted) return;
 
       switch (result) {
@@ -438,6 +557,16 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
               lastCheckpoint: vm.repository.lastVerifiedGpsCheckpoint,
             );
             if (spoofCheck.isBlocked) {
+              vm.recordLiveGpsResult(
+                LocationMockDetected(
+                  point: point,
+                  detectedLabel:
+                      spoofCheck.detectedLabel ??
+                      'Mock GPS / Spoofing Provider',
+                  reasonKhmer: spoofCheck.khmerSummary,
+                  reasonEnglish: spoofCheck.englishSummary,
+                ),
+              );
               await Navigator.push<void>(
                 context,
                 MaterialPageRoute<void>(
@@ -461,20 +590,25 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
               point,
               timestamp: result.timestamp,
             );
-            vm.setPinLocation(
-              point,
-              verified: true,
-              fromLiveGps: true,
-              accuracyMeters: accuracyMeters,
-            );
-            if (_mapReady) _mapController.move(point, 17.5);
-            await _reverseGeocodeCurrentPin(point);
+            final shouldMovePin =
+                !autoRequest ||
+                (widget.initialCoordinates == null &&
+                    !vm.userManuallyMovedPin &&
+                    vm.activePhotoAnchor == null);
+            vm.recordLiveGpsResult(result, movePinToGps: shouldMovePin);
+            if (shouldMovePin) {
+              if (_mapReady) {
+                _mapController.move(point, MapTileConfig.streetFocusZoom);
+              }
+              await _reverseGeocodeCurrentPin(point);
+            }
           }
         case LocationMockDetected(
           :final detectedLabel,
           :final reasonKhmer,
           :final reasonEnglish,
         ):
+          vm.recordLiveGpsResult(result);
           await Navigator.push<void>(
             context,
             MaterialPageRoute<void>(
@@ -491,38 +625,47 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
             ),
           );
         case LocationServiceDisabled():
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                tr.primary(
-                  'សូមបើកសេវាកម្ម GPS ឬអូសផែនទីដើម្បីកំណត់ទីតាំង',
-                  'Enable GPS services or drag the map under the pin.',
+          vm.recordLiveGpsResult(result);
+          if (!autoRequest) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  tr.primary(
+                    'សូមបើកសេវាកម្ម GPS ដើម្បីផ្ទៀងផ្ទាត់ទីតាំង',
+                    'Please enable GPS services to verify your reporting area.',
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          }
         case LocationPermissionDenied():
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                tr.primary(
-                  'ត្រូវការសិទ្ធិ GPS ឬអូសផែនទីដើម្បីបញ្ជាក់ទីតាំង',
-                  'GPS permission required, or drag the map to place the pin.',
+          vm.recordLiveGpsResult(result);
+          if (!autoRequest) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  tr.primary(
+                    'ត្រូវការសិទ្ធិ GPS ដើម្បីផ្ទៀងផ្ទាត់ទីតាំង',
+                    'Location permission is required to verify your reporting area.',
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          }
         case LocationFailure():
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                tr.primary(
-                  'មិនអាចចាប់ GPS បានទេ — អូសផែនទីដើម្បីជ្រើសទីតាំង',
-                  'GPS unavailable — drag the map under the pin.',
+          vm.recordLiveGpsResult(result);
+          if (!autoRequest) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  tr.primary(
+                    'មិនអាចចាប់ GPS បានទេ — សូមព្យាយាមម្តងទៀត ឬកំណត់តំបន់រស់នៅ',
+                    'Could not acquire GPS fix — try again or set your Home District.',
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          }
       }
     } finally {
       if (mounted) vm.setLocating(false);
@@ -557,6 +700,16 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
         vm.updatePinCoordinatesLive(_mapController.camera.center);
       }
     }
+    // Enforce Rule #1 (Smart Distance Gate) defensively before submitting.
+    if (!vm.canSubmitAtCurrentPin) {
+      final eligibility = vm.locationEligibility;
+      if (eligibility is ReportLocationDeniedLocationRequired &&
+          eligibility.pendingGpsCheck &&
+          !vm.isLocating) {
+        unawaited(_verifyGpsLocation(tr));
+      }
+      return;
+    }
     if (!vm.locationVerified) {
       vm.confirmCurrentPin();
     }
@@ -577,6 +730,7 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
     CivicReport masterReport,
     Bilingual tr,
   ) async {
+    if (!vm.canSubmitAtCurrentPin) return;
     HapticFeedback.selectionClick();
     final submitted =
         await showModalBottomSheet<
@@ -1620,6 +1774,7 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                           HapticFeedback.selectionClick();
                           vm.nextStep();
                           _reverseGeocodeCurrentPin(vm.pinLocation);
+                          _maybeTriggerAutoGps(tr);
                         },
                         child: Text(
                           tr.paired(
@@ -2420,90 +2575,123 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
     return Scaffold(
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: vm.pinLocation,
-              initialZoom: 17.0,
-              minZoom: LocationService.minMapZoom,
-              maxZoom: LocationService.maxMapZoom,
-              cameraConstraint: CameraConstraint.contain(
-                bounds: LocationService.cambodiaMapBounds,
+          MergeSemantics(
+            child: Semantics(
+              label: tr.primary(
+                'ផែនទីកំណត់ទីតាំងបញ្ហា · អូសដើម្បីផ្លាស់ទីម្ជុល',
+                'Issue location map, drag to position pin',
               ),
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
-              onMapReady: () => _mapReady = true,
-              onPositionChanged: (camera, hasGesture) {
-                if (hasGesture) {
-                  _onMapDragged(camera.center);
-                }
-              },
-              onTap: (_, point) {
-                HapticFeedback.selectionClick();
-                if (_mapReady) {
-                  _mapController.move(point, _mapController.camera.zoom);
-                }
-                vm.setPinLocation(point, verified: true, fromLiveGps: false);
-                _reverseGeocodeCurrentPin(point);
-              },
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.srolanhcity.app',
-                maxNativeZoom: 19,
-                maxZoom: 19,
-                keepBuffer: 2,
-              ),
-              CircleLayer(
-                circles: [
-                  CircleMarker(
-                    point: vm.pinLocation,
-                    radius: SpatialClusteringService.defaultRadiusMeters,
-                    useRadiusInMeter: true,
-                    color:
-                        (duplicate != null ? AppColors.saffron : AppColors.teal)
-                            .withValues(alpha: 0.16),
-                    borderColor: duplicate != null
-                        ? AppColors.priorityColor(4)
-                        : AppColors.teal,
-                    borderStrokeWidth: 2,
+              child: FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: vm.pinLocation,
+                  initialZoom: MapTileConfig.streetFocusZoom,
+                  minZoom: LocationService.minMapZoom,
+                  maxZoom: LocationService.maxMapZoom,
+                  backgroundColor: MapTileConfig.mapBackgroundColor,
+                  cameraConstraint: CameraConstraint.contain(
+                    bounds: LocationService.cambodiaMapBounds,
                   ),
-                ],
-              ),
-              MarkerLayer(
-                markers: [
-                  for (final existing in allReports.where(
-                    (r) => r.status != ReportStatus.resolved,
-                  ))
-                    Marker(
-                      point: existing.coordinates,
-                      width: 32,
-                      height: 32,
-                      child: Container(
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: AppColors.priorityColor(
-                            existing.priority.level,
-                          ),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                  ),
+                  onMapReady: () => _mapReady = true,
+                  onPositionChanged: (camera, hasGesture) {
+                    if (hasGesture) {
+                      _onMapDragged(camera.center);
+                    }
+                  },
+                  onTap: (_, point) {
+                    HapticFeedback.selectionClick();
+                    if (_mapReady) {
+                      _mapController.move(point, _mapController.camera.zoom);
+                    }
+                    vm.setPinLocation(
+                      point,
+                      verified: true,
+                      fromLiveGps: false,
+                    );
+                    _reverseGeocodeCurrentPin(point);
+                  },
+                ),
+                children: [
+                  MapTileConfig.buildTileLayer(),
+                  CircleLayer(
+                    circles: [
+                      if (vm.activePhotoAnchor != null)
+                        CircleMarker(
+                          point: vm.activePhotoAnchor!.point,
+                          radius: ReportLocationEligibilityService
+                              .maxPhotoAnchorDriftMeters,
+                          useRadiusInMeter: true,
+                          color:
+                              (vm.locationEligibility
+                                          is ReportLocationDeniedPhotoAnchorMismatch
+                                      ? AppColors.danger
+                                      : AppColors.teal)
+                                  .withValues(alpha: 0.10),
+                          borderColor:
+                              vm.locationEligibility
+                                  is ReportLocationDeniedPhotoAnchorMismatch
+                              ? AppColors.danger
+                              : AppColors.teal.withValues(alpha: 0.65),
+                          borderStrokeWidth:
+                              vm.locationEligibility
+                                  is ReportLocationDeniedPhotoAnchorMismatch
+                              ? 2.2
+                              : 1.5,
                         ),
-                        child: Text(
-                          '${existing.affectedCitizens}',
-                          style: AppFonts.displayStyle(
-                            color: AppColors.priorityForeground(
-                              existing.priority.level,
-                            ),
-                            fontSize: 10,
-                          ),
-                        ),
+                      CircleMarker(
+                        point: vm.pinLocation,
+                        radius: SpatialClusteringService.defaultRadiusMeters,
+                        useRadiusInMeter: true,
+                        color:
+                            (duplicate != null
+                                    ? AppColors.saffron
+                                    : AppColors.teal)
+                                .withValues(alpha: 0.16),
+                        borderColor: duplicate != null
+                            ? AppColors.priorityColor(4)
+                            : AppColors.teal,
+                        borderStrokeWidth: 2,
                       ),
-                    ),
+                    ],
+                  ),
+                  MarkerLayer(
+                    markers: [
+                      for (final existing in allReports.where(
+                        (r) => r.status != ReportStatus.resolved,
+                      ))
+                        Marker(
+                          point: existing.coordinates,
+                          width: 32,
+                          height: 32,
+                          child: Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppColors.priorityColor(
+                                existing.priority.level,
+                              ),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: Text(
+                              '${existing.affectedCitizens}',
+                              style: AppFonts.displayStyle(
+                                color: AppColors.priorityForeground(
+                                  existing.priority.level,
+                                ),
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  MapTileConfig.buildAttributionBadge(),
                 ],
               ),
-            ],
+            ),
           ),
 
           // Centered Grab-Style Crosshair Pin that lifts slightly while dragging
@@ -2740,7 +2928,7 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                               if (_mapReady) {
                                 _mapController.move(
                                   LocationService.phnomPenhCenter,
-                                  17,
+                                  MapTileConfig.streetFocusZoom,
                                 );
                               }
                             },
@@ -2822,11 +3010,19 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                         child: BilingualText(
                                           bilingual: tr,
                                           khmer: alreadyMine
-                                              ? 'អ្នកបានរាយការណ៍បញ្ហានេះរួចហើយ (${duplicate.distanceMeters.round()} ម៉ែត្រ)'
-                                              : 'រកឃើញរបាយការណ៍ស្រដៀងចម្ងាយ ${duplicate.distanceMeters.round()} ម៉ែត្រ',
+                                              ? (duplicate.matchedViaPhotoAnchor
+                                                    ? 'អ្នកបានរាយការណ៍បញ្ហានេះរួចហើយ (${duplicate.distanceMeters.round()} ម៉ែត្រពីទីតាំងថតរូប)'
+                                                    : 'អ្នកបានរាយការណ៍បញ្ហានេះរួចហើយ (${duplicate.distanceMeters.round()} ម៉ែត្រ)')
+                                              : (duplicate.matchedViaPhotoAnchor
+                                                    ? 'មានរបាយការណ៍ដូចគ្នាចម្ងាយ ${duplicate.distanceMeters.round()} ម៉ែត្រ ពីទីតាំងថតរូប'
+                                                    : 'រកឃើញរបាយការណ៍ស្រដៀងចម្ងាយ ${duplicate.distanceMeters.round()} ម៉ែត្រ'),
                                           english: alreadyMine
-                                              ? 'You already reported this issue (${duplicate.distanceMeters.round()} m away)'
-                                              : 'Similar report found ${duplicate.distanceMeters.round()} m away',
+                                              ? (duplicate.matchedViaPhotoAnchor
+                                                    ? 'You already reported this issue (${duplicate.distanceMeters.round()} m from photo location)'
+                                                    : 'You already reported this issue (${duplicate.distanceMeters.round()} m away)')
+                                              : (duplicate.matchedViaPhotoAnchor
+                                                    ? 'Existing report found ${duplicate.distanceMeters.round()} m from where this photo was taken'
+                                                    : 'Similar report found ${duplicate.distanceMeters.round()} m away'),
                                           fontSize: 14,
                                         ),
                                       ),
@@ -2893,7 +3089,9 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(height: 14),
+                                  const SizedBox(height: 12),
+                                  _buildLocationEligibilitySection(vm, tr),
+                                  const SizedBox(height: 12),
                                   if (alreadyMine) ...[
                                     SizedBox(
                                       width: double.infinity,
@@ -2955,19 +3153,23 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                               48,
                                             ),
                                           ),
-                                          onPressed: () =>
-                                              _openDifferentProblemSheet(
-                                                vm,
-                                                duplicate.masterReport,
-                                                tr,
-                                              ),
+                                          onPressed: vm.canSubmitAtCurrentPin
+                                              ? () =>
+                                                    _openDifferentProblemSheet(
+                                                      vm,
+                                                      duplicate.masterReport,
+                                                      tr,
+                                                    )
+                                              : null,
                                           child: Text(
                                             tr.paired(
                                               'ជាបញ្ហាផ្សេង',
                                               "It's a different problem",
                                             ),
-                                            style: const TextStyle(
-                                              color: AppColors.teal,
+                                            style: TextStyle(
+                                              color: vm.canSubmitAtCurrentPin
+                                                  ? AppColors.teal
+                                                  : AppColors.muted,
                                               fontWeight: FontWeight.w700,
                                             ),
                                           ),
@@ -2985,12 +3187,14 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                               48,
                                             ),
                                           ),
-                                          onPressed: () =>
-                                              _openDifferentProblemSheet(
-                                                vm,
-                                                duplicate.masterReport,
-                                                tr,
-                                              ),
+                                          onPressed: vm.canSubmitAtCurrentPin
+                                              ? () =>
+                                                    _openDifferentProblemSheet(
+                                                      vm,
+                                                      duplicate.masterReport,
+                                                      tr,
+                                                    )
+                                              : null,
                                           child: Text(
                                             tr.paired(
                                               'ជាបញ្ហាផ្សេង',
@@ -3007,16 +3211,19 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                     SizedBox(
                                       width: double.infinity,
                                       child: FilledButton(
+                                        key: const Key('step3-join-report-btn'),
                                         style: FilledButton.styleFrom(
                                           minimumSize: const Size.fromHeight(
                                             52,
                                           ),
                                         ),
-                                        onPressed: () => _completeSubmission(
-                                          vm,
-                                          tr,
-                                          forceCreateNew: false,
-                                        ),
+                                        onPressed: vm.canSubmitAtCurrentPin
+                                            ? () => _completeSubmission(
+                                                vm,
+                                                tr,
+                                                forceCreateNew: false,
+                                              )
+                                            : null,
                                         child: Text(
                                           tr.paired(
                                             'ចូលរួមរបាយការណ៍នេះ',
@@ -3035,12 +3242,13 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                             48,
                                           ),
                                         ),
-                                        onPressed: () =>
-                                            _openDifferentProblemSheet(
-                                              vm,
-                                              duplicate.masterReport,
-                                              tr,
-                                            ),
+                                        onPressed: vm.canSubmitAtCurrentPin
+                                            ? () => _openDifferentProblemSheet(
+                                                vm,
+                                                duplicate.masterReport,
+                                                tr,
+                                              )
+                                            : null,
                                         child: Text(
                                           tr.paired(
                                             'ជាបញ្ហាផ្សេង',
@@ -3101,166 +3309,19 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                                   fontSize: 12,
                                 ),
                               ),
-                              if (vm.photoExifAssessment.photoExifVerified) ...[
-                                const SizedBox(height: 8),
-                                Semantics(
-                                  container: true,
-                                  liveRegion: true,
-                                  child: Container(
-                                    key: const Key('step3-exif-verified-pill'),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 5,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.successSoft,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(
-                                          Icons.verified_rounded,
-                                          size: 14,
-                                          color: AppColors.success,
-                                        ),
-                                        const SizedBox(width: 5),
-                                        Text(
-                                          tr.primary(
-                                            '✓ ទីតាំង GPS ក្នុងរូបថតត្រឹមត្រូវ',
-                                            '✓ Photo GPS verified',
-                                          ),
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.tealDark,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ] else if (vm
-                                  .combinedIntegrityAssessment
-                                  .hasWarning) ...[
-                                const SizedBox(height: 8),
-                                Semantics(
-                                  container: true,
-                                  liveRegion: true,
-                                  child: Container(
-                                    key: const Key(
-                                      'step3-integrity-warning-banner',
-                                    ),
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 11,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.saffronSoft,
-                                      borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(
-                                        color: AppColors.saffron.withValues(
-                                          alpha: 0.6,
-                                        ),
-                                      ),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            const Icon(
-                                              Icons.shield_outlined,
-                                              size: 15,
-                                              color: AppColors.saffronInk,
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Expanded(
-                                              child: Text(
-                                                tr.primary(
-                                                  vm
-                                                          .combinedIntegrityAssessment
-                                                          .khmerSummary ??
-                                                      '',
-                                                  vm
-                                                          .combinedIntegrityAssessment
-                                                          .englishSummary ??
-                                                      '',
-                                                ),
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: AppColors.saffronInk,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        if (vm.canApplyPhotoExifLocation) ...[
-                                          const SizedBox(height: 6),
-                                          TextButton.icon(
-                                            key: const Key(
-                                              'step3-use-photo-gps-btn',
-                                            ),
-                                            onPressed: () {
-                                              HapticFeedback.selectionClick();
-                                              final coords = vm
-                                                  .applyPhotoExifLocation();
-                                              if (coords != null && _mapReady) {
-                                                _mapController.move(
-                                                  coords,
-                                                  17.0,
-                                                );
-                                                unawaited(
-                                                  _reverseGeocodeCurrentPin(
-                                                    coords,
-                                                  ),
-                                                );
-                                              }
-                                            },
-                                            style: TextButton.styleFrom(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 6,
-                                                  ),
-                                              minimumSize: const Size(48, 44),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.my_location_rounded,
-                                              size: 14,
-                                              color: AppColors.teal,
-                                            ),
-                                            label: Text(
-                                              tr.primary(
-                                                'ប្រើទីតាំងពីរូបថត',
-                                                'Use photo location',
-                                              ),
-                                              style: const TextStyle(
-                                                fontSize: 11.5,
-                                                fontWeight: FontWeight.w700,
-                                                color: AppColors.teal,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              const SizedBox(height: 8),
+                              _buildLocationEligibilitySection(vm, tr),
                               const SizedBox(height: 14),
                               SizedBox(
                                 width: double.infinity,
                                 child: FilledButton(
+                                  key: const Key('step3-submit-report-btn'),
                                   style: FilledButton.styleFrom(
                                     minimumSize: const Size.fromHeight(52),
                                   ),
-                                  onPressed: () => _completeSubmission(vm, tr),
+                                  onPressed: vm.canSubmitAtCurrentPin
+                                      ? () => _completeSubmission(vm, tr)
+                                      : null,
                                   child: Text(
                                     tr.paired(
                                       'បញ្ជូនរបាយការណ៍',
@@ -3279,6 +3340,665 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
         ],
       ),
     );
+  }
+
+  /// Renders the live Rule #1 (Smart Distance Gate) trust pill or actionable
+  /// blocker card inside Step 3's bottom sheet.
+  Widget _buildLocationEligibilitySection(
+    ReportWizardViewModel vm,
+    Bilingual tr,
+  ) {
+    final eligibility = vm.locationEligibility;
+    final hasHomeArea = vm.repository.profile.hasHomeArea;
+
+    Widget buildUsePhotoButton() {
+      return TextButton.icon(
+        key: const Key('step3-use-photo-gps-btn'),
+        onPressed: () {
+          HapticFeedback.selectionClick();
+          final coords = vm.snapToPhotoAnchor();
+          if (coords != null && _mapReady) {
+            _mapController.move(coords, MapTileConfig.streetFocusZoom);
+            unawaited(_reverseGeocodeCurrentPin(coords));
+          }
+        },
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          minimumSize: const Size(48, 48),
+        ),
+        icon: const Icon(
+          Icons.photo_camera_back_outlined,
+          size: 15,
+          color: AppColors.tealDark,
+        ),
+        label: Text(
+          tr.primary('ទៅទីតាំងរូបថត', 'Snap to photo location'),
+          style: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: AppColors.tealDark,
+          ),
+        ),
+      );
+    }
+
+    Widget buildSetHomeButton() {
+      return TextButton.icon(
+        key: const Key('step3-set-home-area-btn'),
+        onPressed: () {
+          HapticFeedback.selectionClick();
+          Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(builder: (_) => const EditProfilePage()),
+          );
+        },
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          minimumSize: const Size(48, 44),
+        ),
+        icon: const Icon(
+          Icons.home_outlined,
+          size: 15,
+          color: AppColors.tealDark,
+        ),
+        label: Text(
+          tr.primary('កំណត់តំបន់រស់នៅ', 'Set Home District'),
+          style: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: AppColors.tealDark,
+          ),
+        ),
+      );
+    }
+
+    switch (eligibility) {
+      case ReportLocationEligible(:final tier, :final distanceMeters):
+        final isPhotoAnchorTier =
+            tier == ReportLocationVerificationTier.photoExifVerified ||
+            tier == ReportLocationVerificationTier.liveCameraVerified;
+        final distLabel = distanceMeters != null
+            ? SupportEligibilityService.formatDistance(
+                distanceMeters,
+                englishFirst: tr.englishFirst,
+              )
+            : null;
+        final badgeText = switch (tier) {
+          ReportLocationVerificationTier.photoExifVerified => tr.primary(
+            '✓ ទីតាំង GPS ក្នុងរូបថតត្រឹមត្រូវ',
+            '✓ Photo GPS verified',
+          ),
+          ReportLocationVerificationTier.liveCameraVerified => tr.primary(
+            '✓ ផ្ទៀងផ្ទាត់ GPS កាមេរ៉ាផ្ទាល់',
+            '✓ Live camera GPS verified',
+          ),
+          ReportLocationVerificationTier.verifiedOnSite => tr.primary(
+            distLabel != null
+                ? '✓ ផ្ទៀងផ្ទាត់នៅទីតាំង ($distLabel)'
+                : '✓ ផ្ទៀងផ្ទាត់នៅទីតាំង',
+            distLabel != null
+                ? '✓ Verified on-site ($distLabel)'
+                : '✓ Verified on-site',
+          ),
+          ReportLocationVerificationTier.sameCityCommuter => tr.primary(
+            distLabel != null
+                ? '✓ ក្នុងចម្ងាយក្រុងតែមួយ ($distLabel)'
+                : '✓ ក្នុងចម្ងាយក្រុងតែមួយ',
+            distLabel != null
+                ? '✓ Within city range ($distLabel)'
+                : '✓ Within city range',
+          ),
+          ReportLocationVerificationTier.homeResident => tr.primary(
+            '✓ តំបន់រស់នៅរបស់អ្នក',
+            '✓ Saved Home District',
+          ),
+        };
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              container: true,
+              liveRegion: true,
+              child: Container(
+                key: isPhotoAnchorTier
+                    ? const Key('step3-exif-verified-pill')
+                    : const Key('step3-location-verified-pill'),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.successSoft,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.verified_rounded,
+                      size: 14,
+                      color: AppColors.success,
+                    ),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        badgeText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.tealDark,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (vm.isGalleryPhotoWithoutLocationAnchor) ...[
+              const SizedBox(height: 8),
+              Semantics(
+                container: true,
+                liveRegion: true,
+                child: Container(
+                  key: const Key('step3-unverified-photo-pill'),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.saffronSoft,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.saffron.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.policy_outlined,
+                        size: 15,
+                        color: AppColors.saffronInk,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          tr.primary(
+                            'រូបថតគ្មានទិន្នន័យ GPS — នឹងសម្គាល់សម្រាប់មន្ត្រីពិនិត្យ',
+                            'Photo has no GPS tag — marked for municipal review',
+                          ),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.saffronInk,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            if (!isPhotoAnchorTier &&
+                vm.combinedIntegrityAssessment.hasWarning) ...[
+              const SizedBox(height: 8),
+              Semantics(
+                container: true,
+                liveRegion: true,
+                child: Container(
+                  key: const Key('step3-integrity-warning-banner'),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.saffronSoft,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: AppColors.saffron.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.shield_outlined,
+                            size: 15,
+                            color: AppColors.saffronInk,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              tr.primary(
+                                vm.combinedIntegrityAssessment.khmerSummary ??
+                                    '',
+                                vm.combinedIntegrityAssessment.englishSummary ??
+                                    '',
+                              ),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.saffronInk,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (vm.canApplyPhotoExifLocation) ...[
+                        const SizedBox(height: 4),
+                        buildUsePhotoButton(),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+
+      case ReportLocationDeniedPhotoAnchorMismatch(
+        :final anchorSource,
+        :final distanceMeters,
+        :final maxMeters,
+      ):
+        final distLabel = SupportEligibilityService.formatDistance(
+          distanceMeters,
+          englishFirst: tr.englishFirst,
+        );
+        final isLiveCamera =
+            anchorSource == PhotoAnchorSource.liveCameraCapture;
+
+        return Semantics(
+          container: true,
+          liveRegion: true,
+          child: Container(
+            key: const Key('step3-photo-anchor-blocker'),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.dangerSoft,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.danger.withValues(alpha: 0.45),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.wrong_location_outlined,
+                      size: 17,
+                      color: AppColors.danger,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        tr.primary(
+                          isLiveCamera
+                              ? 'ម្ជុលផែនទីនៅឆ្ងាយ $distLabel ពីទីតាំងថតរូបផ្ទាល់។ សូមអូសមកក្នុងរង្វង់ ${maxMeters.round()} ម៉ែត្រ ឬចុច "ទៅទីតាំងរូបថត" ដើម្បីបញ្ជូន។'
+                              : 'ម្ជុលផែនទីនៅឆ្ងាយ $distLabel ពីទីតាំង GPS ក្នុងរូបថត។ សូមអូសមកក្នុងរង្វង់ ${maxMeters.round()} ម៉ែត្រ ឬចុច "ទៅទីតាំងរូបថត" ដើម្បីបញ្ជូន។',
+                          isLiveCamera
+                              ? 'Map pin is $distLabel away from where you took this photo. Move within ${maxMeters.round()} m or tap "Snap to photo location" to submit.'
+                              : 'Map pin is $distLabel away from this photo\'s GPS location. Move within ${maxMeters.round()} m or tap "Snap to photo location" to submit.',
+                        ),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          height: 1.38,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                buildUsePhotoButton(),
+              ],
+            ),
+          ),
+        );
+
+      case ReportLocationDeniedTooFar(
+        :final distanceMeters,
+        :final liveProvinceKhmer,
+        :final liveProvinceEnglish,
+      ):
+        final distLabel = SupportEligibilityService.formatDistance(
+          distanceMeters,
+          englishFirst: tr.englishFirst,
+        );
+        final provinceSuffixKh = liveProvinceKhmer != null
+            ? ' ($liveProvinceKhmer)'
+            : '';
+        final provinceSuffixEn = liveProvinceEnglish != null
+            ? ' ($liveProvinceEnglish)'
+            : '';
+
+        return Semantics(
+          container: true,
+          liveRegion: true,
+          child: Container(
+            key: const Key('step3-location-blocked-banner'),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.dangerSoft,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.danger.withValues(alpha: 0.45),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.location_off_outlined,
+                      size: 17,
+                      color: AppColors.danger,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        tr.primary(
+                          'ទីតាំង GPS របស់អ្នកនៅឆ្ងាយប្រហែល $distLabel$provinceSuffixKh។ អ្នកអាចរាយការណ៍បានតែក្នុងចម្ងាយ 15 គ.ម ក្នុងតំបន់រស់នៅ ឬភ្ជាប់រូបថតដែលថតនៅទីតាំងនេះ។',
+                          'Your GPS is ~$distLabel away$provinceSuffixEn. You can submit within 15 km of your location, in your Home District, or with a photo taken at this spot.',
+                        ),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          height: 1.38,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 2,
+                  children: [
+                    TextButton.icon(
+                      key: const Key('step3-jump-live-gps-btn'),
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        final coords = vm.jumpToLiveGps();
+                        if (coords != null) {
+                          if (_mapReady) {
+                            _mapController.move(
+                              coords,
+                              MapTileConfig.streetFocusZoom,
+                            );
+                          }
+                          unawaited(_reverseGeocodeCurrentPin(coords));
+                        }
+                      },
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        minimumSize: const Size(48, 44),
+                      ),
+                      icon: const Icon(
+                        Icons.my_location_rounded,
+                        size: 15,
+                        color: AppColors.tealDark,
+                      ),
+                      label: Text(
+                        tr.primary('ទៅទីតាំង GPS ខ្ញុំ', 'Jump to my GPS'),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.tealDark,
+                        ),
+                      ),
+                    ),
+                    if (vm.canApplyPhotoExifLocation) buildUsePhotoButton(),
+                    if (!hasHomeArea) buildSetHomeButton(),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+
+      case ReportLocationDeniedLocationRequired(
+        :final permissionDenied,
+        :final serviceDisabled,
+        :final outsideCambodia,
+        :final pendingGpsCheck,
+      ):
+        if (vm.isLocating || pendingGpsCheck) {
+          return Semantics(
+            container: true,
+            liveRegion: true,
+            child: Container(
+              key: const Key('step3-location-checking-pill'),
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+              decoration: BoxDecoration(
+                color: AppColors.tealSoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 13,
+                    height: 13,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.teal,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    tr.primary(
+                      'កំពុងផ្ទៀងផ្ទាត់ទីតាំង GPS របស់អ្នក...',
+                      'Verifying your GPS location...',
+                    ),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.tealDark,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final reasonText = serviceDisabled
+            ? tr.primary(
+                'សូមបើក GPS ដើម្បីផ្ទៀងផ្ទាត់ថាអ្នកនៅក្នុងចម្ងាយ 15 គ.ម ឬកំណត់តំបន់រស់នៅរបស់អ្នក។',
+                'Enable GPS to verify you are within 15 km, attach a photo taken here, or set your Home District.',
+              )
+            : permissionDenied
+            ? tr.primary(
+                'ត្រូវការសិទ្ធិ GPS ដើម្បីផ្ទៀងផ្ទាត់តំបន់រាយការណ៍ (ឬកំណត់តំបន់រស់នៅ / រូបថតមាន GPS)។',
+                'Location permission is required to verify your area (or set your Home District / attach a geotagged photo).',
+              )
+            : outsideCambodia
+            ? tr.primary(
+                'GPS ឧបករណ៍នៅក្រៅកម្ពុជា — សូមកំណត់តំបន់រស់នៅ ឬភ្ជាប់រូបថតដែលថតនៅកម្ពុជា។',
+                'Device GPS is outside Cambodia — set your Home District or attach a photo taken at this spot.',
+              )
+            : tr.primary(
+                'មិនអាចផ្ទៀងផ្ទាត់ GPS បានទេ — ចុចផ្ទៀងផ្ទាត់ម្តងទៀត ឬកំណត់តំបន់រស់នៅ។',
+                'Could not verify GPS — retry GPS, attach a photo taken here, or set your Home District.',
+              );
+
+        return Semantics(
+          container: true,
+          liveRegion: true,
+          child: Container(
+            key: const Key('step3-location-required-banner'),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.saffronSoft,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.saffron.withValues(alpha: 0.65),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.gps_off_rounded,
+                      size: 16,
+                      color: AppColors.saffronInk,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        reasonText,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          height: 1.38,
+                          color: AppColors.saffronInk,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 2,
+                  children: [
+                    TextButton.icon(
+                      key: const Key('step3-retry-gps-btn'),
+                      onPressed: vm.isLocating
+                          ? null
+                          : () => _verifyGpsLocation(tr),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        minimumSize: const Size(48, 44),
+                      ),
+                      icon: const Icon(
+                        Icons.my_location_rounded,
+                        size: 15,
+                        color: AppColors.tealDark,
+                      ),
+                      label: Text(
+                        tr.primary('ផ្ទៀងផ្ទាត់ GPS', 'Verify GPS'),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.tealDark,
+                        ),
+                      ),
+                    ),
+                    if (serviceDisabled || permissionDenied)
+                      TextButton.icon(
+                        onPressed: widget.locationService.openLocationSettings,
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          minimumSize: const Size(48, 44),
+                        ),
+                        icon: const Icon(
+                          Icons.settings_outlined,
+                          size: 15,
+                          color: AppColors.saffronInk,
+                        ),
+                        label: Text(
+                          tr.primary('បើក GPS', 'Open GPS'),
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.saffronInk,
+                          ),
+                        ),
+                      ),
+                    if (vm.canApplyPhotoExifLocation) buildUsePhotoButton(),
+                    if (!hasHomeArea) buildSetHomeButton(),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+
+      case ReportLocationDeniedMockGps():
+        return Semantics(
+          container: true,
+          liveRegion: true,
+          child: Container(
+            key: const Key('step3-location-blocked-banner'),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.dangerSoft,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.danger.withValues(alpha: 0.45),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.gpp_bad_outlined,
+                  size: 17,
+                  color: AppColors.danger,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    tr.primary(
+                      'រកឃើញទីតាំងក្លែងក្លាយ — សូមបិទ Mock GPS មុនដាក់ស្នើ',
+                      'Fake GPS detected — disable mock location before submitting.',
+                    ),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _verifyGpsLocation(tr),
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
+                  child: Text(
+                    tr.primary('ពិនិត្យម្តងទៀត', 'Retry'),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.tealDark,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+    }
   }
 }
 

@@ -23,6 +23,7 @@ import 'package:my_app/domain/services/help_assistant_service.dart';
 import 'package:my_app/domain/services/map_cluster_service.dart';
 import 'package:my_app/domain/services/priority_calculator.dart';
 import 'package:my_app/domain/services/relative_time_formatter.dart';
+import 'package:my_app/domain/services/report_location_eligibility_service.dart';
 import 'package:my_app/domain/services/spatial_clustering_service.dart';
 import 'package:my_app/domain/services/support_eligibility_service.dart';
 import 'package:my_app/ui/features/report/view_models/report_wizard_view_model.dart';
@@ -1497,14 +1498,21 @@ void main() {
       expect(indexHtml, contains('SrolanhCity'));
       expect(indexHtml, contains('apple-touch-icon.png'));
       expect(indexHtml, contains("register('sw.js'"));
+      expect(
+        indexHtml,
+        contains('rel="preconnect" href="https://basemaps.cartocdn.com"'),
+      );
       expect(indexHtml, isNot(contains('my_app')));
 
       // Offline-first PWA service worker & custom bootstrap
       final swJs = File('web/sw.js').readAsStringSync();
       final bootstrapJs = File('web/flutter_bootstrap.js').readAsStringSync();
-      expect(swJs, contains('srolanhcity-app-v3'));
+      expect(swJs, contains('srolanhcity-app-v4'));
+      expect(swJs, contains('srolanhcity-tiles-v2'));
       expect(swJs, contains('canvaskit/canvaskit.wasm'));
+      expect(swJs, contains('basemaps.cartocdn.com'));
       expect(swJs, contains('tile.openstreetmap.org'));
+      expect(swJs, contains('WARM_TILE_URLS'));
       expect(bootstrapJs, contains('_flutter.loader.load()'));
       expect(bootstrapJs, isNot(contains('serviceWorkerSettings')));
     });
@@ -1966,6 +1974,367 @@ void main() {
       expect(restored.assistantBubbleOnLeft, isTrue);
       expect(restored.assistantBubbleYFraction, equals(1.0));
       expect(restored.assistantHintSeen, isTrue);
+    });
+  });
+
+  group('ReportLocationEligibilityService (Rule #1 Smart Distance Gate)', () {
+    const phnomPenhPin = LatLng(11.5564, 104.9282); // Daun Penh, Phnom Penh
+    const siemReapGps = LatLng(13.3633, 103.8564); // ~234 km north-west
+    final ppRouting = GisRoutingService.resolve(
+      coordinates: phnomPenhPin,
+      category: IssueCategory.pothole,
+    );
+    const guestProfile = UserProfile(); // no Home District set
+    const daunPenhProfile = UserProfile(
+      homeProvinceCode: 'PP',
+      khmerHomeArea: 'ផ្សារថ្មី, ខណ្ឌដូនពេញ',
+      englishHomeArea: 'Phsar Thmei, Daun Penh',
+    );
+
+    test('blocks cross-province submission (Siem Reap -> Phnom Penh) when outside Home District with no matching photo EXIF', () {
+      final res = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: phnomPenhPin,
+        routing: ppRouting,
+        profile: guestProfile,
+        liveGpsResult: const LocationSuccess(
+          point: siemReapGps,
+          accuracyMeters: 12,
+          isOutsideCambodia: false,
+        ),
+      );
+      expect(res, isA<ReportLocationDeniedTooFar>());
+      final denied = res as ReportLocationDeniedTooFar;
+      expect(denied.distanceMeters, greaterThan(200000));
+      expect(denied.liveProvinceEnglish, equals('Siem Reap'));
+    });
+
+    test(
+      'allows <= 500 m as verifiedOnSite and 500 m – 15 km as sameCityCommuter',
+      () {
+        final onSite = ReportLocationEligibilityService.evaluate(
+          pinnedLocation: phnomPenhPin,
+          routing: ppRouting,
+          profile: guestProfile,
+          liveGpsResult: const LocationSuccess(
+            point: LatLng(11.5572, 104.9285), // ~95 m
+            accuracyMeters: 8,
+            isOutsideCambodia: false,
+          ),
+        );
+        expect(onSite, isA<ReportLocationEligible>());
+        expect(
+          (onSite as ReportLocationEligible).tier,
+          equals(ReportLocationVerificationTier.verifiedOnSite),
+        );
+
+        final commuter = ReportLocationEligibilityService.evaluate(
+          pinnedLocation: phnomPenhPin,
+          routing: ppRouting,
+          profile: guestProfile,
+          liveGpsResult: const LocationSuccess(
+            point: LatLng(11.5920, 104.8850), // ~6.1 km (Sen Sok)
+            accuracyMeters: 15,
+            isOutsideCambodia: false,
+          ),
+        );
+        expect(commuter, isA<ReportLocationEligible>());
+        expect(
+          (commuter as ReportLocationEligible).tier,
+          equals(ReportLocationVerificationTier.sameCityCommuter),
+        );
+      },
+    );
+
+    test('allows Siem Reap -> Phnom Penh delayed upload when fresh photo EXIF matches pin (<= 500 m, <= 30 days) but rejects stale EXIF', () {
+      final now = DateTime(2026, 11, 24, 18, 0);
+      final allowed = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: phnomPenhPin,
+        routing: ppRouting,
+        profile: guestProfile,
+        liveGpsResult: const LocationSuccess(
+          point: siemReapGps,
+          accuracyMeters: 12,
+          isOutsideCambodia: false,
+        ),
+        photoExif: PhotoExifMetadata(
+          coordinates: const LatLng(11.5566, 104.9283),
+          capturedAt: now.subtract(const Duration(hours: 6)),
+        ),
+        now: now,
+      );
+      expect(allowed, isA<ReportLocationEligible>());
+      expect(
+        (allowed as ReportLocationEligible).tier,
+        equals(ReportLocationVerificationTier.photoExifVerified),
+      );
+
+      // Stale EXIF (45 days old) does NOT bypass the 15 km distance gate
+      final stale = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: phnomPenhPin,
+        routing: ppRouting,
+        profile: guestProfile,
+        liveGpsResult: const LocationSuccess(
+          point: siemReapGps,
+          accuracyMeters: 12,
+          isOutsideCambodia: false,
+        ),
+        photoExif: PhotoExifMetadata(
+          coordinates: const LatLng(11.5566, 104.9283),
+          capturedAt: now.subtract(const Duration(days: 45)),
+        ),
+        now: now,
+      );
+      expect(stale, isA<ReportLocationDeniedTooFar>());
+    });
+
+    test('allows saved Home District from afar and when GPS is off, but never lets Mock GPS bypass', () {
+      // 1. Siem Reap GPS + saved Daun Penh Home District -> allowed
+      final fromAfar = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: phnomPenhPin,
+        routing: ppRouting,
+        profile: daunPenhProfile,
+        liveGpsResult: const LocationSuccess(
+          point: siemReapGps,
+          accuracyMeters: 14,
+          isOutsideCambodia: false,
+        ),
+      );
+      expect(fromAfar, isA<ReportLocationEligible>());
+      expect(
+        (fromAfar as ReportLocationEligible).tier,
+        equals(ReportLocationVerificationTier.homeResident),
+      );
+
+      // 2. GPS off + saved Daun Penh Home District -> allowed
+      final gpsOffHome = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: phnomPenhPin,
+        routing: ppRouting,
+        profile: daunPenhProfile,
+        liveGpsResult: const LocationServiceDisabled(),
+      );
+      expect(gpsOffHome, isA<ReportLocationEligible>());
+
+      // 3. GPS off + Guest (no Home District) -> blocked (LocationRequired)
+      final gpsOffGuest = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: phnomPenhPin,
+        routing: ppRouting,
+        profile: guestProfile,
+        liveGpsResult: const LocationServiceDisabled(),
+      );
+      expect(gpsOffGuest, isA<ReportLocationDeniedLocationRequired>());
+      expect(
+        (gpsOffGuest as ReportLocationDeniedLocationRequired).serviceDisabled,
+        isTrue,
+      );
+
+      // 4. Mock GPS -> ALWAYS blocked even with Home District + matching EXIF
+      final mocked = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: phnomPenhPin,
+        routing: ppRouting,
+        profile: daunPenhProfile,
+        liveGpsResult: const LocationMockDetected(point: phnomPenhPin),
+        photoExif: PhotoExifMetadata(
+          coordinates: phnomPenhPin,
+          capturedAt: DateTime.now(),
+        ),
+      );
+      expect(mocked, isA<ReportLocationDeniedMockGps>());
+    });
+
+    test('Photo-Anchored Hard Fence (<= 250 m) blocks pins dragged > 250 m from EXIF or live camera even inside Home District & live GPS', () {
+      final now = DateTime(2026, 11, 24, 19, 0);
+      const photoSpot = LatLng(11.5564, 104.9282); // Daun Penh
+      // ~180 m north (inside 250 m adjustment fence)
+      const within250mPin = LatLng(11.5580, 104.9282);
+      // ~400 m north (outside 250 m fence, still in Daun Penh!)
+      const dragged400mPin = LatLng(11.5600, 104.9282);
+      final draggedRouting = GisRoutingService.resolve(
+        coordinates: dragged400mPin,
+        category: IssueCategory.pothole,
+      );
+
+      // 1. EXIF within 250 m -> allowed as photoExifVerified
+      final okExif = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: within250mPin,
+        routing: ppRouting,
+        profile: guestProfile,
+        liveGpsResult: const LocationSuccess(
+          point: siemReapGps,
+          accuracyMeters: 12,
+          isOutsideCambodia: false,
+        ),
+        photoExif: PhotoExifMetadata(
+          coordinates: photoSpot,
+          capturedAt: now.subtract(const Duration(hours: 1)),
+        ),
+        now: now,
+      );
+      expect(okExif, isA<ReportLocationEligible>());
+      expect(
+        (okExif as ReportLocationEligible).tier,
+        equals(ReportLocationVerificationTier.photoExifVerified),
+      );
+
+      // 2. EXIF dragged 400 m away -> HARD BLOCKED even when live GPS is at
+      //    the dragged pin AND pin is inside saved Home District!
+      final blockedExif = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: dragged400mPin,
+        routing: draggedRouting,
+        profile: daunPenhProfile,
+        liveGpsResult: const LocationSuccess(
+          point: dragged400mPin,
+          accuracyMeters: 8,
+          isOutsideCambodia: false,
+        ),
+        photoExif: PhotoExifMetadata(
+          coordinates: photoSpot,
+          capturedAt: now.subtract(const Duration(minutes: 5)),
+        ),
+        now: now,
+      );
+      expect(blockedExif, isA<ReportLocationDeniedPhotoAnchorMismatch>());
+      final denied = blockedExif as ReportLocationDeniedPhotoAnchorMismatch;
+      expect(denied.anchorSource, equals(PhotoAnchorSource.photoExif));
+      expect(denied.distanceMeters, greaterThan(250));
+
+      // 3. Live camera capture anchor: allowed <= 250 m, blocked > 250 m
+      final liveCamAnchor = PhotoLocationAnchor(
+        point: photoSpot,
+        source: PhotoAnchorSource.liveCameraCapture,
+        capturedAt: now,
+      );
+      final okCam = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: within250mPin,
+        routing: ppRouting,
+        profile: guestProfile,
+        photoAnchor: liveCamAnchor,
+        now: now,
+      );
+      expect(okCam, isA<ReportLocationEligible>());
+      expect(
+        (okCam as ReportLocationEligible).tier,
+        equals(ReportLocationVerificationTier.liveCameraVerified),
+      );
+
+      final blockedCam = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: dragged400mPin,
+        routing: draggedRouting,
+        profile: daunPenhProfile,
+        liveGpsResult: const LocationSuccess(
+          point: dragged400mPin,
+          accuracyMeters: 8,
+          isOutsideCambodia: false,
+        ),
+        photoAnchor: liveCamAnchor,
+        now: now,
+      );
+      expect(blockedCam, isA<ReportLocationDeniedPhotoAnchorMismatch>());
+      expect(
+        (blockedCam as ReportLocationDeniedPhotoAnchorMismatch).anchorSource,
+        equals(PhotoAnchorSource.liveCameraCapture),
+      );
+    });
+
+    test('Dual Master Incident duplicate check catches existing report at photo anchor even when pin is dragged 180 m away', () {
+      final repo = ReportRepository();
+      final master = repo.findById('#SC-20481')!; // Open pothole on Norodom
+      // Dragged ~180 m east-northeast: outside 100 m / 150 m pin radius,
+      // still inside 250 m photo fence!
+      final draggedPin = LatLng(
+        master.coordinates.latitude + 0.0014,
+        master.coordinates.longitude + 0.0010,
+      );
+
+      // Pin alone does NOT detect the duplicate
+      final pinOnly = repo.findDuplicateNearby(
+        point: draggedPin,
+        category: master.category,
+      );
+      expect(pinOnly, isNull);
+
+      // Dual check with photo anchor right at master DOES detect it!
+      final dual = repo.findDuplicateNearby(
+        point: draggedPin,
+        category: master.category,
+        photoAnchorPoint: master.coordinates,
+      );
+      expect(dual, isNotNull);
+      expect(dual!.masterReport.id, equals(master.id));
+      expect(dual.matchedViaPhotoAnchor, isTrue);
+
+      // Submitting defensively merges into the existing Master Incident
+      final beforeCount = repo.reports.length;
+      final submitted = repo.submitReport(
+        category: master.category,
+        description: 'Trying to slide pin away from photo spot',
+        severity: 4,
+        coordinates: draggedPin,
+        photoAnchorCoordinates: master.coordinates,
+        isAnonymous: false,
+        locationVerificationTier:
+            ReportLocationVerificationTier.photoExifVerified,
+      );
+      expect(submitted.mergedIntoExisting, isTrue);
+      expect(submitted.report.id, equals(master.id));
+      expect(repo.reports.length, equals(beforeCount));
+    });
+
+    test('CivicReport JSON round-trip preserves verification tier & unverified photo flag, and ViewModel clears per-photo anchors on delete', () {
+      final repo = ReportRepository();
+      final vm = ReportWizardViewModel(
+        repository: repo,
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: const _FakeIpGeoService(null),
+      );
+
+      // Add geotagged photo #1 -> auto-snaps pin & activePhotoAnchor is set
+      const spot = LatLng(11.5318, 104.9044);
+      vm.addLocalPhotoPath(
+        'data:image/png;base64,AAA',
+        exifMetadata: PhotoExifMetadata(
+          coordinates: spot,
+          capturedAt: DateTime(2026, 11, 24, 18, 0),
+        ),
+      );
+      expect(vm.activePhotoAnchor?.point, equals(spot));
+      expect(vm.pinLocation, equals(spot));
+      expect(vm.isGalleryPhotoWithoutLocationAnchor, isFalse);
+
+      // Add gallery photo #2 without EXIF, then remove photo #1 -> anchor clears
+      vm.addLocalPhotoPath('data:image/png;base64,BBB');
+      vm.removeLocalPhotoAt(0);
+      expect(vm.activePhotoAnchor, isNull);
+      expect(vm.isGalleryPhotoWithoutLocationAnchor, isTrue);
+
+      // Submit and verify JSON serialization round-trip
+      vm.recordLiveGpsResult(
+        const LocationSuccess(
+          point: spot,
+          accuracyMeters: 10,
+          isOutsideCambodia: false,
+        ),
+      );
+      final res = vm.submit();
+      expect(res.report.photoLocationUnverified, isTrue);
+      expect(
+        res.report.locationVerificationTier,
+        equals(ReportLocationVerificationTier.verifiedOnSite),
+      );
+
+      final restored = CivicReport.fromJson(res.report.toJson());
+      expect(restored.photoLocationUnverified, isTrue);
+      expect(
+        restored.locationVerificationTier,
+        equals(ReportLocationVerificationTier.verifiedOnSite),
+      );
+
+      // Legacy JSON without new fields defaults cleanly
+      final legacyJson = Map<String, dynamic>.from(res.report.toJson())
+        ..remove('locationVerificationTier')
+        ..remove('photoLocationUnverified');
+      final legacyRestored = CivicReport.fromJson(legacyJson);
+      expect(legacyRestored.locationVerificationTier, isNull);
+      expect(legacyRestored.photoLocationUnverified, isFalse);
     });
   });
 }

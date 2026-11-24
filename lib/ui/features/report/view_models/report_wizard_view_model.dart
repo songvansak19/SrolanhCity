@@ -18,6 +18,7 @@ import '../../../../domain/services/ai_classifier_service.dart';
 import '../../../../domain/services/anti_spoof_service.dart';
 import '../../../../domain/services/gis_routing_service.dart';
 import '../../../../domain/services/priority_calculator.dart';
+import '../../../../domain/services/report_location_eligibility_service.dart';
 
 /// Manages state and business interactions for the 3-step Report Wizard.
 class ReportWizardViewModel extends ChangeNotifier {
@@ -46,6 +47,17 @@ class ReportWizardViewModel extends ChangeNotifier {
        _localPhotoPaths = List<String>.of(
          initialDraft?.localPhotoPaths ?? const <String>[],
        ),
+       _photoExifEntries = List<PhotoExifMetadata?>.filled(
+         initialDraft?.localPhotoPaths.length ?? 0,
+         null,
+         growable: true,
+       ),
+       _photoAnchors = List<PhotoLocationAnchor?>.filled(
+         initialDraft?.localPhotoPaths.length ?? 0,
+         null,
+         growable: true,
+       ),
+       _hasExplicitInitialCoordinates = initialCoordinates != null,
        _voiceTranscript = initialDraft?.voiceTranscript,
        _voiceAudioPath = initialDraft?.voiceAudioPath,
        _voiceAudioDurationSeconds = initialDraft?.voiceAudioDurationSeconds,
@@ -79,7 +91,11 @@ class ReportWizardViewModel extends ChangeNotifier {
   String _description;
   bool _descriptionEditedByUser;
   final List<String> _localPhotoPaths;
-  PhotoExifMetadata? _photoExifMetadata;
+  final List<PhotoExifMetadata?> _photoExifEntries;
+  final List<PhotoLocationAnchor?> _photoAnchors;
+  final bool _hasExplicitInitialCoordinates;
+  PhotoExifMetadata? _explicitPhotoExif;
+  PhotoLocationAnchor? _explicitPhotoAnchor;
   PhotoAiAnalysis _photoAi = PhotoAiAnalysis.noPhoto;
   int _photoAnalysisGeneration = 0;
 
@@ -88,6 +104,8 @@ class ReportWizardViewModel extends ChangeNotifier {
   double? _gpsAccuracyMeters;
   bool _locationVerified;
   bool _usedLiveGps = false;
+  LocationFetchResult? _liveGpsResult;
+  bool _userManuallyMovedPin = false;
   bool _isOutsideCambodia = false;
   LatLng? _rawOutsideGps;
   bool _isLocating = false;
@@ -132,7 +150,56 @@ class ReportWizardViewModel extends ChangeNotifier {
   int get remainingPhotoSlots =>
       (maxPhotos - _localPhotoPaths.length).clamp(0, maxPhotos);
   bool get canAddMorePhotos => _localPhotoPaths.length < maxPhotos;
-  PhotoExifMetadata? get photoExifMetadata => _photoExifMetadata;
+
+  /// Best available pre-strip EXIF metadata across attached photos (or an
+  /// explicitly supplied initial EXIF payload).
+  PhotoExifMetadata? get photoExifMetadata {
+    for (final entry in _photoExifEntries) {
+      if (entry != null && entry.coordinates != null) return entry;
+    }
+    for (final entry in _photoExifEntries) {
+      if (entry != null && !entry.isEmpty) return entry;
+    }
+    return _explicitPhotoExif;
+  }
+
+  /// Authoritative photo capture anchor used by the 250 m Photo-Anchored Hard
+  /// Fence and Dual Master Incident check. Prefers in-Cambodia EXIF GPS, then
+  /// live in-app camera capture GPS, then an explicitly configured anchor.
+  PhotoLocationAnchor? get activePhotoAnchor {
+    for (final anchor in _photoAnchors) {
+      if (anchor != null &&
+          anchor.source == PhotoAnchorSource.photoExif &&
+          LocationService.isInsideCambodia(anchor.point)) {
+        return anchor;
+      }
+    }
+    for (final anchor in _photoAnchors) {
+      if (anchor != null && LocationService.isInsideCambodia(anchor.point)) {
+        return anchor;
+      }
+    }
+    if (_explicitPhotoAnchor != null &&
+        LocationService.isInsideCambodia(_explicitPhotoAnchor!.point)) {
+      return _explicitPhotoAnchor;
+    }
+    final exif = photoExifMetadata;
+    if (exif?.coordinates != null &&
+        LocationService.isInsideCambodia(exif!.coordinates!)) {
+      return PhotoLocationAnchor(
+        point: exif.coordinates!,
+        source: PhotoAnchorSource.photoExif,
+        capturedAt: exif.capturedAt,
+      );
+    }
+    return null;
+  }
+
+  /// True when the citizen attached gallery/file photo(s) that carry neither
+  /// EXIF GPS nor a live camera capture anchor (flagged for municipal review).
+  bool get isGalleryPhotoWithoutLocationAnchor =>
+      _localPhotoPaths.isNotEmpty && activePhotoAnchor == null;
+
   PhotoAiAnalysis get photoAi => _photoAi;
   bool get isBackendAiAvailable => _civicAiService.isBackendConfigured;
 
@@ -141,14 +208,50 @@ class ReportWizardViewModel extends ChangeNotifier {
   double? get gpsAccuracyMeters => _gpsAccuracyMeters;
   bool get locationVerified => _locationVerified;
   bool get usedLiveGps => _usedLiveGps;
+  LocationFetchResult? get liveGpsResult => _liveGpsResult;
+  bool get userManuallyMovedPin => _userManuallyMovedPin;
   bool get isOutsideCambodia => _isOutsideCambodia;
   LatLng? get rawOutsideGps => _rawOutsideGps;
   bool get isLocating => _isLocating;
   String? get ipCountryCode => _ipCountryCode;
 
+  /// Verified live Cambodia GPS fix (if acquired in this session or fresh
+  /// repository checkpoint <= 15 minutes old).
+  LatLng? get liveGpsPoint {
+    final live = _liveGpsResult;
+    if (live is LocationSuccess && !live.isOutsideCambodia) {
+      return live.point;
+    }
+    final cp = repository.lastVerifiedGpsCheckpoint;
+    if (live == null && cp != null) {
+      final age = DateTime.now().difference(cp.timestamp);
+      if (!age.isNegative &&
+          age <= ReportLocationEligibilityService.freshCheckpointWindow &&
+          LocationService.isInsideCambodia(cp.point)) {
+        return cp.point;
+      }
+    }
+    return null;
+  }
+
+  /// Rule #1 (Smart Distance Gate) + 250 m Photo-Anchored Hard Fence evaluation.
+  ReportLocationEligibilityResult get locationEligibility =>
+      ReportLocationEligibilityService.evaluate(
+        pinnedLocation: _pinLocation,
+        routing: gisRouting,
+        profile: repository.profile,
+        liveGpsResult: _liveGpsResult,
+        photoExif: photoExifMetadata,
+        photoAnchor: activePhotoAnchor,
+        lastVerifiedCheckpoint: repository.lastVerifiedGpsCheckpoint,
+      );
+
+  /// Whether the citizen is currently permitted to submit at [pinLocation].
+  bool get canSubmitAtCurrentPin => locationEligibility.isAllowed;
+
   /// Layer 4 pre-strip photo EXIF assessment against the current pin.
   SpoofAssessment get photoExifAssessment => AntiSpoofService.evaluatePhotoExif(
-    exif: _photoExifMetadata,
+    exif: photoExifMetadata,
     pinnedLocation: _pinLocation,
   );
 
@@ -161,12 +264,12 @@ class ReportWizardViewModel extends ChangeNotifier {
     <SpoofAssessment>[photoExifAssessment, ipIntegrityAssessment],
   );
 
-  /// Whether the attached photo has EXIF coordinates inside Cambodia that can
-  /// be applied with 1 tap when the pin mismatches.
+  /// Whether the attached photo has an in-Cambodia location anchor (EXIF or
+  /// live camera capture) that can be snapped to in 1 tap.
   bool get canApplyPhotoExifLocation {
-    final coords = _photoExifMetadata?.coordinates;
-    if (coords == null) return false;
-    return LocationService.isInsideCambodia(coords) &&
+    final anchor = activePhotoAnchor;
+    if (anchor == null) return false;
+    return locationEligibility is ReportLocationDeniedPhotoAnchorMismatch ||
         photoExifAssessment.reasons.contains(
           SpoofSignalReason.photoExifLocationMismatch,
         );
@@ -214,6 +317,7 @@ class ReportWizardViewModel extends ChangeNotifier {
     point: _pinLocation,
     category: _category,
     roadName: _geocodedPlace?.roadName ?? gisRouting.englishRoadName,
+    photoAnchorPoint: activePhotoAnchor?.point,
   );
 
   PriorityBreakdown get estimatedPriority {
@@ -329,23 +433,79 @@ class ReportWizardViewModel extends ChangeNotifier {
 
   void toggleVoiceLanguage() => setVoicePreferEnglish(!_voicePreferEnglish);
 
-  /// Records pre-strip EXIF metadata extracted in memory from a citizen photo.
-  void setPhotoExifMetadata(PhotoExifMetadata? exif) {
-    if (exif == null || exif.isEmpty) return;
-    _photoExifMetadata = exif;
-    notifyListeners();
+  /// Auto-snaps Step 3's initial pin straight onto a newly attached photo's
+  /// anchor when the wizard was opened via `+` (not a specific map tap) and
+  /// the user hasn't manually dragged the pin yet.
+  void _maybeAutoSnapToAnchor(PhotoLocationAnchor? anchor) {
+    if (anchor == null || !LocationService.isInsideCambodia(anchor.point)) {
+      return;
+    }
+    if (_hasExplicitInitialCoordinates || _userManuallyMovedPin || _step >= 2) {
+      return;
+    }
+    _pinLocation = anchor.point;
+    _locationVerified = true;
+    _geocodedPlace = null;
   }
 
-  /// Snaps the Step 3 map pin to the attached photo's original EXIF GPS fix
-  /// when inside Cambodia.
-  LatLng? applyPhotoExifLocation() {
-    final coords = _photoExifMetadata?.coordinates;
+  static PhotoLocationAnchor? _anchorFromExif(PhotoExifMetadata? exif) {
+    final coords = exif?.coordinates;
     if (coords == null || !LocationService.isInsideCambodia(coords)) {
       return null;
     }
-    setPinLocation(coords, verified: true, fromLiveGps: false);
-    return coords;
+    return PhotoLocationAnchor(
+      point: coords,
+      source: PhotoAnchorSource.photoExif,
+      capturedAt: exif!.capturedAt,
+    );
   }
+
+  /// Records pre-strip EXIF metadata extracted in memory from a citizen photo.
+  void setPhotoExifMetadata(PhotoExifMetadata? exif) {
+    if (exif == null || exif.isEmpty) return;
+    _explicitPhotoExif = exif;
+    _maybeAutoSnapToAnchor(_anchorFromExif(exif));
+    notifyListeners();
+  }
+
+  /// Records an explicit photo capture anchor (e.g. live camera capture GPS).
+  void setPhotoLocationAnchor(PhotoLocationAnchor? anchor) {
+    if (anchor == null || !LocationService.isInsideCambodia(anchor.point)) {
+      return;
+    }
+    _explicitPhotoAnchor = anchor;
+    _maybeAutoSnapToAnchor(anchor);
+    notifyListeners();
+  }
+
+  /// Attaches an asynchronously acquired live camera GPS anchor to the photo
+  /// added at [index] (when the browser/camera stripped EXIF metadata).
+  void attachLiveCameraAnchorToPhotoAt(int index, PhotoLocationAnchor anchor) {
+    if (index < 0 || index >= _photoAnchors.length) return;
+    if (!LocationService.isInsideCambodia(anchor.point)) return;
+    // Never overwrite a valid photo EXIF anchor with a looser live GPS fix.
+    if (_photoAnchors[index]?.source == PhotoAnchorSource.photoExif) return;
+    _photoAnchors[index] = anchor;
+    _maybeAutoSnapToAnchor(anchor);
+    notifyListeners();
+  }
+
+  /// Snaps the Step 3 map pin back onto the attached photo's original EXIF or
+  /// live camera capture coordinates.
+  LatLng? snapToPhotoAnchor() {
+    final anchor = activePhotoAnchor;
+    if (anchor == null) return null;
+    _pinLocation = anchor.point;
+    _locationVerified = true;
+    _usedLiveGps = false;
+    _userManuallyMovedPin = false;
+    _geocodedPlace = null;
+    notifyListeners();
+    return anchor.point;
+  }
+
+  /// Alias for [snapToPhotoAnchor] preserved for existing callers.
+  LatLng? applyPhotoExifLocation() => snapToPhotoAnchor();
 
   /// Runs non-blocking Layer 5 IP-country check when online (fails open).
   Future<void> refreshIpIntegrityCheck({bool force = false}) async {
@@ -360,13 +520,21 @@ class ReportWizardViewModel extends ChangeNotifier {
     }
   }
 
-  bool addLocalPhotoPath(String path, {PhotoExifMetadata? exifMetadata}) {
+  bool addLocalPhotoPath(
+    String path, {
+    PhotoExifMetadata? exifMetadata,
+    PhotoLocationAnchor? photoAnchor,
+  }) {
     if (path.isEmpty) return false;
     if (_localPhotoPaths.length >= maxPhotos) return false;
+    final cleanExif = (exifMetadata != null && !exifMetadata.isEmpty)
+        ? exifMetadata
+        : null;
+    final resolvedAnchor = photoAnchor ?? _anchorFromExif(cleanExif);
     _localPhotoPaths.add(path);
-    if (exifMetadata != null && !exifMetadata.isEmpty) {
-      _photoExifMetadata = exifMetadata;
-    }
+    _photoExifEntries.add(cleanExif);
+    _photoAnchors.add(resolvedAnchor);
+    _maybeAutoSnapToAnchor(resolvedAnchor);
     notifyListeners();
     unawaited(analyzeLatestPhoto());
     return true;
@@ -375,18 +543,28 @@ class ReportWizardViewModel extends ChangeNotifier {
   int addLocalPhotoPaths(
     Iterable<String> paths, {
     PhotoExifMetadata? exifMetadata,
+    List<PhotoExifMetadata?>? perPhotoExif,
   }) {
     var added = 0;
+    var idx = 0;
+    PhotoLocationAnchor? firstAnchor;
     for (final path in paths) {
+      final rawExif = (perPhotoExif != null && idx < perPhotoExif.length)
+          ? perPhotoExif[idx]
+          : (added == 0 ? exifMetadata : null);
+      idx++;
       if (path.isEmpty) continue;
       if (_localPhotoPaths.length >= maxPhotos) break;
+      final cleanExif = (rawExif != null && !rawExif.isEmpty) ? rawExif : null;
+      final anchor = _anchorFromExif(cleanExif);
+      firstAnchor ??= anchor;
       _localPhotoPaths.add(path);
+      _photoExifEntries.add(cleanExif);
+      _photoAnchors.add(anchor);
       added++;
     }
-    if (exifMetadata != null && !exifMetadata.isEmpty) {
-      _photoExifMetadata = exifMetadata;
-    }
     if (added > 0) {
+      _maybeAutoSnapToAnchor(firstAnchor);
       notifyListeners();
       unawaited(analyzeLatestPhoto());
     }
@@ -396,8 +574,15 @@ class ReportWizardViewModel extends ChangeNotifier {
   void removeLocalPhotoAt(int index) {
     if (index < 0 || index >= _localPhotoPaths.length) return;
     _localPhotoPaths.removeAt(index);
+    if (index < _photoExifEntries.length) {
+      _photoExifEntries.removeAt(index);
+    }
+    if (index < _photoAnchors.length) {
+      _photoAnchors.removeAt(index);
+    }
     if (_localPhotoPaths.isEmpty) {
-      _photoExifMetadata = null;
+      _explicitPhotoExif = null;
+      _explicitPhotoAnchor = null;
       _photoAnalysisGeneration++;
       _photoAi = PhotoAiAnalysis.noPhoto;
     } else {
@@ -464,13 +649,12 @@ class ReportWizardViewModel extends ChangeNotifier {
   }
 
   /// Updates pin coordinates immediately while panning so duplicate detection
-  /// reacts in real time without waiting for reverse-geocoding debounce.
+  /// and Rule #1 distance checks react in real time without erasing live GPS.
   void updatePinCoordinatesLive(LatLng point) {
     _pinLocation = point;
     _locationVerified = true;
     _usedLiveGps = false;
-    _isOutsideCambodia = false;
-    _rawOutsideGps = null;
+    _userManuallyMovedPin = true;
     notifyListeners();
   }
 
@@ -478,6 +662,48 @@ class ReportWizardViewModel extends ChangeNotifier {
     if (_isLocating == value) return;
     _isLocating = value;
     notifyListeners();
+  }
+
+  /// Records the device's actual GPS result separately from the draggable pin
+  /// so Rule #1 proximity verification remains accurate even while panning.
+  void recordLiveGpsResult(
+    LocationFetchResult result, {
+    bool movePinToGps = false,
+  }) {
+    _liveGpsResult = result;
+    if (result is LocationSuccess) {
+      _gpsAccuracyMeters = result.accuracyMeters;
+      if (result.isOutsideCambodia) {
+        _isOutsideCambodia = true;
+        _rawOutsideGps = result.point;
+      } else {
+        _isOutsideCambodia = false;
+        _rawOutsideGps = null;
+        if (movePinToGps) {
+          _pinLocation = result.point;
+          _locationVerified = true;
+          _usedLiveGps = true;
+          _geocodedPlace = null;
+        }
+      }
+    } else {
+      _isOutsideCambodia = false;
+      _rawOutsideGps = null;
+    }
+    notifyListeners();
+  }
+
+  /// Snaps the draggable pin back onto the device's verified live GPS fix.
+  LatLng? jumpToLiveGps() {
+    final target = liveGpsPoint;
+    if (target == null) return null;
+    _pinLocation = target;
+    _locationVerified = true;
+    _usedLiveGps = true;
+    _userManuallyMovedPin = false;
+    _geocodedPlace = null;
+    notifyListeners();
+    return target;
   }
 
   void setPinLocation(
@@ -489,14 +715,24 @@ class ReportWizardViewModel extends ChangeNotifier {
     _pinLocation = point;
     _locationVerified = verified;
     _usedLiveGps = fromLiveGps;
+    if (!fromLiveGps) {
+      _userManuallyMovedPin = true;
+    }
     _gpsAccuracyMeters = accuracyMeters ?? _gpsAccuracyMeters;
-    _isOutsideCambodia = false;
-    _rawOutsideGps = null;
+    if (fromLiveGps) {
+      _isOutsideCambodia = false;
+      _rawOutsideGps = null;
+    }
     _geocodedPlace = null;
     notifyListeners();
   }
 
   void setOutsideCambodiaDetected(LatLng rawPoint, {double? accuracyMeters}) {
+    _liveGpsResult = LocationSuccess(
+      point: rawPoint,
+      accuracyMeters: accuracyMeters ?? 0,
+      isOutsideCambodia: true,
+    );
     _isOutsideCambodia = true;
     _rawOutsideGps = rawPoint;
     _gpsAccuracyMeters = accuracyMeters;
@@ -1096,6 +1332,10 @@ class ReportWizardViewModel extends ChangeNotifier {
     bool forceCreateNew = false,
     String? customTitle,
   }) {
+    final eligibility = locationEligibility;
+    final verificationTier = eligibility is ReportLocationEligible
+        ? eligibility.tier
+        : null;
     return repository.submitReport(
       category: _category,
       description: _description.trim(),
@@ -1109,6 +1349,9 @@ class ReportWizardViewModel extends ChangeNotifier {
       voiceAudioPath: _voiceAudioPath,
       voiceAudioDurationSeconds: _voiceAudioDurationSeconds,
       geocodedPlace: _geocodedPlace,
+      photoAnchorCoordinates: activePhotoAnchor?.point,
+      locationVerificationTier: verificationTier,
+      photoLocationUnverified: isGalleryPhotoWithoutLocationAnchor,
       forceCreateNew: forceCreateNew,
     );
   }

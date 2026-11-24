@@ -539,6 +539,33 @@ enum SupportVerificationTier {
   };
 }
 
+/// How a citizen's Step 3 report pin was verified under Rule #1 (Smart Distance
+/// Gate) and the 250 m Photo-Anchored Hard Fence.
+enum ReportLocationVerificationTier {
+  /// Attached photo's pre-strip EXIF GPS matches the pin (`<= 250 m`, `<= 30 days`).
+  photoExifVerified,
+
+  /// Live in-app camera capture GPS matches the pin (`<= 250 m`).
+  liveCameraVerified,
+
+  /// Live Cambodia GPS is right at the pinned incident (`<= 500 m`).
+  verifiedOnSite,
+
+  /// Live Cambodia GPS is within the same city / commuter radius (`500 m – 15 km`).
+  sameCityCommuter,
+
+  /// Pin lies inside the citizen's saved Home Province & District (`ខណ្ឌ / ក្រុង / ស្រុក`).
+  homeResident;
+
+  static ReportLocationVerificationTier? fromName(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    for (final value in ReportLocationVerificationTier.values) {
+      if (value.name == raw) return value;
+    }
+    return null;
+  }
+}
+
 /// One citizen's field description or follow-up note attached to a shared
 /// Master Incident. Displayed with privacy-first badges (never exposing real
 /// names, phone numbers, or user IDs on public reports).
@@ -666,6 +693,8 @@ class CivicReport {
     this.joinedByCurrentUser = false,
     this.userSupportTier,
     this.userSupportDistanceMeters,
+    this.locationVerificationTier,
+    this.photoLocationUnverified = false,
     this.syncStatus = SyncStatus.synced,
     this.crewCode,
     this.voiceTranscript,
@@ -706,6 +735,8 @@ class CivicReport {
   final bool joinedByCurrentUser;
   final SupportVerificationTier? userSupportTier;
   final double? userSupportDistanceMeters;
+  final ReportLocationVerificationTier? locationVerificationTier;
+  final bool photoLocationUnverified;
   final SyncStatus syncStatus;
   final String? crewCode;
   final String? voiceTranscript;
@@ -822,6 +853,8 @@ class CivicReport {
     SupportVerificationTier? userSupportTier,
     double? userSupportDistanceMeters,
     bool clearUserSupportMeta = false,
+    ReportLocationVerificationTier? locationVerificationTier,
+    bool? photoLocationUnverified,
     SyncStatus? syncStatus,
     String? crewCode,
     String? voiceTranscript,
@@ -871,6 +904,10 @@ class CivicReport {
       userSupportDistanceMeters: clearUserSupportMeta
           ? null
           : (userSupportDistanceMeters ?? this.userSupportDistanceMeters),
+      locationVerificationTier:
+          locationVerificationTier ?? this.locationVerificationTier,
+      photoLocationUnverified:
+          photoLocationUnverified ?? this.photoLocationUnverified,
       syncStatus: syncStatus ?? this.syncStatus,
       crewCode: crewCode ?? this.crewCode,
       voiceTranscript: voiceTranscript ?? this.voiceTranscript,
@@ -918,6 +955,10 @@ class CivicReport {
     'joinedByCurrentUser': joinedByCurrentUser,
     'userSupportTier': userSupportTier?.name,
     'userSupportDistanceMeters': userSupportDistanceMeters,
+    if (locationVerificationTier != null)
+      'locationVerificationTier': locationVerificationTier!.name,
+    if (photoLocationUnverified)
+      'photoLocationUnverified': photoLocationUnverified,
     'syncStatus': syncStatus.name,
     'crewCode': crewCode,
     'voiceTranscript': voiceTranscript,
@@ -1003,6 +1044,11 @@ class CivicReport {
       ),
       userSupportDistanceMeters: (json['userSupportDistanceMeters'] as num?)
           ?.toDouble(),
+      locationVerificationTier: ReportLocationVerificationTier.fromName(
+        json['locationVerificationTier'] as String?,
+      ),
+      photoLocationUnverified:
+          (json['photoLocationUnverified'] as bool?) ?? false,
       syncStatus: SyncStatus.fromName(json['syncStatus'] as String?),
       crewCode: json['crewCode'] as String?,
       voiceTranscript: json['voiceTranscript'] as String?,

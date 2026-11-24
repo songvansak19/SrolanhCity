@@ -11,7 +11,7 @@ A **Khmer-first, bilingual (Khmer / English) civic infrastructure reporting app*
 ### 1. Fast 3-Step Civic Reporting
 - **Photo-First with Automatic Privacy & Mobile-Web Resilience**: Attach up to 3 photos with pure-Dart pre-strip EXIF GPS/timestamp extraction (for anti-spoof verification) followed by complete JPEG **EXIF / GPS metadata stripping** (`APP1`, `APP2`, `APP13`, `COM` markers removed before storage or upload). Direct Web `FileReader` + `<canvas>` decoding ensures reliable gallery uploads on Android/iOS mobile browsers.
 - **Online & Offline Khmer/English Voice Reporting**: Supports both Hold-to-Speak and Tap-to-Toggle voice reporting with a 1-tap `ខ្មែរ / EN` switcher, live sound-level waveform, real offline local voice memo recording & inline playback (`MediaRecorder` on Web, `package:record` on Native), automatic Brave/browser fallback, and backend-ready transcription.
-- **5-Layer Anti-Spoof & Verified GPS Pinning**: Combines OS mock-location blocking, impossible-travel velocity detection (`> 250 km/h` / teleport guard), synthetic GPS accuracy heuristics, pre-strip photo EXIF cross-checking (with 1-tap **Use photo location**), and soft IP-vs-GPS country checks.
+- **5-Layer Anti-Spoof, 250 m Photo-Anchored Fence & Smart Distance Gate**: Combines OS mock-location blocking, impossible-travel velocity detection (`> 250 km/h` / teleport guard), synthetic GPS accuracy heuristics, pre-strip photo EXIF & live camera capture anchoring (hard-blocking pins dragged `> 250 m` from where the photo was taken with a visual 250 m ring and 1-tap **Snap to photo location**), **dual Master Incident duplicate detection** checking both the dragged pin and the photo's capture spot, soft IP-vs-GPS country checks, transparent **municipal review tagging** for gallery photos lacking EXIF GPS, and a Step 3 **15 km Smart Distance Gate** blocking cross-province pins unless inside the citizen's saved Home District.
 - **Guest-First Privacy & Flexible Issue Reporting**: Starts cleanly as **Guest (`ភ្ញៀវ`)** with optional phone and home area, and supports custom **Other Issue (`បញ្ហាផ្សេងៗ`)** reports with optional custom titles when tapping **"It's a different problem"** near an existing pin.
 
 ### 2. Nationwide 25-Province Interactive Map
@@ -93,7 +93,7 @@ dart format lib test
 dart analyze --fatal-infos
 flutter test
 ```
-The test suite includes **92 unit, widget, and WCAG 2.1 AA accessibility tests** covering Priority Score tiers, multi-citizen Master Incident comments & inline Khmer/English translation, self-duplicate & `"It's a different problem"` flows, Guest profile & resilient data-URI avatar uploads, Khmer/English online/offline voice memos, 5-layer anti-spoof & EXIF GPS verification, ODC/25-province GIS routing, stable zoom clustering & overview carousel visibility, distance-aware `"Affects me"` anti-abuse rules, offline reopen auto-sync, floating AI Assistant bubble & Help Center ticket lookup, PWA manifest & service worker branding, and automated Flutter accessibility guidelines.
+The test suite includes **104 unit, widget, and WCAG 2.1 AA accessibility tests** covering Priority Score tiers, multi-citizen Master Incident comments & inline Khmer/English translation, self-duplicate & `"It's a different problem"` flows, Guest profile & resilient data-URI avatar uploads, Khmer/English online/offline voice memos, 5-layer anti-spoof, 250 m photo-anchored fence & dual Master Incident deduplication, Step 3 15 km Smart Distance Gate & unverified gallery review tagging, ODC/25-province GIS routing, stable zoom clustering & overview carousel visibility, distance-aware `"Affects me"` anti-abuse rules, offline reopen auto-sync, floating AI Assistant bubble & Help Center ticket lookup, PWA manifest & cache-first CDN map tile service worker, and automated Flutter accessibility guidelines.
 
 ---
 
@@ -110,9 +110,17 @@ flutter build web --release --no-web-resources-cdn
 # For GitHub Pages subpath (bundles CanvasKit locally for full offline PWA launch)
 flutter build web --release --base-href "/SrolanhCity/" --no-web-resources-cdn
 ```
+
+### Android APK Build
+```bash
+flutter build apk --release
+```
+
+---
+
 ## Roadmap & Venture Vision
 
-- **MVP (Current Build)**: Bilingual Flutter mobile & web app, 25-province interactive map, pure-Dart EXIF stripping, spatial deduplication, `P1–P5` priority scoring, and 51 automated tests.
+- **MVP (Current Build)**: Bilingual Flutter mobile & web app, fast CARTO CDN 25-province interactive map, pure-Dart EXIF stripping, dual-point spatial deduplication, `P1–P5` priority scoring, 250 m photo-anchored fence, Smart Distance Gate & 5-layer anti-spoof, floating AI Assistant bubble, and 104 automated tests.
 - **Phase 1 — Live AI Backend & Pilot**: Connect live `/api/v1/ai/` classification and Khmer speech-to-text endpoints, deploy the 2–3 staff verification dashboard, and pilot in a target Phnom Penh district with local Village Chiefs (`Me Phum`) and drivers.
 - **Phase 2 — Elderly Accessibility & Local Fixer Monetization**: Launch a **Telegram Bot** intake channel for zero-install reporting, alongside a **Fixed-Price Local Fixer** directory connecting residents with verified neighborhood plumbers, electricians, and handymen for private household repairs—creating a sustainable revenue stream while keeping public civic reporting 100% free.
 - **Phase 3 — City-Wide & Ministry Scale**: Expand across all 14 Khans of Phnom Penh and major provinces with direct municipal dispatch integration and anonymized Open Data infrastructure heatmaps.
@@ -134,7 +142,3 @@ Built by **TechnoTeam** for the **Open Data × AI Venture Hackathon 1.0**:
 ## License
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
-### Android APK Build
-```bash
-flutter build apk --release
-```

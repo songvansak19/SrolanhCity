@@ -108,8 +108,8 @@ class HelpAssistantService {
       khmerQuestion:
           'តើឯកជនភាព និងប្រព័ន្ធទប់ស្កាត់ទីតាំងក្លែងក្លាយដំណើរការយ៉ាងណា?',
       englishQuestion: 'How do Privacy-by-Design and Anti-Spoof checks work?',
-      khmerAnswer: 'ឈ្មោះ លេខទូរស័ព្ទ និងទិន្នន័យ EXIF ក្នុងរូបថតត្រូវបានលុបចេញដោយស្វ័យប្រវត្តិមុនរក្សាទុក ហើយមិនបង្ហាញលើផែនទីសាធារណៈឡើយ។ ប្រព័ន្ធក៏ផ្ទៀងផ្ទាត់ GPS ល្បឿនផ្លាស់ទី និងចម្ងាយពិត ដើម្បីការពារការបន្លំទីតាំងផងដែរ។',
-      englishAnswer: 'Reporter names, phones, and camera EXIF metadata are automatically stripped and never shown on public pins. Multi-layer anti-spoof checks verify genuine GPS fixes, realistic travel speed, and proximity.',
+      khmerAnswer: 'ឈ្មោះ លេខទូរស័ព្ទ និងទិន្នន័យ EXIF ក្នុងរូបថតត្រូវបានលុបចេញដោយស្វ័យប្រវត្តិមុនរក្សាទុក ហើយមិនបង្ហាញលើផែនទីសាធារណៈឡើយ។ ការដាក់ស្នើរបាយការណ៍ក៏ផ្ទៀងផ្ទាត់ GPS ពិតប្រាកដក្នុងចម្ងាយ 15 គ.ម (ឬទីតាំង GPS ក្នុងរូបថត / តំបន់រស់នៅរបស់អ្នក) ដើម្បីការពារការបន្លំទីតាំងផងដែរ។',
+      englishAnswer: 'Reporter names, phones, and camera EXIF metadata are automatically stripped and never shown on public pins. Submissions and votes verify genuine GPS within 15 km (or matching photo EXIF / your saved Home District) while blocking mock GPS and impossible travel.',
     ),
   ];
 
@@ -384,11 +384,11 @@ class HelpAssistantService {
             ? 'Your identity is protected by **Privacy-by-Design**:\n'
                   '• Public map pins never show your name, phone, or user ID.\n'
                   '• Camera EXIF metadata (GPS/device model) is stripped automatically before saving.\n'
-                  '• Multi-layer anti-spoof checks verify genuine GPS fixes & realistic travel speed while keeping honest VPN/gallery users safe.'
+                  '• Multi-layer anti-spoof locks geotagged/camera photos within 250 m of capture, checks duplicates at both pin and photo coordinates, enforces 15 km / Home District rules, and blocks fake GPS apps.'
             : 'អត្តសញ្ញាណរបស់អ្នកត្រូវបានការពារដោយ **ឯកជនភាពជាមូលដ្ឋាន**៖\n'
                   '• ផែនទីសាធារណៈមិនបង្ហាញឈ្មោះ លេខទូរស័ព្ទ ឬលេខសម្គាល់អ្នកឡើយ។\n'
                   '• ទិន្នន័យ EXIF ក្នុងរូបថតត្រូវបានលុបចេញដោយស្វ័យប្រវត្តិមុនរក្សាទុក។\n'
-                  '• ប្រព័ន្ធការពារទីតាំងក្លែងក្លាយផ្ទៀងផ្ទាត់ GPS និងល្បឿនផ្លាស់ទីពិតប្រាកដ ដោយមិនរំខានអ្នកប្រើប្រាស់ស្មោះត្រង់ឡើយ។',
+                  '• ប្រព័ន្ធការពារទីតាំងក្លែងក្លាយកំណត់រង្វង់ 250 ម៉ែត្រជុំវិញទីតាំងថតរូប ពិនិត្យរបាយការណ៍ស្ទួនទាំងម្ជុល និងរូបថត ផ្ទៀងផ្ទាត់ចម្ងាយ 15 គ.ម / តំបន់រស់នៅ និងទប់ស្កាត់កម្មវិធីបន្លំ GPS។',
       );
     }
 

@@ -159,9 +159,9 @@ abstract final class AntiSpoofService {
   static const double teleportMinDistanceMeters = 500.0;
   static const Duration teleportMaxWindow = Duration(seconds: 2);
 
-  /// Photo EXIF thresholds.
-  static const double exifVerifiedRadiusMeters = 500.0;
-  static const double exifMismatchRadiusMeters = 5000.0;
+  /// Photo EXIF thresholds (aligned with the 250 m Photo-Anchored Hard Fence).
+  static const double exifVerifiedRadiusMeters = 250.0;
+  static const double exifMismatchRadiusMeters = 250.0;
   static const Duration exifMaxAge = Duration(days: 30);
 
   /// Evaluates Layers 1–3 on a live GPS fix against an optional previous
@@ -285,10 +285,15 @@ abstract final class AntiSpoofService {
       if (dist <= exifVerifiedRadiusMeters) {
         photoExifVerified = true;
       } else if (dist > exifMismatchRadiusMeters) {
-        final km = (dist / 1000.0).toStringAsFixed(1);
+        final khDist = dist < 1000
+            ? '${dist.round()} ម៉ែត្រ'
+            : '${(dist / 1000.0).toStringAsFixed(1)} គ.ម';
+        final enDist = dist < 1000
+            ? '${dist.round()} m'
+            : '${(dist / 1000.0).toStringAsFixed(1)} km';
         reasons.add(SpoofSignalReason.photoExifLocationMismatch);
-        khNotes.add('ទីតាំងក្នុងរូបថតនៅឆ្ងាយពីចំណុចលើផែនទី $km គ.ម');
-        enNotes.add('Photo GPS metadata is $km km away from the pinned spot');
+        khNotes.add('ទីតាំងក្នុងរូបថតនៅឆ្ងាយពីចំណុចលើផែនទី $khDist');
+        enNotes.add('Photo GPS metadata is $enDist away from the pinned spot');
       }
     }
 

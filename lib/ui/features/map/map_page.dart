@@ -14,6 +14,7 @@ import '../../../domain/services/anti_spoof_service.dart';
 import '../../../domain/services/gis_routing_service.dart';
 import '../../../domain/services/map_cluster_service.dart';
 import '../../core/l10n.dart';
+import '../../core/map_tile_config.dart';
 import '../../core/report_scope.dart';
 import '../../core/support_action_coordinator.dart';
 import '../../core/theme.dart';
@@ -90,7 +91,7 @@ class _MapPageState extends State<MapPage> {
         if (focused != null) {
           _center = focused.coordinates;
           _activeReportId = focused.id;
-          _zoom = 16.0;
+          _zoom = MapTileConfig.streetFocusZoom;
           _clusterTier = MapClusterService.tierForZoom(_zoom);
         }
       } else if (repo.profile.hasHomeArea) {
@@ -100,11 +101,11 @@ class _MapPageState extends State<MapPage> {
           provinceCode: repo.profile.homeProvinceCode,
         ).province;
         _center = homeProvince.center;
-        _zoom = homeProvince.isCapital ? 13.8 : 13.6;
+        _zoom = MapTileConfig.cityFocusZoom;
         _clusterTier = MapClusterService.tierForZoom(_zoom);
       } else {
         _center = _phnomPenh;
-        _zoom = 13.8;
+        _zoom = MapTileConfig.cityFocusZoom;
         _clusterTier = MapClusterService.tierForZoom(_zoom);
       }
       _didApplyInitialFocus = true;
@@ -1207,154 +1208,165 @@ class _MapPageState extends State<MapPage> {
     return Scaffold(
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _center,
-              initialZoom: _zoom,
-              minZoom: LocationService.minMapZoom,
-              maxZoom: LocationService.maxMapZoom,
-              cameraConstraint: CameraConstraint.contain(
-                bounds: LocationService.cambodiaMapBounds,
-              ),
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
-              onMapReady: () {
-                _mapReady = true;
-                _visibleBounds = _mapController.camera.visibleBounds;
-                _carouselBounds = _visibleBounds;
-                if (mounted) setState(() {});
-              },
-              onPositionChanged: (camera, hasGesture) =>
-                  _handleCameraPositionChanged(camera, hasGesture: hasGesture),
-              onTap: (_, point) {
-                HapticFeedback.selectionClick();
-                setState(() {
-                  _customPin = point;
-                  _outsideCambodiaDetected = false;
-                });
-                _updatePinLabel(point);
-              },
+          Semantics(
+            label: tr.primary(
+              'ផែនទីបញ្ហាសាធារណៈកម្ពុជា',
+              'Cambodia civic issues map',
             ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.srolanhcity.app',
-                maxNativeZoom: 19,
-                maxZoom: 19,
-                keepBuffer: 2,
-              ),
-              MarkerLayer(
-                markers: [
-                  if (_customPin != null)
-                    Marker(
-                      point: _customPin!,
-                      width: 48,
-                      height: 48,
-                      alignment: Alignment.topCenter,
-                      child: const Icon(
-                        Icons.location_on,
-                        color: AppColors.teal,
-                        size: 44,
-                      ),
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _center,
+                initialZoom: _zoom,
+                minZoom: LocationService.minMapZoom,
+                maxZoom: LocationService.maxMapZoom,
+                backgroundColor: MapTileConfig.mapBackgroundColor,
+                cameraConstraint: CameraConstraint.contain(
+                  bounds: LocationService.cambodiaMapBounds,
+                ),
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                ),
+                onMapReady: () {
+                  _mapReady = true;
+                  _visibleBounds = _mapController.camera.visibleBounds;
+                  _carouselBounds = _visibleBounds;
+                  if (mounted) setState(() {});
+                },
+                onPositionChanged: (camera, hasGesture) =>
+                    _handleCameraPositionChanged(
+                      camera,
+                      hasGesture: hasGesture,
                     ),
-                  for (final item in clusterItems)
-                    switch (item) {
-                      ProvinceClusterItem() => Marker(
-                        point: item.position,
-                        width: 152,
-                        height: 48,
-                        child: _ProvinceClusterBubble(
-                          key: Key('province-cluster-${item.province.code}'),
-                          label: tr.primary(
-                            item.province.shortKhmer,
-                            item.province.english,
-                          ),
-                          semanticLabel: tr.primary(
-                            '${item.province.khmer} · ${item.count} របាយការណ៍ · ពង្រីកមើល',
-                            '${item.province.english}, ${item.count} reports, zoom in',
-                          ),
-                          count: item.count,
-                          color: item.allResolved
-                              ? AppColors.success
-                              : AppColors.priorityColor(item.maxPriorityLevel),
-                          countForeground: item.allResolved
-                              ? Colors.white
-                              : AppColors.priorityForeground(
-                                  item.maxPriorityLevel,
-                                ),
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            _flyToPoint(
-                              item.position,
-                              item.province.isCapital ? 13.8 : 13.6,
-                            );
-                          },
-                        ),
-                      ),
-                      AreaClusterItem() => Marker(
-                        point: item.position,
-                        width: 52,
-                        height: 52,
-                        child: _AreaClusterMarker(
-                          count: item.count,
-                          semanticLabel: tr.primary(
-                            'ចង្កោមរបាយការណ៍ ${item.count} កន្លែង · ពង្រីកមើល',
-                            'Cluster of ${item.count} reports, zoom in',
-                          ),
-                          color: item.allResolved
-                              ? AppColors.success
-                              : AppColors.priorityColor(item.maxPriorityLevel),
-                          foreground: item.allResolved
-                              ? Colors.white
-                              : AppColors.priorityForeground(
-                                  item.maxPriorityLevel,
-                                ),
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            _flyToPoint(
-                              item.position,
-                              (_zoom + 2.2).clamp(13.6, 16.0).toDouble(),
-                            );
-                          },
-                        ),
-                      ),
-                      SingleReportPinItem(:final report) => Marker(
-                        point: report.coordinates,
-                        width: highlightedId == report.id ? 54 : 48,
-                        height: highlightedId == report.id ? 54 : 48,
-                        child: _PriorityMarker(
-                          label: report.status == ReportStatus.resolved
-                              ? '✓'
-                              : 'P${report.priority.level}',
-                          semanticLabel: tr.primary(
-                            '${report.khmerTitle} · P${report.priority.level}',
-                            '${report.englishTitle}, Priority P${report.priority.level}',
-                          ),
-                          color: report.status == ReportStatus.resolved
-                              ? AppColors.success
-                              : AppColors.priorityColor(report.priority.level),
-                          foreground: report.status == ReportStatus.resolved
-                              ? Colors.white
-                              : AppColors.priorityForeground(
-                                  report.priority.level,
-                                ),
-                          highlighted: highlightedId == report.id,
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            setState(() {
-                              _activeReportId = report.id;
-                              _customPin = null;
-                            });
-                            _openIncidentSheet(report, tr);
-                          },
-                        ),
-                      ),
-                    },
-                ],
+                onTap: (_, point) {
+                  HapticFeedback.selectionClick();
+                  setState(() {
+                    _customPin = point;
+                    _outsideCambodiaDetected = false;
+                  });
+                  _updatePinLabel(point);
+                },
               ),
-            ],
+              children: [
+                MapTileConfig.buildTileLayer(),
+                MarkerLayer(
+                  markers: [
+                    if (_customPin != null)
+                      Marker(
+                        point: _customPin!,
+                        width: 48,
+                        height: 48,
+                        alignment: Alignment.topCenter,
+                        child: const Icon(
+                          Icons.location_on,
+                          color: AppColors.teal,
+                          size: 44,
+                        ),
+                      ),
+                    for (final item in clusterItems)
+                      switch (item) {
+                        ProvinceClusterItem() => Marker(
+                          point: item.position,
+                          width: 152,
+                          height: 48,
+                          child: _ProvinceClusterBubble(
+                            key: Key('province-cluster-${item.province.code}'),
+                            label: tr.primary(
+                              item.province.shortKhmer,
+                              item.province.english,
+                            ),
+                            semanticLabel: tr.primary(
+                              '${item.province.khmer} · ${item.count} របាយការណ៍ · ពង្រីកមើល',
+                              '${item.province.english}, ${item.count} reports, zoom in',
+                            ),
+                            count: item.count,
+                            color: item.allResolved
+                                ? AppColors.success
+                                : AppColors.priorityColor(
+                                    item.maxPriorityLevel,
+                                  ),
+                            countForeground: item.allResolved
+                                ? Colors.white
+                                : AppColors.priorityForeground(
+                                    item.maxPriorityLevel,
+                                  ),
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              _flyToPoint(
+                                item.position,
+                                MapTileConfig.cityFocusZoom,
+                              );
+                            },
+                          ),
+                        ),
+                        AreaClusterItem() => Marker(
+                          point: item.position,
+                          width: 52,
+                          height: 52,
+                          child: _AreaClusterMarker(
+                            count: item.count,
+                            semanticLabel: tr.primary(
+                              'ចង្កោមរបាយការណ៍ ${item.count} កន្លែង · ពង្រីកមើល',
+                              'Cluster of ${item.count} reports, zoom in',
+                            ),
+                            color: item.allResolved
+                                ? AppColors.success
+                                : AppColors.priorityColor(
+                                    item.maxPriorityLevel,
+                                  ),
+                            foreground: item.allResolved
+                                ? Colors.white
+                                : AppColors.priorityForeground(
+                                    item.maxPriorityLevel,
+                                  ),
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              _flyToPoint(
+                                item.position,
+                                (_zoom + 2.2).clamp(13.6, 16.0).toDouble(),
+                              );
+                            },
+                          ),
+                        ),
+                        SingleReportPinItem(:final report) => Marker(
+                          point: report.coordinates,
+                          width: highlightedId == report.id ? 54 : 48,
+                          height: highlightedId == report.id ? 54 : 48,
+                          child: _PriorityMarker(
+                            label: report.status == ReportStatus.resolved
+                                ? '✓'
+                                : 'P${report.priority.level}',
+                            semanticLabel: tr.primary(
+                              '${report.khmerTitle} · P${report.priority.level}',
+                              '${report.englishTitle}, Priority P${report.priority.level}',
+                            ),
+                            color: report.status == ReportStatus.resolved
+                                ? AppColors.success
+                                : AppColors.priorityColor(
+                                    report.priority.level,
+                                  ),
+                            foreground: report.status == ReportStatus.resolved
+                                ? Colors.white
+                                : AppColors.priorityForeground(
+                                    report.priority.level,
+                                  ),
+                            highlighted: highlightedId == report.id,
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              setState(() {
+                                _activeReportId = report.id;
+                                _customPin = null;
+                              });
+                              _openIncidentSheet(report, tr);
+                            },
+                          ),
+                        ),
+                      },
+                  ],
+                ),
+                MapTileConfig.buildAttributionBadge(),
+              ],
+            ),
           ),
 
           // Floating Search Bar, Category Chips & Collapsible Priority Legend
