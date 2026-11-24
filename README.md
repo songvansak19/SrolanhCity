@@ -110,7 +110,30 @@ flutter build web --release --no-web-resources-cdn
 # For GitHub Pages subpath (bundles CanvasKit locally for full offline PWA launch)
 flutter build web --release --base-href "/SrolanhCity/" --no-web-resources-cdn
 ```
+## Roadmap & Venture Vision
 
+- **MVP (Current Build)**: Bilingual Flutter mobile & web app, 25-province interactive map, pure-Dart EXIF stripping, spatial deduplication, `P1–P5` priority scoring, and 51 automated tests.
+- **Phase 1 — Live AI Backend & Pilot**: Connect live `/api/v1/ai/` classification and Khmer speech-to-text endpoints, deploy the 2–3 staff verification dashboard, and pilot in a target Phnom Penh district with local Village Chiefs (`Me Phum`) and drivers.
+- **Phase 2 — Elderly Accessibility & Local Fixer Monetization**: Launch a **Telegram Bot** intake channel for zero-install reporting, alongside a **Fixed-Price Local Fixer** directory connecting residents with verified neighborhood plumbers, electricians, and handymen for private household repairs—creating a sustainable revenue stream while keeping public civic reporting 100% free.
+- **Phase 3 — City-Wide & Ministry Scale**: Expand across all 14 Khans of Phnom Penh and major provinces with direct municipal dispatch integration and anonymized Open Data infrastructure heatmaps.
+
+---
+
+## Team
+
+Built by **TechnoTeam** for the **Open Data × AI Venture Hackathon 1.0**:
+
+- **Bou Socheat**
+- **Song Vansak**
+- **Heng Sovannarith**
+- **Seng Pich**
+- **Chheng Sopongreasey**
+
+---
+
+## License
+
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 ### Android APK Build
 ```bash
 flutter build apk --release
