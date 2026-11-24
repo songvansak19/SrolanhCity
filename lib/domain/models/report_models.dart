@@ -1121,6 +1121,10 @@ class AppSettings {
     this.newsProvinceCode,
     this.newsKhanEnglish,
     this.newsSangkatEnglish,
+    this.assistantBubbleEnabled = true,
+    this.assistantBubbleOnLeft = false,
+    this.assistantBubbleYFraction = 0.45,
+    this.assistantHintSeen = false,
   });
 
   final bool englishFirst;
@@ -1129,6 +1133,10 @@ class AppSettings {
   final String? newsProvinceCode;
   final String? newsKhanEnglish;
   final String? newsSangkatEnglish;
+  final bool assistantBubbleEnabled;
+  final bool assistantBubbleOnLeft;
+  final double assistantBubbleYFraction;
+  final bool assistantHintSeen;
 
   AppSettings copyWith({
     bool? englishFirst,
@@ -1137,6 +1145,10 @@ class AppSettings {
     String? newsProvinceCode,
     String? newsKhanEnglish,
     String? newsSangkatEnglish,
+    bool? assistantBubbleEnabled,
+    bool? assistantBubbleOnLeft,
+    double? assistantBubbleYFraction,
+    bool? assistantHintSeen,
     bool clearNewsProvince = false,
     bool clearNewsArea = false,
     bool clearNewsSangkat = false,
@@ -1154,6 +1166,15 @@ class AppSettings {
       newsSangkatEnglish: clearNewsArea || clearNewsSangkat
           ? null
           : (newsSangkatEnglish ?? this.newsSangkatEnglish),
+      assistantBubbleEnabled:
+          assistantBubbleEnabled ?? this.assistantBubbleEnabled,
+      assistantBubbleOnLeft:
+          assistantBubbleOnLeft ?? this.assistantBubbleOnLeft,
+      assistantBubbleYFraction:
+          (assistantBubbleYFraction ?? this.assistantBubbleYFraction)
+              .clamp(0.0, 1.0)
+              .toDouble(),
+      assistantHintSeen: assistantHintSeen ?? this.assistantHintSeen,
     );
   }
 
@@ -1164,9 +1185,14 @@ class AppSettings {
     'newsProvinceCode': newsProvinceCode,
     'newsKhanEnglish': newsKhanEnglish,
     'newsSangkatEnglish': newsSangkatEnglish,
+    'assistantBubbleEnabled': assistantBubbleEnabled,
+    'assistantBubbleOnLeft': assistantBubbleOnLeft,
+    'assistantBubbleYFraction': assistantBubbleYFraction,
+    'assistantHintSeen': assistantHintSeen,
   };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
+    final rawY = (json['assistantBubbleYFraction'] as num?)?.toDouble();
     return AppSettings(
       englishFirst: (json['englishFirst'] as bool?) ?? false,
       notificationsEnabled: (json['notificationsEnabled'] as bool?) ?? true,
@@ -1174,6 +1200,10 @@ class AppSettings {
       newsProvinceCode: json['newsProvinceCode'] as String?,
       newsKhanEnglish: json['newsKhanEnglish'] as String?,
       newsSangkatEnglish: json['newsSangkatEnglish'] as String?,
+      assistantBubbleEnabled: (json['assistantBubbleEnabled'] as bool?) ?? true,
+      assistantBubbleOnLeft: (json['assistantBubbleOnLeft'] as bool?) ?? false,
+      assistantBubbleYFraction: (rawY ?? 0.45).clamp(0.0, 1.0).toDouble(),
+      assistantHintSeen: (json['assistantHintSeen'] as bool?) ?? false,
     );
   }
 }

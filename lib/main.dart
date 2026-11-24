@@ -6,6 +6,9 @@ import 'package:material_ui/material_ui.dart';
 import 'data/repositories/report_repository.dart';
 import 'data/services/connectivity_service.dart';
 import 'data/services/local_storage_service.dart';
+import 'domain/services/help_assistant_service.dart';
+import 'ui/core/assistant/assistant_bubble_host.dart';
+import 'ui/core/assistant/assistant_scope.dart';
 import 'ui/core/report_scope.dart';
 import 'ui/core/theme.dart';
 import 'ui/features/welcome/welcome_page.dart';
@@ -17,10 +20,12 @@ class SrolanhCityApp extends StatefulWidget {
     super.key,
     ReportRepository? repository,
     this.connectivityService,
+    this.assistantService,
   }) : _providedRepository = repository;
 
   final ReportRepository? _providedRepository;
   final ConnectivityService? connectivityService;
+  final HelpAssistantService? assistantService;
 
   @override
   State<SrolanhCityApp> createState() => _SrolanhCityAppState();
@@ -28,6 +33,7 @@ class SrolanhCityApp extends StatefulWidget {
 
 class _SrolanhCityAppState extends State<SrolanhCityApp> {
   late final ReportRepository _repository;
+  late final AssistantController _assistant;
   late final bool _ownsRepository;
   ConnectivityService? _connectivity;
   StreamSubscription<bool>? _connectivitySub;
@@ -35,6 +41,7 @@ class _SrolanhCityAppState extends State<SrolanhCityApp> {
   @override
   void initState() {
     super.initState();
+    _assistant = AssistantController(assistant: widget.assistantService);
     if (widget._providedRepository != null) {
       _repository = widget._providedRepository!;
       _ownsRepository = false;
@@ -66,6 +73,7 @@ class _SrolanhCityAppState extends State<SrolanhCityApp> {
   @override
   void dispose() {
     _connectivitySub?.cancel();
+    _assistant.dispose();
     if (_ownsRepository) {
       _repository.dispose();
     }
@@ -76,12 +84,19 @@ class _SrolanhCityAppState extends State<SrolanhCityApp> {
   Widget build(BuildContext context) {
     return ReportScope(
       repository: _repository,
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'SrolanhCity',
-        scrollBehavior: const _SrolanhScrollBehavior(),
-        theme: buildSrolanhCityTheme(),
-        home: const WelcomePage(),
+      child: AssistantScope(
+        controller: _assistant,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'SrolanhCity',
+          navigatorKey: _assistant.navigatorKey,
+          navigatorObservers: [_assistant.routeObserver],
+          scrollBehavior: const _SrolanhScrollBehavior(),
+          theme: buildSrolanhCityTheme(),
+          builder: (context, child) =>
+              Stack(children: [?child, const AssistantBubbleHost()]),
+          home: const WelcomePage(),
+        ),
       ),
     );
   }

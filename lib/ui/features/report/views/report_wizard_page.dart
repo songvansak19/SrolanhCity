@@ -19,6 +19,7 @@ import '../../../../domain/models/report_models.dart';
 import '../../../../domain/models/routing_result.dart';
 import '../../../../domain/services/anti_spoof_service.dart';
 import '../../../../domain/services/spatial_clustering_service.dart';
+import '../../../core/assistant/assistant_bubble_suppressor.dart';
 import '../../../core/l10n.dart';
 import '../../../core/report_scope.dart';
 import '../../../core/theme.dart';
@@ -609,62 +610,64 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
     final repo = ReportScope.of(context);
     final tr = Bilingual(repo.settings.englishFirst);
 
-    return ListenableBuilder(
-      listenable: vm,
-      builder: (context, _) {
-        _syncDescriptionController(vm.description);
+    return AssistantBubbleSuppressor(
+      child: ListenableBuilder(
+        listenable: vm,
+        builder: (context, _) {
+          _syncDescriptionController(vm.description);
 
-        return PopScope(
-          canPop: vm.step == 0 && !vm.hasUnsavedChanges,
-          onPopInvokedWithResult: (didPop, _) {
-            if (didPop) return;
-            if (vm.step > 0) {
-              vm.previousStep();
-            } else {
-              _handleExitRequest(vm, tr);
-            }
-          },
-          child: AnnotatedRegion<SystemUiOverlayStyle>(
-            value: vm.step == 0
-                ? SystemUiOverlayStyle.light
-                : SystemUiOverlayStyle.dark,
-            child: Builder(
-              builder: (context) {
-                final step = vm.step;
-                final goingForward = step >= _previousStep;
-                _previousStep = step;
-                final reduceMotion = MediaQuery.disableAnimationsOf(context);
-                return AnimatedSwitcher(
-                  duration: reduceMotion
-                      ? Duration.zero
-                      : const Duration(milliseconds: 240),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
-                  transitionBuilder: (child, animation) {
-                    if (reduceMotion) return child;
-                    final offset = Tween<Offset>(
-                      begin: Offset(goingForward ? 0.06 : -0.06, 0.0),
-                      end: Offset.zero,
-                    ).animate(animation);
-                    return FadeTransition(
-                      opacity: animation,
-                      child: SlideTransition(position: offset, child: child),
-                    );
-                  },
-                  child: KeyedSubtree(
-                    key: ValueKey('wizard-step-$step'),
-                    child: switch (step) {
-                      0 => _buildCameraStep(vm, tr),
-                      1 => _buildDetailsStep(vm, tr),
-                      _ => _buildFullBleedLocationStep(vm, repo.reports, tr),
+          return PopScope(
+            canPop: vm.step == 0 && !vm.hasUnsavedChanges,
+            onPopInvokedWithResult: (didPop, _) {
+              if (didPop) return;
+              if (vm.step > 0) {
+                vm.previousStep();
+              } else {
+                _handleExitRequest(vm, tr);
+              }
+            },
+            child: AnnotatedRegion<SystemUiOverlayStyle>(
+              value: vm.step == 0
+                  ? SystemUiOverlayStyle.light
+                  : SystemUiOverlayStyle.dark,
+              child: Builder(
+                builder: (context) {
+                  final step = vm.step;
+                  final goingForward = step >= _previousStep;
+                  _previousStep = step;
+                  final reduceMotion = MediaQuery.disableAnimationsOf(context);
+                  return AnimatedSwitcher(
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 240),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) {
+                      if (reduceMotion) return child;
+                      final offset = Tween<Offset>(
+                        begin: Offset(goingForward ? 0.06 : -0.06, 0.0),
+                        end: Offset.zero,
+                      ).animate(animation);
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(position: offset, child: child),
+                      );
                     },
-                  ),
-                );
-              },
+                    child: KeyedSubtree(
+                      key: ValueKey('wizard-step-$step'),
+                      child: switch (step) {
+                        0 => _buildCameraStep(vm, tr),
+                        1 => _buildDetailsStep(vm, tr),
+                        _ => _buildFullBleedLocationStep(vm, repo.reports, tr),
+                      },
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -915,23 +918,29 @@ class _ReportWizardPageState extends State<ReportWizardPage> {
                         tooltip: tr.primary('បិទ', 'Close'),
                         onTap: () => _handleExitRequest(vm, tr),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 7,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.device.withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: BilingualText(
-                          bilingual: tr,
-                          khmer: 'ជំហាន ១/៣ · ថតរូប',
-                          english: 'Step 1 of 3 · Photo',
-                          fontSize: 12,
-                          color: Colors.white,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          isHeader: true,
+                      Flexible(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.device.withValues(alpha: 0.65),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: BilingualText(
+                              bilingual: tr,
+                              khmer: 'ជំហាន ១/៣ · ថតរូប',
+                              english: 'Step 1 of 3 · Photo',
+                              fontSize: 12,
+                              color: Colors.white,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              maxLines: 1,
+                              isHeader: true,
+                            ),
+                          ),
                         ),
                       ),
                       _FrostedCircleButton(

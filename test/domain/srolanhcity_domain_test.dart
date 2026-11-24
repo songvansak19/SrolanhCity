@@ -1944,6 +1944,29 @@ void main() {
       expect(offlineReply.fromBackendAi, isFalse);
       expect(offlineReply.text, contains('40%'));
     });
+
+    test('AppSettings persists floating assistant bubble preferences and defaults legacy JSON to enabled', () {
+      final legacy = AppSettings.fromJson(const {'englishFirst': true});
+      expect(legacy.englishFirst, isTrue);
+      expect(legacy.assistantBubbleEnabled, isTrue);
+      expect(legacy.assistantBubbleOnLeft, isFalse);
+      expect(legacy.assistantBubbleYFraction, closeTo(0.45, 0.001));
+      expect(legacy.assistantHintSeen, isFalse);
+
+      final custom = legacy.copyWith(
+        assistantBubbleEnabled: false,
+        assistantBubbleOnLeft: true,
+        assistantBubbleYFraction: 1.4, // clamped to 1.0
+        assistantHintSeen: true,
+      );
+      expect(custom.assistantBubbleYFraction, equals(1.0));
+
+      final restored = AppSettings.fromJson(custom.toJson());
+      expect(restored.assistantBubbleEnabled, isFalse);
+      expect(restored.assistantBubbleOnLeft, isTrue);
+      expect(restored.assistantBubbleYFraction, equals(1.0));
+      expect(restored.assistantHintSeen, isTrue);
+    });
   });
 }
 

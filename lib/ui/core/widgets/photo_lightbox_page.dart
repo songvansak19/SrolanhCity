@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../domain/models/report_models.dart';
+import '../assistant/assistant_bubble_suppressor.dart';
 import '../l10n.dart';
 import 'report_photo.dart';
 
@@ -73,50 +74,52 @@ class PhotoLightboxPage extends StatelessWidget {
       photo = Hero(tag: heroTag!, child: photo);
     }
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
+    return AssistantBubbleSuppressor(
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle.light,
+        child: Scaffold(
           backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          title: title == null
-              ? null
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (subtitle != null)
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            title: title == null
+                ? null
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        subtitle!,
+                        title!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w400,
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                  ],
+                      if (subtitle != null)
+                        Text(
+                          subtitle!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+          body: SafeArea(
+            child: Center(
+              child: InteractiveViewer(
+                minScale: 1.0,
+                maxScale: 4.0,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: AspectRatio(aspectRatio: 4 / 3, child: photo),
                 ),
-        ),
-        body: SafeArea(
-          child: Center(
-            child: InteractiveViewer(
-              minScale: 1.0,
-              maxScale: 4.0,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: AspectRatio(aspectRatio: 4 / 3, child: photo),
               ),
             ),
           ),

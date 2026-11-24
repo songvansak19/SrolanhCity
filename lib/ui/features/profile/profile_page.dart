@@ -266,6 +266,34 @@ class ProfilePage extends StatelessWidget {
                         ),
                       ),
                     ),
+                    const Divider(height: 1, color: AppColors.border),
+                    SwitchListTile(
+                      key: const Key('assistant-bubble-toggle'),
+                      value: settings.assistantBubbleEnabled,
+                      onChanged: (value) {
+                        HapticFeedback.selectionClick();
+                        repo.updateSettings(
+                          settings.copyWith(assistantBubbleEnabled: value),
+                        );
+                      },
+                      secondary: const Icon(
+                        Icons.support_agent_rounded,
+                        color: AppColors.teal,
+                      ),
+                      title: Text(
+                        tr.primary(
+                          'បង្ហាញប៊ូតុងជំនួយការ AI',
+                          'Show AI Assistant bubble',
+                        ),
+                      ),
+                      subtitle: Text(
+                        tr.primary(
+                          'អូសដើម្បីផ្លាស់ទី · សង្កត់ឲ្យយូរដើម្បីលាក់',
+                          'Drag to move · long-press to hide',
+                        ),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
                   ],
                 ),
               ),

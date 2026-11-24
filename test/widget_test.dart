@@ -1596,6 +1596,307 @@ void main() {
         handle.dispose();
       },
     );
+
+    testWidgets(
+      'Floating AI Assistant bubble and open chat panel pass tap target, labeled target, and contrast guidelines',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(
+            englishFirst: true,
+            assistantHintSeen: true,
+          ),
+        );
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(SrolanhCityApp(repository: repo));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Get started'));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+
+        // Open chat panel and verify tap targets, labels, and contrast
+        await tester.tap(find.byKey(const Key('assistant-bubble')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('assistant-chat-panel')), findsOneWidget);
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+        handle.dispose();
+      },
+    );
+  });
+
+  group('Floating AI Assistant Bubble (app-wide)', () {
+    testWidgets(
+      'Bubble hides on WelcomePage, shows on MainShell, opens panel, looks up #SC-20481, and navigates to TrackingPage',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(
+            englishFirst: true,
+            assistantHintSeen: true,
+          ),
+        );
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(SrolanhCityApp(repository: repo));
+        await tester.pumpAndSettle();
+
+        // Suppressed on WelcomePage
+        expect(find.byKey(const Key('assistant-bubble')), findsNothing);
+
+        // Enter MainShell -> bubble appears
+        await tester.tap(find.text('Get started'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+
+        // Tap bubble -> opens chat panel and hides bubble while popup is active
+        await tester.tap(find.byKey(const Key('assistant-bubble')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('assistant-chat-panel')), findsOneWidget);
+        expect(find.byKey(const Key('assistant-bubble')), findsNothing);
+
+        // Ask about #SC-20481 -> tap Open #SC-20481 -> navigates to TrackingPage
+        await tester.enterText(
+          find.byKey(const Key('assistant-panel-input')),
+          '#SC-20481',
+        );
+        await tester.tap(find.byKey(const Key('assistant-panel-send-btn')));
+        await tester.pumpAndSettle();
+        expect(find.text('Open #SC-20481'), findsOneWidget);
+
+        await tester.tap(find.text('Open #SC-20481'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TrackingPage), findsOneWidget);
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Long-press hides bubble with Undo SnackBar and Profile toggle unhides it',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(
+            englishFirst: true,
+            assistantHintSeen: true,
+          ),
+        );
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(SrolanhCityApp(repository: repo));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Get started'));
+        await tester.pumpAndSettle();
+
+        // Long-press bubble -> hides & shows Undo SnackBar
+        await tester.longPress(find.byKey(const Key('assistant-bubble')));
+        await tester.pumpAndSettle();
+        expect(repo.settings.assistantBubbleEnabled, isFalse);
+        expect(find.byKey(const Key('assistant-bubble')), findsNothing);
+        expect(
+          find.byKey(const Key('assistant-bubble-hidden-snackbar')),
+          findsOneWidget,
+        );
+
+        // Tap Undo -> bubble comes back immediately
+        await tester.tap(find.text('Undo'));
+        await tester.pumpAndSettle();
+        expect(repo.settings.assistantBubbleEnabled, isTrue);
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+
+        // Hide again via long-press, dismiss SnackBar, then re-enable via Profile switch
+        await tester.longPress(find.byKey(const Key('assistant-bubble')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('assistant-bubble')), findsNothing);
+        ScaffoldMessenger.of(tester.element(find.byType(MainShell)))
+            .hideCurrentSnackBar();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Profile'));
+        await tester.pumpAndSettle();
+        final toggle = find.byKey(const Key('assistant-bubble-toggle'));
+        await tester.scrollUntilVisible(
+          toggle,
+          200,
+          scrollable: find
+              .descendant(
+                of: find.byType(ProfilePage),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.ensureVisible(toggle);
+        await tester.pumpAndSettle();
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+
+        expect(repo.settings.assistantBubbleEnabled, isTrue);
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Auto-hides on ReportWizardPage, HelpCenterPage, and open dialogs, then reappears cleanly',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(
+            englishFirst: true,
+            assistantHintSeen: true,
+          ),
+        );
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(SrolanhCityApp(repository: repo));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Get started'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+
+        // 1. ReportWizardPage suppresses bubble; popping restores it
+        await tester.tap(find.byKey(const Key('center-report-fab')));
+        await tester.pumpAndSettle();
+        expect(find.byType(ReportWizardPage), findsOneWidget);
+        expect(find.byKey(const Key('assistant-bubble')), findsNothing);
+
+        await tester.tap(find.byTooltip('Close'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+
+        // 2. Open Privacy dialog on Profile -> bubble hides while dialog is open
+        await tester.tap(find.text('Profile'));
+        await tester.pumpAndSettle();
+        final privacyTile = find.text('Privacy & Security');
+        await tester.scrollUntilVisible(
+          privacyTile,
+          200,
+          scrollable: find
+              .descendant(
+                of: find.byType(ProfilePage),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.ensureVisible(privacyTile);
+        await tester.pumpAndSettle();
+        await tester.tap(privacyTile);
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.byKey(const Key('assistant-bubble')), findsNothing);
+
+        await tester.tap(find.text('Got it'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+
+        // 3. HelpCenterPage suppresses bubble; popping restores it
+        final helpTile = find.byKey(const Key('open-help-center-tile'));
+        await tester.scrollUntilVisible(
+          helpTile,
+          200,
+          scrollable: find
+              .descendant(
+                of: find.byType(ProfilePage),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.ensureVisible(helpTile);
+        await tester.pumpAndSettle();
+        await tester.tap(helpTile);
+        await tester.pumpAndSettle();
+        expect(find.byType(HelpCenterPage), findsOneWidget);
+        expect(find.byKey(const Key('assistant-bubble')), findsNothing);
+
+        await tester.tap(find.byTooltip('Back'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('assistant-bubble')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Dragging bubble to left half snaps to left edge and persists position',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(
+            englishFirst: true,
+            assistantHintSeen: true,
+          ),
+        );
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(SrolanhCityApp(repository: repo));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Get started'));
+        await tester.pumpAndSettle();
+
+        expect(repo.settings.assistantBubbleOnLeft, isFalse);
+        final bubble = find.byKey(const Key('assistant-bubble'));
+        await tester.drag(bubble, const Offset(-300, -100));
+        await tester.pumpAndSettle();
+
+        expect(repo.settings.assistantBubbleOnLeft, isTrue);
+        expect(
+          repo.settings.assistantBubbleYFraction,
+          inInclusiveRange(0.0, 1.0),
+        );
+        final snappedLeft = tester.getTopLeft(bubble).dx;
+        expect(snappedLeft, lessThan(40));
+      },
+    );
+
+    testWidgets(
+      'Conversation sent in floating bubble panel persists when opening HelpCenterPage',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(
+            englishFirst: true,
+            assistantHintSeen: true,
+          ),
+        );
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(SrolanhCityApp(repository: repo));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Get started'));
+        await tester.pumpAndSettle();
+
+        // Send a question in the floating panel
+        await tester.tap(find.byKey(const Key('assistant-bubble')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('assistant-panel-input')),
+          'How is P5 priority calculated?',
+        );
+        await tester.tap(find.byKey(const Key('assistant-panel-send-btn')));
+        await tester.pumpAndSettle();
+        expect(find.text('How is P5 priority calculated?'), findsOneWidget);
+
+        // Open Help Center directly from the panel menu
+        await tester.tap(find.byKey(const Key('assistant-panel-menu-btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('assistant-menu-help-center')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(HelpCenterPage), findsOneWidget);
+        expect(find.text('How is P5 priority calculated?'), findsOneWidget);
+      },
+    );
   });
 }
 

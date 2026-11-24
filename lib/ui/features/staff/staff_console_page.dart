@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../../domain/models/report_models.dart';
+import '../../core/assistant/assistant_bubble_suppressor.dart';
 import '../../core/l10n.dart';
 import '../../core/report_scope.dart';
 import '../../core/theme.dart';
@@ -57,75 +58,77 @@ class _StaffConsolePageState extends State<StaffConsolePage> {
     }
     selected ??= queue.isNotEmpty ? queue.first : null;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: BilingualText(
-          bilingual: tr,
-          khmer: 'ផ្ទាំងផ្ទៀងផ្ទាត់បុគ្គលិក',
-          english: 'Staff Review Console',
-          fontSize: 16,
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 14),
-            child: Chip(
-              backgroundColor: AppColors.tealSoft,
-              side: BorderSide.none,
-              avatar: const Icon(
-                Icons.circle,
-                size: 10,
-                color: AppColors.success,
-              ),
-              label: Text(
-                tr.primary('៣ នាក់អនឡាញ', '3 online'),
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.tealDark,
+    return AssistantBubbleSuppressor(
+      child: Scaffold(
+        appBar: AppBar(
+          title: BilingualText(
+            bilingual: tr,
+            khmer: 'ផ្ទាំងផ្ទៀងផ្ទាត់បុគ្គលិក',
+            english: 'Staff Review Console',
+            fontSize: 16,
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: Chip(
+                backgroundColor: AppColors.tealSoft,
+                side: BorderSide.none,
+                avatar: const Icon(
+                  Icons.circle,
+                  size: 10,
+                  color: AppColors.success,
+                ),
+                label: Text(
+                  tr.primary('៣ នាក់អនឡាញ', '3 online'),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.tealDark,
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isSplit = constraints.maxWidth >= 740;
-            final queuePane = _buildQueuePane(
-              context: context,
-              queue: queue,
-              selectedId: selected?.id,
-              pendingCount: queue.length,
-              criticalCount: criticalCount,
-              resolvedCount: resolvedCount,
-              tr: tr,
-              isSplit: isSplit,
-            );
-
-            if (isSplit) {
-              return Row(
-                children: [
-                  SizedBox(width: 340, child: queuePane),
-                  const VerticalDivider(width: 1, color: AppColors.border),
-                  Expanded(
-                    child: selected == null
-                        ? Center(
-                            child: Text(
-                              tr.primary(
-                                'គ្មានរបាយការណ៍រង់ចាំទេ',
-                                'Verification queue is clear!',
-                              ),
-                            ),
-                          )
-                        : _StaffInspector(report: selected, tr: tr),
-                  ),
-                ],
+          ],
+        ),
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isSplit = constraints.maxWidth >= 740;
+              final queuePane = _buildQueuePane(
+                context: context,
+                queue: queue,
+                selectedId: selected?.id,
+                pendingCount: queue.length,
+                criticalCount: criticalCount,
+                resolvedCount: resolvedCount,
+                tr: tr,
+                isSplit: isSplit,
               );
-            }
 
-            return queuePane;
-          },
+              if (isSplit) {
+                return Row(
+                  children: [
+                    SizedBox(width: 340, child: queuePane),
+                    const VerticalDivider(width: 1, color: AppColors.border),
+                    Expanded(
+                      child: selected == null
+                          ? Center(
+                              child: Text(
+                                tr.primary(
+                                  'គ្មានរបាយការណ៍រង់ចាំទេ',
+                                  'Verification queue is clear!',
+                                ),
+                              ),
+                            )
+                          : _StaffInspector(report: selected, tr: tr),
+                    ),
+                  ],
+                );
+              }
+
+              return queuePane;
+            },
+          ),
         ),
       ),
     );
