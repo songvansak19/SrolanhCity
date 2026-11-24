@@ -159,9 +159,9 @@ abstract final class AntiSpoofService {
   static const double teleportMinDistanceMeters = 500.0;
   static const Duration teleportMaxWindow = Duration(seconds: 2);
 
-  /// Photo EXIF thresholds (aligned with the 250 m Photo-Anchored Hard Fence).
-  static const double exifVerifiedRadiusMeters = 250.0;
-  static const double exifMismatchRadiusMeters = 250.0;
+  /// Photo EXIF thresholds (aligned with the 150 m Photo-Anchored Hard Fence).
+  static const double exifVerifiedRadiusMeters = 150.0;
+  static const double exifMismatchRadiusMeters = 150.0;
   static const Duration exifMaxAge = Duration(days: 30);
 
   /// Evaluates Layers 1–3 on a live GPS fix against an optional previous

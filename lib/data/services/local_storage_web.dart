@@ -58,7 +58,7 @@ Future<void> writeLocalState(String fileName, Map<String, dynamic> data) async {
   } catch (_) {
     // Quota exceeded — trim large base64 photo attachments ONLY from already-
     // synced reports first so queued offline (`pendingSync`) reports strictly
-    // preserve their required photo and offline voice memo until synced.
+    // preserve their required photo and transcript until synced.
     try {
       final slim = Map<String, dynamic>.from(data);
       final rawReports = slim['reports'];

@@ -22,7 +22,6 @@ import '../../core/widgets/bilingual_text.dart';
 import '../../core/widgets/photo_lightbox_page.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/report_photo.dart';
-import '../../core/widgets/voice_memo_player_card.dart';
 import '../report/views/fake_gps_page.dart';
 import '../report/views/report_wizard_page.dart';
 import '../tracking/tracking_page.dart';
@@ -768,7 +767,13 @@ class _MapPageState extends State<MapPage> {
                     repository: repo,
                     report: live,
                     locationService: widget.locationService,
+                    geocodingService: _geocodingService,
                     bilingual: tr,
+                    onLocationResolved: () {
+                      if (sheetContext.mounted) {
+                        setSheetState(() => isCheckingSupport = false);
+                      }
+                    },
                   );
                   if (!sheetContext.mounted) return;
                   setSheetState(() {
@@ -905,11 +910,6 @@ class _MapPageState extends State<MapPage> {
                                     Text(
                                       live.hasDescription
                                           ? live.description.trim()
-                                          : live.hasVoiceAudioMemo
-                                          ? tr.primary(
-                                              'បានភ្ជាប់កំណត់ត្រាសំឡេង (${VoiceMemoPlayerCard.formatDuration(live.voiceAudioDurationSeconds)})',
-                                              'Voice memo attached (${VoiceMemoPlayerCard.formatDuration(live.voiceAudioDurationSeconds)})',
-                                            )
                                           : tr.primary(
                                               'គ្មានមតិបន្ថែម',
                                               'No comment',
@@ -919,14 +919,10 @@ class _MapPageState extends State<MapPage> {
                                       style: TextStyle(
                                         fontSize: 12.5,
                                         height: 1.4,
-                                        color:
-                                            (live.hasDescription ||
-                                                live.hasVoiceAudioMemo)
+                                        color: live.hasDescription
                                             ? AppColors.ink
                                             : AppColors.muted,
-                                        fontStyle:
-                                            (live.hasDescription ||
-                                                live.hasVoiceAudioMemo)
+                                        fontStyle: live.hasDescription
                                             ? FontStyle.normal
                                             : FontStyle.italic,
                                       ),
@@ -966,16 +962,6 @@ class _MapPageState extends State<MapPage> {
                             ],
                           ),
                         ),
-                        if (live.hasVoiceAudioMemo) ...[
-                          const SizedBox(height: 8),
-                          VoiceMemoPlayerCard(
-                            key: const Key('map-sheet-voice-memo-card'),
-                            audioPath: live.voiceAudioPath!,
-                            durationSeconds: live.voiceAudioDurationSeconds,
-                            bilingual: tr,
-                            compact: true,
-                          ),
-                        ],
                         const SizedBox(height: 10),
                         Wrap(
                           spacing: 8,

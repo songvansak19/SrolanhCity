@@ -58,6 +58,7 @@ class ReportRepository extends ChangeNotifier {
   final List<CivicReport> _reports;
   final List<AlertItem> _alerts;
   final List<DateTime> _supportVoteTimestamps = <DateTime>[];
+  final List<DateTime> _remoteProvinceSupportTimestamps = <DateTime>[];
   final LocalStorageService? storage;
   AppSettings _settings;
   UserProfile _profile;
@@ -72,6 +73,14 @@ class ReportRepository extends ChangeNotifier {
     final cutoff = reference.subtract(const Duration(hours: 24));
     _supportVoteTimestamps.removeWhere((ts) => ts.isBefore(cutoff));
     return _supportVoteTimestamps.length;
+  }
+
+  /// Number of cross-province remote supports cast in the trailing 24 hours.
+  int remoteProvinceSupportsUsedInLast24Hours({DateTime? now}) {
+    final reference = now ?? DateTime.now();
+    final cutoff = reference.subtract(const Duration(hours: 24));
+    _remoteProvinceSupportTimestamps.removeWhere((ts) => ts.isBefore(cutoff));
+    return _remoteProvinceSupportTimestamps.length;
   }
 
   UnmodifiableListView<CivicReport> get reports =>
@@ -376,6 +385,20 @@ class ReportRepository extends ChangeNotifier {
         );
     }
 
+    final rawRemoteVotes = data['remoteProvinceSupportTimestamps'];
+    if (rawRemoteVotes is List) {
+      final cutoff = DateTime.now().subtract(const Duration(hours: 24));
+      _remoteProvinceSupportTimestamps
+        ..clear()
+        ..addAll(
+          rawRemoteVotes
+              .whereType<String>()
+              .map(DateTime.tryParse)
+              .whereType<DateTime>()
+              .where((ts) => !ts.isBefore(cutoff)),
+        );
+    }
+
     _lastVerifiedGpsCheckpoint = GpsCheckpoint.fromJson(
       data['lastVerifiedGpsCheckpoint'],
     );
@@ -402,6 +425,9 @@ class ReportRepository extends ChangeNotifier {
         'draft': _draft?.toJson(),
         'nextTicketNumber': _nextTicketNumber,
         'supportVoteTimestamps': _supportVoteTimestamps
+            .map((ts) => ts.toIso8601String())
+            .toList(),
+        'remoteProvinceSupportTimestamps': _remoteProvinceSupportTimestamps
             .map((ts) => ts.toIso8601String())
             .toList(),
         if (_lastVerifiedGpsCheckpoint != null)
@@ -558,15 +584,30 @@ class ReportRepository extends ChangeNotifier {
     return null;
   }
 
+  /// Returns ALL open Master Incidents of the same [category] within
+  /// [radiusMeters] (default: 150 m) of [point] or [photoAnchorPoint],
+  /// sorted nearest-first.
+  List<DuplicateMatch> findSimilarReportsNearby({
+    required LatLng point,
+    required IssueCategory category,
+    double radiusMeters = SpatialClusteringService.defaultRadiusMeters,
+    LatLng? photoAnchorPoint,
+  }) {
+    return SpatialClusteringService.findSimilarReportsInRadius(
+      point: point,
+      category: category,
+      existingReports: _reports,
+      radiusMeters: radiusMeters,
+      secondaryAnchorPoint: photoAnchorPoint,
+    );
+  }
+
   /// Checks whether an open Master Incident of the same [category] exists
-  /// within the 100 m spatial clustering radius (or 150 m on the same road),
-  /// evaluating both [point] and an optional [photoAnchorPoint] (EXIF / live
-  /// camera coordinates) so sliding a pin away cannot bypass deduplication.
+  /// within the unified 150 m detection radius of [point] or [photoAnchorPoint].
   DuplicateMatch? findDuplicateNearby({
     required LatLng point,
     required IssueCategory category,
     double radiusMeters = SpatialClusteringService.defaultRadiusMeters,
-    String? roadName,
     LatLng? photoAnchorPoint,
   }) {
     return SpatialClusteringService.findNearestDuplicate(
@@ -574,15 +615,19 @@ class ReportRepository extends ChangeNotifier {
       category: category,
       existingReports: _reports,
       radiusMeters: radiusMeters,
-      roadName: roadName,
       secondaryAnchorPoint: photoAnchorPoint,
     );
   }
 
-  /// Submits a citizen report. Merges into an existing Master Incident if an
-  /// open same-category incident lies within 100 m (or 150 m on the same road)
-  /// of either [coordinates] or [photoAnchorCoordinates], unless
-  /// [forceCreateNew] is set ("It's a different problem").
+  /// Submits a citizen report.
+  ///
+  /// - If [targetMasterReportId] is provided (and `!forceCreateNew`), merges
+  ///   into that specific open same-category Master Incident within 150 m.
+  /// - If [targetMasterReportId] is omitted and `!forceCreateNew`, falls back
+  ///   to merging into the nearest match within 150 m (if any).
+  /// - If [forceCreateNew] is true, creates a new separate Master Incident at
+  ///   [coordinates] unless the citizen already owns/joined an open
+  ///   same-category report within `50 m` ([SpatialClusteringService.hardSelfBlockRadiusMeters]).
   ReportSubmissionResult submitReport({
     required IssueCategory category,
     required String description,
@@ -593,126 +638,144 @@ class ReportRepository extends ChangeNotifier {
     String? localPhotoPath,
     List<String> additionalLocalPhotoPaths = const [],
     String? voiceTranscript,
-    String? voiceAudioPath,
-    int? voiceAudioDurationSeconds,
     GeocodedPlace? geocodedPlace,
     LatLng? photoAnchorCoordinates,
     ReportLocationVerificationTier? locationVerificationTier,
-    bool photoLocationUnverified = false,
+    String? targetMasterReportId,
     bool forceCreateNew = false,
     DateTime? now,
   }) {
     final submittedAt = now ?? DateTime.now();
     _draft = null;
-    final duplicate = findDuplicateNearby(
+    final candidates = findSimilarReportsNearby(
       point: coordinates,
       category: category,
-      roadName: geocodedPlace?.roadName,
       photoAnchorPoint: photoAnchorCoordinates,
     );
 
-    // Block the same user from duplicating or self-inflating a report they
-    // already own, created, or joined at the same spot.
-    if (duplicate != null) {
-      final existing = duplicate.masterReport;
-      final alreadyContributedByUser = existing.isContributedByCurrentUser;
+    DuplicateMatch? hardSelfMatch;
+    for (final candidate in candidates) {
+      if (candidate.masterReport.isContributedByCurrentUser &&
+          candidate.distanceMeters <=
+              SpatialClusteringService.hardSelfBlockRadiusMeters) {
+        hardSelfMatch = candidate;
+        break;
+      }
+    }
 
-      if (alreadyContributedByUser &&
-          (!forceCreateNew ||
-              duplicate.distanceMeters <=
-                  SpatialClusteringService.hardSelfBlockRadiusMeters)) {
+    DuplicateMatch? selectedMatch;
+    if (!forceCreateNew) {
+      if (targetMasterReportId != null && targetMasterReportId.isNotEmpty) {
+        for (final candidate in candidates) {
+          if (candidate.masterReport.id == targetMasterReportId) {
+            selectedMatch = candidate;
+            break;
+          }
+        }
+      } else if (candidates.isNotEmpty) {
+        selectedMatch = candidates.first;
+      }
+    }
+
+    // Block the same user from double-submitting their own report at the exact
+    // same spot (<= 50 m), even if forceCreateNew is set.
+    if (forceCreateNew && hardSelfMatch != null) {
+      return ReportSubmissionResult(
+        report: hardSelfMatch.masterReport,
+        mergedIntoExisting: true,
+        alreadyReportedByUser: true,
+        mergedDistanceMeters: hardSelfMatch.distanceMeters,
+      );
+    }
+
+    if (selectedMatch != null) {
+      final existing = selectedMatch.masterReport;
+      if (existing.isContributedByCurrentUser) {
         return ReportSubmissionResult(
           report: existing,
           mergedIntoExisting: true,
           alreadyReportedByUser: true,
-          mergedDistanceMeters: duplicate.distanceMeters,
+          mergedDistanceMeters: selectedMatch.distanceMeters,
         );
       }
 
-      if (!forceCreateNew) {
-        final index = _reports.indexWhere((r) => r.id == existing.id);
-        final trimmedDescription = description.trim();
-        final clampedSeverity = severity.clamp(1, 5);
-        final updatedSeverity = math.max(existing.severity, clampedSeverity);
-        final updatedCount = existing.affectedCitizens + 1;
+      final index = _reports.indexWhere((r) => r.id == existing.id);
+      final trimmedDescription = description.trim();
+      final clampedSeverity = severity.clamp(1, 5);
+      final updatedSeverity = math.max(existing.severity, clampedSeverity);
+      final updatedCount = existing.affectedCitizens + 1;
 
-        // Preserve original reporter's photo and append newly attached photos.
-        final mergedLocalPhoto = existing.localPhotoPath ?? localPhotoPath;
-        final mergedExtraPhotos = <String>[
-          ...existing.additionalLocalPhotoPaths,
-          if (existing.localPhotoPath != null &&
-              localPhotoPath != null &&
-              localPhotoPath.isNotEmpty &&
-              localPhotoPath != existing.localPhotoPath &&
-              !existing.additionalLocalPhotoPaths.contains(localPhotoPath))
-            localPhotoPath,
-          for (final extra in additionalLocalPhotoPaths)
-            if (extra.isNotEmpty &&
-                extra != mergedLocalPhoto &&
-                !existing.additionalLocalPhotoPaths.contains(extra))
-              extra,
-        ];
+      // Preserve original reporter's photo and append newly attached photos.
+      final mergedLocalPhoto = existing.localPhotoPath ?? localPhotoPath;
+      final mergedExtraPhotos = <String>[
+        ...existing.additionalLocalPhotoPaths,
+        if (existing.localPhotoPath != null &&
+            localPhotoPath != null &&
+            localPhotoPath.isNotEmpty &&
+            localPhotoPath != existing.localPhotoPath &&
+            !existing.additionalLocalPhotoPaths.contains(localPhotoPath))
+          localPhotoPath,
+        for (final extra in additionalLocalPhotoPaths)
+          if (extra.isNotEmpty &&
+              extra != mergedLocalPhoto &&
+              !existing.additionalLocalPhotoPaths.contains(extra))
+            extra,
+      ];
 
-        final joinedComment = CitizenComment(
-          id: 'c-join-${submittedAt.microsecondsSinceEpoch}',
-          text: trimmedDescription,
+      final joinedComment = CitizenComment(
+        id: 'c-join-${submittedAt.microsecondsSinceEpoch}',
+        text: trimmedDescription,
+        createdAt: submittedAt,
+        isOriginalReporter: false,
+        isCurrentUser: true,
+        isAnonymous: isAnonymous,
+        severity: clampedSeverity,
+        voiceTranscript: voiceTranscript,
+      );
+      final mergedComments = <CitizenComment>[
+        ...existing.effectiveComments,
+        joinedComment,
+      ];
+
+      final merged = existing.copyWith(
+        severity: updatedSeverity,
+        affectedCitizens: updatedCount,
+        isMine: true,
+        joinedByCurrentUser: true,
+        localPhotoPath: mergedLocalPhoto,
+        additionalLocalPhotoPaths: mergedExtraPhotos,
+        voiceTranscript: voiceTranscript ?? existing.voiceTranscript,
+        citizenComments: mergedComments,
+      );
+
+      if (index != -1) {
+        _reports[index] = merged;
+      }
+
+      _alerts.insert(
+        0,
+        AlertItem(
+          id: 'alert-join-${submittedAt.microsecondsSinceEpoch}',
+          reportId: merged.id,
+          khmerTitle: 'បានចូលរួមរបាយការណ៍ ${merged.id}',
+          englishTitle: 'Joined Master Incident ${merged.id}',
+          khmerSubtitle:
+              'ប្រជាពលរដ្ឋរងផលប៉ះពាល់កើនដល់ $updatedCount នាក់ · P${merged.priority.level}',
+          englishSubtitle:
+              'Affected citizens increased to $updatedCount · P${merged.priority.level}',
           createdAt: submittedAt,
-          isOriginalReporter: false,
-          isCurrentUser: true,
-          isAnonymous: isAnonymous,
-          severity: clampedSeverity,
-          voiceTranscript: voiceTranscript,
-          voiceAudioPath: voiceAudioPath,
-          voiceAudioDurationSeconds: voiceAudioDurationSeconds,
-        );
-        final mergedComments = <CitizenComment>[
-          ...existing.effectiveComments,
-          joinedComment,
-        ];
+          isRead: false,
+        ),
+      );
 
-        final merged = existing.copyWith(
-          severity: updatedSeverity,
-          affectedCitizens: updatedCount,
-          isMine: true,
-          joinedByCurrentUser: true,
-          localPhotoPath: mergedLocalPhoto,
-          additionalLocalPhotoPaths: mergedExtraPhotos,
-          voiceTranscript: voiceTranscript ?? existing.voiceTranscript,
-          voiceAudioPath: voiceAudioPath ?? existing.voiceAudioPath,
-          voiceAudioDurationSeconds:
-              voiceAudioDurationSeconds ?? existing.voiceAudioDurationSeconds,
-          citizenComments: mergedComments,
-        );
-
-        if (index != -1) {
-          _reports[index] = merged;
-        }
-
-        _alerts.insert(
-          0,
-          AlertItem(
-            id: 'alert-join-${submittedAt.microsecondsSinceEpoch}',
-            reportId: merged.id,
-            khmerTitle: 'បានចូលរួមរបាយការណ៍ ${merged.id}',
-            englishTitle: 'Joined Master Incident ${merged.id}',
-            khmerSubtitle:
-                'ប្រជាពលរដ្ឋរងផលប៉ះពាល់កើនដល់ $updatedCount នាក់ · P${merged.priority.level}',
-            englishSubtitle:
-                'Affected citizens increased to $updatedCount · P${merged.priority.level}',
-            createdAt: submittedAt,
-            isRead: false,
-          ),
-        );
-
-        _persist();
-        notifyListeners();
-        return ReportSubmissionResult(
-          report: merged,
-          mergedIntoExisting: true,
-          mergedDistanceMeters: duplicate.distanceMeters,
-          submittedDescription: trimmedDescription,
-        );
-      }
+      _persist();
+      notifyListeners();
+      return ReportSubmissionResult(
+        report: merged,
+        mergedIntoExisting: true,
+        mergedDistanceMeters: selectedMatch.distanceMeters,
+        submittedDescription: trimmedDescription,
+      );
     }
 
     final routing = GisRoutingService.resolve(
@@ -760,11 +823,8 @@ class ReportRepository extends ChangeNotifier {
       isMine: true,
       createdByCurrentUser: true,
       locationVerificationTier: locationVerificationTier,
-      photoLocationUnverified: photoLocationUnverified,
       syncStatus: _isOnline ? SyncStatus.synced : SyncStatus.pendingSync,
       voiceTranscript: voiceTranscript,
-      voiceAudioPath: voiceAudioPath,
-      voiceAudioDurationSeconds: voiceAudioDurationSeconds,
       beforeDateLabel: RelativeTimeFormatter.formatShortDate(submittedAt),
       afterDateLabel: 'Pending',
       createdAt: submittedAt,
@@ -778,8 +838,6 @@ class ReportRepository extends ChangeNotifier {
           isAnonymous: isAnonymous,
           severity: clampedSeverity,
           voiceTranscript: voiceTranscript,
-          voiceAudioPath: voiceAudioPath,
-          voiceAudioDurationSeconds: voiceAudioDurationSeconds,
         ),
       ],
       timeline: _buildTimeline(
@@ -957,7 +1015,8 @@ class ReportRepository extends ChangeNotifier {
   };
 
   /// Undoes a citizen's `+1 Support` or duplicate join without deleting
-  /// another neighbor's Master Incident, refunding the citizen's daily slot.
+  /// another neighbor's Master Incident, refunding the citizen's daily slot
+  /// and cleaning up any remote-support comment/metadata.
   CivicReport? undoSupportReport(String reportId) {
     final index = _reports.indexWhere((r) => r.id == reportId);
     if (index == -1) return null;
@@ -968,8 +1027,16 @@ class ReportRepository extends ChangeNotifier {
     final cleanedComments = existing.citizenComments.isEmpty
         ? existing.citizenComments
         : existing.citizenComments
-              .where((c) => !(c.isCurrentUser && c.id.startsWith('c-join-')))
+              .where(
+                (c) =>
+                    !(c.isCurrentUser &&
+                        (c.id.startsWith('c-join-') ||
+                            c.id.startsWith('c-support-'))),
+              )
               .toList(growable: false);
+
+    final wasRemoteProvince =
+        existing.userSupportTier == SupportVerificationTier.remoteProvince;
 
     final updated = existing.copyWith(
       affectedCitizens: math.max(1, existing.affectedCitizens - 1),
@@ -982,6 +1049,9 @@ class ReportRepository extends ChangeNotifier {
     if (_supportVoteTimestamps.isNotEmpty) {
       _supportVoteTimestamps.removeLast();
     }
+    if (wasRemoteProvince && _remoteProvinceSupportTimestamps.isNotEmpty) {
+      _remoteProvinceSupportTimestamps.removeLast();
+    }
     _alerts.removeWhere(
       (a) => a.reportId == reportId && a.id.startsWith('alert-join-'),
     );
@@ -992,11 +1062,16 @@ class ReportRepository extends ChangeNotifier {
 
   /// Increments Affected Citizens & recalculates weighted Priority Score live.
   /// Prevents citizens from voting twice on a report they created or joined,
-  /// and enforces the 24-hour anti-spam vote cap.
+  /// enforces daily caps (`10/24h` total, `3/24h` cross-province), and records
+  /// transparent remote area + reason metadata when supporting from `> 150 m`.
   CivicReport? supportReport(
     String reportId, {
     SupportVerificationTier? tier,
     double? distanceMeters,
+    String? supportAreaKhmer,
+    String? supportAreaEnglish,
+    SupportReasonCategory? reasonCategory,
+    String? reasonNote,
     DateTime? now,
   }) {
     final index = _reports.indexWhere((r) => r.id == reportId);
@@ -1012,6 +1087,44 @@ class ReportRepository extends ChangeNotifier {
         SupportEligibilityService.maxSupportsPer24Hours) {
       return null;
     }
+    if (tier == SupportVerificationTier.remoteProvince &&
+        remoteProvinceSupportsUsedInLast24Hours(now: eventTime) >=
+            SupportEligibilityService.maxRemoteProvinceSupportsPer24Hours) {
+      return null;
+    }
+
+    final trimmedNote = reasonNote?.trim() ?? '';
+    final formattedReason = reasonCategory != null
+        ? (trimmedNote.isNotEmpty
+              ? '${_settings.englishFirst ? reasonCategory.englishLabel : reasonCategory.khmerLabel} · $trimmedNote'
+              : (_settings.englishFirst
+                    ? reasonCategory.englishLabel
+                    : reasonCategory.khmerLabel))
+        : (trimmedNote.isNotEmpty ? trimmedNote : null);
+
+    var nextComments = existing.citizenComments;
+    if (tier != null && tier.isRemote) {
+      final commentText = trimmedNote.isNotEmpty
+          ? trimmedNote
+          : (reasonCategory != null
+                ? (_settings.englishFirst
+                      ? reasonCategory.englishLabel
+                      : reasonCategory.khmerLabel)
+                : '');
+      final supportComment = CitizenComment(
+        id: 'c-support-${eventTime.microsecondsSinceEpoch}',
+        text: commentText,
+        createdAt: eventTime,
+        isOriginalReporter: false,
+        isCurrentUser: true,
+        isAnonymous: _settings.anonymousByDefault,
+        supportTier: tier,
+        supportAreaKhmer: supportAreaKhmer,
+        supportAreaEnglish: supportAreaEnglish,
+        supportReasonCategory: reasonCategory,
+      );
+      nextComments = [...existing.effectiveComments, supportComment];
+    }
 
     final updated = existing.copyWith(
       affectedCitizens: existing.affectedCitizens + 1,
@@ -1019,9 +1132,16 @@ class ReportRepository extends ChangeNotifier {
       joinedByCurrentUser: true,
       userSupportTier: tier,
       userSupportDistanceMeters: distanceMeters,
+      userSupportAreaKhmer: supportAreaKhmer,
+      userSupportAreaEnglish: supportAreaEnglish,
+      userSupportReason: formattedReason,
+      citizenComments: nextComments,
     );
     _reports[index] = updated;
     _supportVoteTimestamps.add(eventTime);
+    if (tier == SupportVerificationTier.remoteProvince) {
+      _remoteProvinceSupportTimestamps.add(eventTime);
+    }
     _persist();
     notifyListeners();
     return updated;
@@ -1033,6 +1153,9 @@ class ReportRepository extends ChangeNotifier {
     required SupportVerificationTier tier,
     double? distanceMeters,
     LatLng? userCoordinates,
+    String? supportAreaEnglish,
+    SupportReasonCategory? reasonCategory,
+    String? reasonNote,
     Map<String, dynamic>? integrityMetadata,
   }) => <String, dynamic>{
     'report_id': reportId,
@@ -1040,6 +1163,11 @@ class ReportRepository extends ChangeNotifier {
     if (distanceMeters != null) 'distance_meters': distanceMeters.round(),
     if (userCoordinates != null) 'lat': userCoordinates.latitude,
     if (userCoordinates != null) 'lng': userCoordinates.longitude,
+    if (supportAreaEnglish != null && supportAreaEnglish.isNotEmpty)
+      'remote_area': supportAreaEnglish,
+    if (reasonCategory != null) 'support_reason_category': reasonCategory.name,
+    if (reasonNote != null && reasonNote.trim().isNotEmpty)
+      'support_reason_note': reasonNote.trim(),
     'integrity': ?integrityMetadata,
   };
 

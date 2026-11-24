@@ -3,33 +3,32 @@ import 'dart:async';
 import 'file_helper.dart';
 import 'web_audio_memo_recorder.dart';
 
-/// Injectable microphone audio recorder contract for capturing short citizen
-/// voice reports (`hackathonshow.md §5`) — used both for backend AI audio
-/// transcription and for real offline local voice memos on Web & Mobile.
+/// Injectable microphone audio recorder contract for capturing short ephemeral
+/// clips for Tier 1 backend AI voice-to-text transcription (`hackathonshow.md §5`).
+/// Temporary clips are always deleted immediately after transcription.
 abstract class AudioRecorderService {
   Future<bool> hasPermission();
 
-  /// Starts recording into a temporary file (for AI transcription) or a
-  /// persistent offline audio memo (data URI on Web / `.m4a` on Native).
-  Future<bool> startRecording({bool persistentMemo = false});
+  /// Starts recording into a temporary clip for backend AI transcription.
+  Future<bool> startRecording();
 
   /// Returns current microphone input loudness normalized to `0.0..1.0`.
   Future<double> getNormalizedAmplitude();
 
-  /// Stops recording and returns the path/data-URI to the recorded clip.
+  /// Stops recording and returns the path/data-URI to the temporary clip.
   Future<String?> stopRecording();
 
   /// Cancels any active recording and deletes any temporary audio file.
   Future<void> cancelAndDelete();
 
-  /// Deletes a recorded audio file safely.
+  /// Deletes a recorded temporary audio file safely.
   Future<void> deleteFile(String? path);
 
   Future<void> dispose();
 }
 
 /// Real device microphone implementation supporting both Native (`record`) and
-/// Web PWA (`MediaRecorder` + `AnalyserNode`).
+/// Web PWA (`MediaRecorder` + `AnalyserNode`) for ephemeral AI transcription.
 class RecordAudioRecorderService implements AudioRecorderService {
   PlatformAudioMemoRecorder? _platform;
 
@@ -40,8 +39,7 @@ class RecordAudioRecorderService implements AudioRecorderService {
   Future<bool> hasPermission() => _ensurePlatform().hasPermission();
 
   @override
-  Future<bool> startRecording({bool persistentMemo = false}) =>
-      _ensurePlatform().start(persistentMemo: persistentMemo);
+  Future<bool> startRecording() => _ensurePlatform().start();
 
   @override
   Future<double> getNormalizedAmplitude() async {

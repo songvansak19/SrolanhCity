@@ -1,11 +1,10 @@
-import 'dart:io';
-
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import 'file_helper.dart';
 
-/// Native mobile/desktop audio memo recorder backed by `package:record`.
+/// Native mobile/desktop ephemeral audio recorder backed by `package:record`
+/// for Tier 1 backend AI voice-to-text transcription.
 class PlatformAudioMemoRecorder {
   AudioRecorder? _recorder;
   String? _currentPath;
@@ -23,46 +22,10 @@ class PlatformAudioMemoRecorder {
     }
   }
 
-  Future<bool> start({required bool persistentMemo}) async {
+  Future<bool> start() async {
     try {
       final permitted = await hasPermission();
       if (!permitted) return false;
-
-      if (persistentMemo) {
-        final docsDir = await getApplicationDocumentsDirectory();
-        final audioDir = Directory('${docsDir.path}/report_audio');
-        if (!audioDir.existsSync()) {
-          await audioDir.create(recursive: true);
-        }
-        final path =
-            '${audioDir.path}/memo_${DateTime.now().microsecondsSinceEpoch}.m4a';
-        _currentPath = path;
-        try {
-          await _ensureRecorder().start(
-            const RecordConfig(
-              encoder: AudioEncoder.aacLc,
-              bitRate: 32000,
-              sampleRate: 16000,
-              numChannels: 1,
-            ),
-            path: path,
-          );
-          return true;
-        } catch (_) {
-          // Fallback to universal 16 kHz mono WAV if AAC is unavailable.
-          final wavPath = path.replaceAll('.m4a', '.wav');
-          _currentPath = wavPath;
-          await _ensureRecorder().start(
-            const RecordConfig(
-              encoder: AudioEncoder.wav,
-              sampleRate: 16000,
-              numChannels: 1,
-            ),
-            path: wavPath,
-          );
-          return true;
-        }
-      }
 
       final tempDir = await getTemporaryDirectory();
       final path =

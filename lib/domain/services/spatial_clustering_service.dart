@@ -3,16 +3,11 @@ import 'package:latlong2/latlong.dart';
 import '../models/report_models.dart';
 import '../models/routing_result.dart';
 
-/// Performs GPS spatial clustering (geofencing) plus same-road proximity
-/// matching to prevent duplicate civic tickets.
-///
-/// Open reports of the same [IssueCategory] within [defaultRadiusMeters]
-/// (100 m city-block geofence to absorb mobile GPS drift & intersection pins)
-/// — or within [sameRoadRadiusMeters] (150 m) on the same road — are grouped
-/// into one Master Incident.
+/// Performs unified 150 m GPS spatial clustering to surface nearby open
+/// Master Incidents of the same [IssueCategory] so citizens can inspect and
+/// join an existing ticket or deliberately submit a new separate report.
 abstract final class SpatialClusteringService {
-  static const double defaultRadiusMeters = 100.0;
-  static const double sameRoadRadiusMeters = 150.0;
+  static const double defaultRadiusMeters = 150.0;
   static const double hardSelfBlockRadiusMeters = 50.0;
   static const Distance _distance = Distance();
 
@@ -21,108 +16,80 @@ abstract final class SpatialClusteringService {
     return _distance.as(LengthUnit.Meter, a, b);
   }
 
-  /// Normalizes a road name for reliable same-street comparison.
-  static String _normalizeRoad(String? locationOrRoad) {
-    if (locationOrRoad == null || locationOrRoad.trim().isEmpty) return '';
-    final primarySegment = locationOrRoad.split('·').first.trim().toLowerCase();
-    return primarySegment
-        .replaceAll(RegExp(r'\([^)]*\)'), '')
-        .replaceAll(RegExp(r'\b(blvd|boulevard|st|street|rd|road)\b'), '')
-        .replaceAll(RegExp(r'[^a-z0-9\u1780-\u17FF]+'), '');
-  }
-
-  /// Finds the nearest open Master Incident matching [category] within
-  /// [radiusMeters] (or within [sameRoadRadiusMeters] if on the same road),
-  /// checking both the dragged [point] and an optional [secondaryAnchorPoint]
-  /// (photo EXIF or live camera capture coordinates) so sliding a pin 150–240 m
-  /// down the road cannot silently bypass an existing Master Incident.
-  static DuplicateMatch? findNearestDuplicate({
+  /// Finds ALL open Master Incidents matching [category] within [radiusMeters]
+  /// (default: 150 m) of the citizen's current [point], sorted nearest-first by
+  /// live distance from [point].
+  ///
+  /// Distances are always measured from [point] (never frozen to a photo
+  /// capture anchor) so dragging the pin across a 150 m zone updates every
+  /// nearby report's distance accurately and only triggers the `<= 50 m`
+  /// self-duplicate guard when the dragged pin itself is within 50 m of an
+  /// already-reported spot.
+  static List<DuplicateMatch> findSimilarReportsInRadius({
     required LatLng point,
     required IssueCategory category,
     required Iterable<CivicReport> existingReports,
     double radiusMeters = defaultRadiusMeters,
-    String? roadName,
     LatLng? secondaryAnchorPoint,
   }) {
-    final pinMatch = _findNearestForSinglePoint(
-      point: point,
-      category: category,
-      existingReports: existingReports,
-      radiusMeters: radiusMeters,
-      roadName: roadName,
-      matchedViaPhotoAnchor: false,
-    );
-
-    if (secondaryAnchorPoint == null) return pinMatch;
-
-    final anchorMatch = _findNearestForSinglePoint(
-      point: secondaryAnchorPoint,
-      category: category,
-      existingReports: existingReports,
-      radiusMeters: radiusMeters,
-      roadName: roadName,
-      matchedViaPhotoAnchor: true,
-    );
-
-    if (anchorMatch == null) return pinMatch;
-    if (pinMatch == null) return anchorMatch;
-    if (pinMatch.masterReport.id == anchorMatch.masterReport.id) {
-      return DuplicateMatch(
-        masterReport: pinMatch.masterReport,
-        distanceMeters: pinMatch.distanceMeters <= anchorMatch.distanceMeters
-            ? pinMatch.distanceMeters
-            : anchorMatch.distanceMeters,
-        matchedViaPhotoAnchor: false,
-      );
-    }
-    return anchorMatch.distanceMeters < pinMatch.distanceMeters
-        ? anchorMatch
-        : pinMatch;
-  }
-
-  static DuplicateMatch? _findNearestForSinglePoint({
-    required LatLng point,
-    required IssueCategory category,
-    required Iterable<CivicReport> existingReports,
-    required double radiusMeters,
-    required String? roadName,
-    required bool matchedViaPhotoAnchor,
-  }) {
-    final normalizedTargetRoad = _normalizeRoad(roadName);
-    DuplicateMatch? closest;
+    final matches = <DuplicateMatch>[];
 
     for (final report in existingReports) {
       if (report.status == ReportStatus.resolved) continue;
       if (report.category != category) continue;
 
-      final meters = distanceMeters(point, report.coordinates);
-      final withinDirectRadius = meters <= radiusMeters;
+      final pinMeters = distanceMeters(point, report.coordinates);
+      final pinWithin = pinMeters <= radiusMeters;
 
-      var withinSameRoadRadius = false;
-      if (!withinDirectRadius &&
-          normalizedTargetRoad.length >= 4 &&
-          meters <= sameRoadRadiusMeters) {
-        final reportRoadEn = _normalizeRoad(report.englishLocation);
-        final reportRoadKh = _normalizeRoad(report.khmerLocation);
-        withinSameRoadRadius =
-            (reportRoadEn.isNotEmpty &&
-                (reportRoadEn.contains(normalizedTargetRoad) ||
-                    normalizedTargetRoad.contains(reportRoadEn))) ||
-            (reportRoadKh.isNotEmpty &&
-                (reportRoadKh.contains(normalizedTargetRoad) ||
-                    normalizedTargetRoad.contains(reportRoadKh)));
-      }
-
-      if ((withinDirectRadius || withinSameRoadRadius) &&
-          (closest == null || meters < closest.distanceMeters)) {
-        closest = DuplicateMatch(
-          masterReport: report,
-          distanceMeters: meters,
-          matchedViaPhotoAnchor: matchedViaPhotoAnchor,
+      var anchorWithin = false;
+      if (!pinWithin && secondaryAnchorPoint != null) {
+        final anchorMeters = distanceMeters(
+          secondaryAnchorPoint,
+          report.coordinates,
         );
+        // Only surface an off-pin photo-anchor match when the photo itself was
+        // taken right next to a neighbor's report (<= 50 m), while still
+        // reporting the honest live distance from the dragged pin.
+        anchorWithin =
+            !report.isContributedByCurrentUser &&
+            anchorMeters <= hardSelfBlockRadiusMeters;
       }
+
+      if (!pinWithin && !anchorWithin) continue;
+
+      matches.add(
+        DuplicateMatch(
+          masterReport: report,
+          distanceMeters: pinMeters,
+          matchedViaPhotoAnchor: !pinWithin && anchorWithin,
+        ),
+      );
     }
 
-    return closest;
+    matches.sort((a, b) {
+      final distCmp = a.distanceMeters.compareTo(b.distanceMeters);
+      if (distCmp != 0) return distCmp;
+      return a.masterReport.id.compareTo(b.masterReport.id);
+    });
+    return matches;
+  }
+
+  /// Finds the nearest open Master Incident matching [category] within
+  /// [radiusMeters] (default: 150 m) of [point] or [secondaryAnchorPoint].
+  static DuplicateMatch? findNearestDuplicate({
+    required LatLng point,
+    required IssueCategory category,
+    required Iterable<CivicReport> existingReports,
+    double radiusMeters = defaultRadiusMeters,
+    LatLng? secondaryAnchorPoint,
+  }) {
+    final matches = findSimilarReportsInRadius(
+      point: point,
+      category: category,
+      existingReports: existingReports,
+      radiusMeters: radiusMeters,
+      secondaryAnchorPoint: secondaryAnchorPoint,
+    );
+    return matches.isEmpty ? null : matches.first;
   }
 }

@@ -5,11 +5,8 @@ import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
-/// Web offline voice memo recorder powered by `MediaRecorder` + `AnalyserNode`.
-///
-/// Works 100% offline in Chrome, Brave, Edge, and Safari (iOS & desktop) —
-/// recording compact Opus/MP4 audio (~4 KB/s) and encoding to a persistent
-/// `data:audio/...;base64,...` URI that survives reloads and Airplane Mode.
+/// Web ephemeral audio recorder powered by `MediaRecorder` + `AnalyserNode`
+/// for Tier 1 backend AI voice-to-text transcription.
 class PlatformAudioMemoRecorder {
   web.MediaStream? _stream;
   web.MediaRecorder? _recorder;
@@ -26,7 +23,7 @@ class PlatformAudioMemoRecorder {
     }
   }
 
-  Future<bool> start({required bool persistentMemo}) async {
+  Future<bool> start() async {
     await cancelAndDelete();
     try {
       final mediaDevices = web.window.navigator.mediaDevices;

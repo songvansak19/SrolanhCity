@@ -56,7 +56,7 @@ class GisRoutingResult {
       : '$englishRoadName · $englishSangkat, $englishKhan, $englishProvince';
 }
 
-/// An existing open Master Incident found within the spatial clustering radius.
+/// An existing open Master Incident found within the 150 m detection field.
 class DuplicateMatch {
   const DuplicateMatch({
     required this.masterReport,
@@ -67,8 +67,8 @@ class DuplicateMatch {
   final CivicReport masterReport;
   final double distanceMeters;
 
-  /// True when the match was triggered by the attached photo's capture
-  /// coordinates after the user dragged the map pin outside the 100 m radius.
+  /// True when the match was triggered solely by the attached photo's capture
+  /// coordinates rather than the current map pin.
   final bool matchedViaPhotoAnchor;
 }
 

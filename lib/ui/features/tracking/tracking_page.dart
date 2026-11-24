@@ -2,9 +2,9 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../data/repositories/report_repository.dart';
-import '../../../data/services/audio_player_service.dart';
 import '../../../data/services/comment_translation_service.dart';
 import '../../../data/services/location_service.dart';
+import '../../../data/services/reverse_geocoding_service.dart';
 import '../../../domain/models/report_models.dart';
 import '../../../domain/services/priority_calculator.dart';
 import '../../../domain/services/relative_time_formatter.dart';
@@ -21,7 +21,6 @@ import '../../core/widgets/photo_lightbox_page.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/priority_donut_chart.dart';
 import '../../core/widgets/report_photo.dart';
-import '../../core/widgets/voice_memo_player_card.dart';
 import '../map/map_page.dart';
 
 class TrackingPage extends StatefulWidget {
@@ -29,14 +28,14 @@ class TrackingPage extends StatefulWidget {
     super.key,
     required this.reportId,
     this.locationService = const LocationService(),
+    this.geocodingService,
     this.translationService,
-    this.audioPlayerService,
   });
 
   final String reportId;
   final LocationService locationService;
+  final ReverseGeocodingService? geocodingService;
   final CommentTranslationService? translationService;
-  final AudioPlayerService? audioPlayerService;
 
   @override
   State<TrackingPage> createState() => _TrackingPageState();
@@ -45,23 +44,6 @@ class TrackingPage extends StatefulWidget {
 class _TrackingPageState extends State<TrackingPage> {
   bool _isCheckingSupportLocation = false;
   bool _useCompareSlider = false;
-
-  Widget _buildReportVoiceMemoCard(CivicReport report, Bilingual tr) {
-    return VoiceMemoPlayerCard(
-      key: const Key('tracking-voice-memo-card'),
-      playButtonKey: const Key('tracking-voice-memo-play'),
-      audioPath: report.voiceAudioPath!,
-      durationSeconds: report.voiceAudioDurationSeconds,
-      bilingual: tr,
-      subtitle: report.syncStatus == SyncStatus.pendingSync
-          ? tr.primary(
-              'រក្សាទុកក្រៅបណ្តាញ · រង់ចាំផ្ញើស្វ័យប្រវត្តិ',
-              'Saved offline · queued for auto-sync',
-            )
-          : tr.primary('បានភ្ជាប់ជាមួយរបាយការណ៍', 'Attached to civic report'),
-      audioPlayerService: widget.audioPlayerService,
-    );
-  }
 
   Future<void> _shareResolvedReport(CivicReport report, Bilingual tr) async {
     HapticFeedback.selectionClick();
@@ -452,17 +434,12 @@ class _TrackingPageState extends State<TrackingPage> {
                           ],
                         ),
                       ),
-                      if (report.hasVoiceAudioMemo) ...[
-                        const SizedBox(height: 12),
-                        _buildReportVoiceMemoCard(report, tr),
-                      ],
                       const SizedBox(height: 12),
                       _CitizenCommentsCard(
                         report: report,
                         tr: tr,
                         allowAddNote: false,
                         translationService: widget.translationService,
-                        audioPlayerService: widget.audioPlayerService,
                       ),
                       const SizedBox(height: 18),
 
@@ -766,50 +743,7 @@ class _TrackingPageState extends State<TrackingPage> {
                                       ],
                                     ],
                                   ),
-                                  if (report.photoLocationUnverified) ...[
-                                    const SizedBox(height: 6),
-                                    Container(
-                                      key: const Key(
-                                        'tracking-unverified-photo-badge',
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 3,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.saffronSoft,
-                                        borderRadius: BorderRadius.circular(
-                                          999,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.policy_outlined,
-                                            size: 12,
-                                            color: AppColors.saffronInk,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Flexible(
-                                            child: Text(
-                                              tr.primary(
-                                                'ទីតាំងរូបថតរង់ចាំផ្ទៀងផ្ទាត់',
-                                                'Photo location unverified · Under review',
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                fontSize: 10.5,
-                                                fontWeight: FontWeight.w700,
-                                                color: AppColors.saffronInk,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ] else if (report.locationVerificationTier ==
+                                  if (report.locationVerificationTier ==
                                           ReportLocationVerificationTier
                                               .photoExifVerified ||
                                       report.locationVerificationTier ==
@@ -864,9 +798,95 @@ class _TrackingPageState extends State<TrackingPage> {
                           ],
                         ),
                       ),
-                      if (report.hasVoiceAudioMemo) ...[
+                      if (!report.createdByCurrentUser &&
+                          report.canUndoSupport) ...[
                         const SizedBox(height: 12),
-                        _buildReportVoiceMemoCard(report, tr),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.mutedSurface,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.handshake_outlined,
+                                size: 17,
+                                color: AppColors.teal,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      tr.primary(
+                                        'អ្នកបានចូលរួមគាំទ្ររបាយការណ៍សហគមន៍នេះ',
+                                        'You joined this community incident',
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.ink,
+                                      ),
+                                    ),
+                                    if (report.userSupportTier != null) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        () {
+                                          final tier = report.userSupportTier!;
+                                          final label = tier
+                                              .formatTransparentTag(
+                                                englishFirst:
+                                                    repo.settings.englishFirst,
+                                                areaKhmer:
+                                                    report.userSupportAreaKhmer,
+                                                areaEnglish: report
+                                                    .userSupportAreaEnglish,
+                                              );
+                                          final dist =
+                                              report.userSupportDistanceMeters;
+                                          if (dist == null) return label;
+                                          final fmt =
+                                              SupportEligibilityService.formatDistance(
+                                                dist,
+                                                englishFirst:
+                                                    repo.settings.englishFirst,
+                                              );
+                                          return '$label · $fmt';
+                                        }(),
+                                        key: const Key('support-tier-badge'),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color:
+                                              report.userSupportTier!.isRemote
+                                              ? AppColors.saffronInk
+                                              : AppColors.teal,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              TextButton(
+                                key: const Key('undo-support-btn'),
+                                onPressed: () => _undoSupport(report, tr),
+                                child: Text(
+                                  tr.primary('ដកការគាំទ្រ', 'Undo'),
+                                  style: const TextStyle(
+                                    color: AppColors.danger,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                       const SizedBox(height: 12),
                       _CitizenCommentsCard(
@@ -874,7 +894,6 @@ class _TrackingPageState extends State<TrackingPage> {
                         tr: tr,
                         allowAddNote: true,
                         translationService: widget.translationService,
-                        audioPlayerService: widget.audioPlayerService,
                       ),
                       if (allPhotos.length > 1) ...[
                         const SizedBox(height: 12),
@@ -1071,86 +1090,6 @@ class _TrackingPageState extends State<TrackingPage> {
                             );
                           },
                         ),
-                      ] else if (report.canUndoSupport) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.mutedSurface,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.handshake_outlined,
-                                size: 17,
-                                color: AppColors.teal,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      tr.primary(
-                                        'អ្នកបានចូលរួមគាំទ្ររបាយការណ៍សហគមន៍នេះ',
-                                        'You joined this community incident',
-                                      ),
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.ink,
-                                      ),
-                                    ),
-                                    if (report.userSupportTier != null) ...[
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        () {
-                                          final tier = report.userSupportTier!;
-                                          final label = tr.primary(
-                                            tier.khmerLabel,
-                                            tier.englishLabel,
-                                          );
-                                          final dist =
-                                              report.userSupportDistanceMeters;
-                                          if (dist == null) return label;
-                                          final fmt =
-                                              SupportEligibilityService.formatDistance(
-                                                dist,
-                                                englishFirst:
-                                                    repo.settings.englishFirst,
-                                              );
-                                          return '$label · $fmt';
-                                        }(),
-                                        key: const Key('support-tier-badge'),
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: AppColors.teal,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                              TextButton(
-                                key: const Key('undo-support-btn'),
-                                onPressed: () => _undoSupport(report, tr),
-                                child: Text(
-                                  tr.primary('ដកការគាំទ្រ', 'Undo'),
-                                  style: const TextStyle(
-                                    color: AppColors.danger,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                       ],
                       const SizedBox(height: 12),
 
@@ -1315,7 +1254,18 @@ class _TrackingPageState extends State<TrackingPage> {
                                             report: report,
                                             locationService:
                                                 widget.locationService,
+                                            geocodingService:
+                                                widget.geocodingService,
                                             bilingual: tr,
+                                            onLocationResolved: () {
+                                              if (mounted) {
+                                                setState(
+                                                  () =>
+                                                      _isCheckingSupportLocation =
+                                                          false,
+                                                );
+                                              }
+                                            },
                                           );
                                       if (!mounted) return;
                                       setState(
@@ -1546,14 +1496,12 @@ class _CitizenCommentsCard extends StatefulWidget {
     required this.tr,
     required this.allowAddNote,
     this.translationService,
-    this.audioPlayerService,
   });
 
   final CivicReport report;
   final Bilingual tr;
   final bool allowAddNote;
   final CommentTranslationService? translationService;
-  final AudioPlayerService? audioPlayerService;
 
   @override
   State<_CitizenCommentsCard> createState() => _CitizenCommentsCardState();
@@ -1793,15 +1741,11 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
                     onToggleTranslate: visibleComments[i].hasText
                         ? () => _toggleTranslateComment(visibleComments[i], tr)
                         : null,
-                    showInlineVoiceMemo:
-                        visibleComments[i].hasVoiceAudioMemo &&
-                        visibleComments[i].voiceAudioPath !=
-                            widget.report.voiceAudioPath,
-                    audioPlayerService: widget.audioPlayerService,
                     onDelete:
                         (visibleComments[i].isCurrentUser &&
                             !visibleComments[i].isOriginalReporter &&
-                            !visibleComments[i].id.startsWith('c-join-'))
+                            !visibleComments[i].id.startsWith('c-join-') &&
+                            !visibleComments[i].id.startsWith('c-support-'))
                         ? () => _deleteComment(visibleComments[i])
                         : null,
                   ),
@@ -1900,8 +1844,6 @@ class _CitizenCommentTile extends StatelessWidget {
     this.isTranslating = false,
     this.translationError,
     this.onToggleTranslate,
-    this.showInlineVoiceMemo = false,
-    this.audioPlayerService,
     this.onDelete,
   });
 
@@ -1912,8 +1854,6 @@ class _CitizenCommentTile extends StatelessWidget {
   final bool isTranslating;
   final String? translationError;
   final VoidCallback? onToggleTranslate;
-  final bool showInlineVoiceMemo;
-  final AudioPlayerService? audioPlayerService;
   final VoidCallback? onDelete;
 
   @override
@@ -2042,39 +1982,105 @@ class _CitizenCommentTile extends StatelessWidget {
               ],
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            comment.hasText
-                ? comment.text.trim()
-                : comment.hasVoiceAudioMemo
-                ? tr.primary(
-                    'បានភ្ជាប់កំណត់ត្រាសំឡេង (${VoiceMemoPlayerCard.formatDuration(comment.voiceAudioDurationSeconds)})',
-                    'Voice memo attached (${VoiceMemoPlayerCard.formatDuration(comment.voiceAudioDurationSeconds)})',
-                  )
-                : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.42,
-              color: (comment.hasText || comment.hasVoiceAudioMemo)
-                  ? AppColors.ink
-                  : AppColors.muted,
-              fontStyle: (comment.hasText || comment.hasVoiceAudioMemo)
-                  ? FontStyle.normal
-                  : FontStyle.italic,
-            ),
-          ),
-          if (showInlineVoiceMemo && comment.hasVoiceAudioMemo) ...[
-            const SizedBox(height: 8),
-            VoiceMemoPlayerCard(
-              key: Key('comment-voice-memo-${comment.id}'),
-              audioPath: comment.voiceAudioPath!,
-              durationSeconds: comment.voiceAudioDurationSeconds,
-              bilingual: tr,
-              compact: true,
-              audioPlayerService: audioPlayerService,
+          if (comment.isRemoteSupport) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                Container(
+                  key: Key('comment-remote-tag-${comment.id}'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.saffronSoft,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: AppColors.saffron.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.location_searching_rounded,
+                        size: 11,
+                        color: AppColors.saffronInk,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          comment.supportTier!.formatTransparentTag(
+                            englishFirst: tr.englishFirst,
+                            areaKhmer: comment.supportAreaKhmer,
+                            areaEnglish: comment.supportAreaEnglish,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.saffronInk,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (comment.supportReasonCategory != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Text(
+                      tr.primary(
+                        comment.supportReasonCategory!.khmerLabel,
+                        comment.supportReasonCategory!.englishLabel,
+                      ),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
-          if (onToggleTranslate != null) ...[
+          if (comment.supportReasonCategory == null ||
+              (comment.text.trim() !=
+                      comment.supportReasonCategory!.englishLabel &&
+                  comment.text.trim() !=
+                      comment.supportReasonCategory!.khmerLabel)) ...[
+            const SizedBox(height: 6),
+            Text(
+              comment.hasText
+                  ? comment.text.trim()
+                  : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.42,
+                color: comment.hasText ? AppColors.ink : AppColors.muted,
+                fontStyle: comment.hasText
+                    ? FontStyle.normal
+                    : FontStyle.italic,
+              ),
+            ),
+          ],
+          if (onToggleTranslate != null &&
+              (comment.supportReasonCategory == null ||
+                  (comment.text.trim() !=
+                          comment.supportReasonCategory!.englishLabel &&
+                      comment.text.trim() !=
+                          comment.supportReasonCategory!.khmerLabel))) ...[
             const SizedBox(height: 6),
             Builder(
               builder: (context) {

@@ -78,8 +78,8 @@ class HelpAssistantService {
       id: 'faq-how-to-report',
       khmerQuestion: 'តើត្រូវរាយការណ៍បញ្ហាផ្លូវ ឬភ្លើងផ្លូវដោយរបៀបណា?',
       englishQuestion: 'How do I report a street, drain, or streetlight issue?',
-      khmerAnswer: 'ចុចប៊ូតុង "+" នៅខាងក្រោម ឬជ្រើសប្រភេទបញ្ហានៅទំព័រដើម → (១) ថត ឬជ្រើសរូបថតរហូតដល់ ៣ សន្លឹក → (២) បញ្ជាក់កម្រិតគ្រោះថ្នាក់ វាយមតិ ឬថតសំឡេង → (៣) បញ្ជាក់ទីតាំងលើផែនទី ហើយចុចដាក់ស្នើ។',
-      englishAnswer: 'Tap the "+" button on the bottom bar (or any quick category on Home) → (1) Take or pick up to 3 photos → (2) Set severity and add a note or voice memo → (3) Confirm the map pin and submit.',
+      khmerAnswer: 'ចុចប៊ូតុង "+" នៅខាងក្រោម ឬជ្រើសប្រភេទបញ្ហានៅទំព័រដើម → (១) ថត ឬជ្រើសរូបថតយ៉ាងតិច ១ សន្លឹក → (២) បញ្ជាក់កម្រិតគ្រោះថ្នាក់ វាយមតិ ឬនិយាយបំប្លែងជាអក្សរ → (៣) ពិនិត្យរបាយការណ៍ស្រដៀងក្នុងរង្វង់ 150m ហើយចូលរួម ឬដាក់ស្នើថ្មី។',
+      englishAnswer: 'Tap the "+" button on the bottom bar (or any quick category on Home) → (1) Take or pick at least 1 real photo → (2) Set severity and add a note or voice-to-text transcript → (3) Confirm inside the 150 m zone to join a matching report or submit a new one.',
     ),
     HelpFaqItem(
       id: 'faq-priority',
@@ -100,16 +100,16 @@ class HelpAssistantService {
       id: 'faq-offline',
       khmerQuestion: 'តើកម្មវិធីដំណើរការពេលគ្មានអ៊ីនធឺណិត (Offline) ដែរឬទេ?',
       englishQuestion: 'Does SrolanhCity work offline?',
-      khmerAnswer: 'បាទ/ចាស! របាយការណ៍ រូបថត និងសំឡេងរក្សាទុកក្នុងឧបករណ៍ជា "រង់ចាំផ្ញើ (Queued)" ហើយនឹងផ្ញើដោយស្វ័យប្រវត្តិភ្លាមៗពេលទូរស័ព្ទភ្ជាប់អ៊ីនធឺណិតវិញ — ទោះបីអ្នកបិទកម្មវិធីហើយបើកឡើងវិញក៏ដោយ។',
-      englishAnswer: 'Yes! Reports, photos, and local voice memos save securely on your device as "Queued" and auto-sync the moment internet returns — even if you close and reopen the app later.',
+      khmerAnswer: 'បាទ/ចាស! របាយការណ៍ រូបថត GPS និងអត្ថបទរក្សាទុកក្នុងឧបករណ៍ជា "រង់ចាំផ្ញើ (Queued)" ហើយនឹងផ្ញើដោយស្វ័យប្រវត្តិភ្លាមៗពេលទូរស័ព្ទភ្ជាប់អ៊ីនធឺណិតវិញ — ទោះបីអ្នកបិទកម្មវិធីហើយបើកឡើងវិញក៏ដោយ។',
+      englishAnswer: 'Yes! Reports, photos, GPS coordinates, and notes save securely on your device as "Queued" and auto-sync the moment internet returns — even if you close and reopen the app later.',
     ),
     HelpFaqItem(
       id: 'faq-privacy-spoof',
       khmerQuestion:
           'តើឯកជនភាព និងប្រព័ន្ធទប់ស្កាត់ទីតាំងក្លែងក្លាយដំណើរការយ៉ាងណា?',
       englishQuestion: 'How do Privacy-by-Design and Anti-Spoof checks work?',
-      khmerAnswer: 'ឈ្មោះ លេខទូរស័ព្ទ និងទិន្នន័យ EXIF ក្នុងរូបថតត្រូវបានលុបចេញដោយស្វ័យប្រវត្តិមុនរក្សាទុក ហើយមិនបង្ហាញលើផែនទីសាធារណៈឡើយ។ ការដាក់ស្នើរបាយការណ៍ក៏ផ្ទៀងផ្ទាត់ GPS ពិតប្រាកដក្នុងចម្ងាយ 15 គ.ម (ឬទីតាំង GPS ក្នុងរូបថត / តំបន់រស់នៅរបស់អ្នក) ដើម្បីការពារការបន្លំទីតាំងផងដែរ។',
-      englishAnswer: 'Reporter names, phones, and camera EXIF metadata are automatically stripped and never shown on public pins. Submissions and votes verify genuine GPS within 15 km (or matching photo EXIF / your saved Home District) while blocking mock GPS and impossible travel.',
+      khmerAnswer: 'ឈ្មោះ លេខទូរស័ព្ទ និងទិន្នន័យ EXIF ក្នុងរូបថតត្រូវបានលុបចេញដោយស្វ័យប្រវត្តិមុនរក្សាទុក។ ការដាក់ស្នើថ្មីតម្រូវឱ្យមាន GPS ពិត ឬ EXIF ក្នុងរង្វង់ 150m ហើយការគាំទ្រពីក្រៅ 150m តម្រូវឱ្យបញ្ជាក់មូលហេតុ និងបង្ហាញតែស្លាកភូមិ/ខណ្ឌ/ខេត្តប៉ុណ្ណោះ។',
+      englishAnswer: 'Reporter names, phones, and camera EXIF metadata are stripped automatically. Submissions strictly enforce a verified 150 m GPS/EXIF zone, and supporting an issue from > 150 m requires a reason while displaying only a privacy-safe village/district/province tag.',
     ),
   ];
 
@@ -297,10 +297,10 @@ class HelpAssistantService {
       return HelpChatReply(
         success: true,
         text: preferEnglish
-            ? 'SrolanhCity works **offline**! Reports, photos, and local voice memos save safely on your device as **Queued** and auto-sync the moment your internet returns — even if you close and reopen the app.\n'
-                  'For voice offline (or on Brave), tapping the mic automatically records a real local voice memo you can play back anytime.'
-            : 'SrolanhCity ដំណើរការ **ក្រៅបណ្តាញ (Offline)** បាន! របាយការណ៍ រូបថត និងសំឡេងរក្សាទុកក្នុងឧបករណ៍ជា **រង់ចាំផ្ញើ (Queued)** ហើយផ្ញើស្វ័យប្រវត្តិភ្លាមៗពេលមានអ៊ីនធឺណិតវិញ — ទោះបីបិទហើយបើកកម្មវិធីឡើងវិញក៏ដោយ។\n'
-                  'ពេលគ្មានអ៊ីនធឺណិត ការចុចមីក្រូហ្វូននឹងថតសំឡេងរក្សាទុកផ្ទាល់ ហើយអ្នកអាចចាក់ស្តាប់វិញបានភ្លាមៗ។',
+            ? 'SrolanhCity works **offline**! Reports, photos, and GPS pins save safely on your device as **Queued** and auto-sync the moment your internet returns — even if you close and reopen the app.\n'
+                  'Voice-to-text transcription needs internet, so when offline simply type a short note or tap quick hazard tags.'
+            : 'SrolanhCity ដំណើរការ **ក្រៅបណ្តាញ (Offline)** បាន! របាយការណ៍ រូបថត និងទីតាំង GPS រក្សាទុកក្នុងឧបករណ៍ជា **រង់ចាំផ្ញើ (Queued)** ហើយផ្ញើស្វ័យប្រវត្តិភ្លាមៗពេលមានអ៊ីនធឺណិតវិញ — ទោះបីបិទហើយបើកកម្មវិធីឡើងវិញក៏ដោយ។\n'
+                  'ការបំប្លែងសំឡេងជាអក្សរត្រូវការអ៊ីនធឺណិត ដូច្នេះពេលក្រៅបណ្តាញសូមវាយអក្សរខ្លី ឬជ្រើសស្លាករហ័ស។',
         suggestedAction: HelpSuggestedAction.openReportWizard,
       );
     }
@@ -384,11 +384,11 @@ class HelpAssistantService {
             ? 'Your identity is protected by **Privacy-by-Design**:\n'
                   '• Public map pins never show your name, phone, or user ID.\n'
                   '• Camera EXIF metadata (GPS/device model) is stripped automatically before saving.\n'
-                  '• Multi-layer anti-spoof locks geotagged/camera photos within 250 m of capture, checks duplicates at both pin and photo coordinates, enforces 15 km / Home District rules, and blocks fake GPS apps.'
+                  '• Multi-layer anti-spoof enforces a strict 150 m GPS/EXIF reporting zone, detects all similar reports within 150 m, requires reasons for remote support (> 150 m), and blocks fake GPS apps.'
             : 'អត្តសញ្ញាណរបស់អ្នកត្រូវបានការពារដោយ **ឯកជនភាពជាមូលដ្ឋាន**៖\n'
                   '• ផែនទីសាធារណៈមិនបង្ហាញឈ្មោះ លេខទូរស័ព្ទ ឬលេខសម្គាល់អ្នកឡើយ។\n'
                   '• ទិន្នន័យ EXIF ក្នុងរូបថតត្រូវបានលុបចេញដោយស្វ័យប្រវត្តិមុនរក្សាទុក។\n'
-                  '• ប្រព័ន្ធការពារទីតាំងក្លែងក្លាយកំណត់រង្វង់ 250 ម៉ែត្រជុំវិញទីតាំងថតរូប ពិនិត្យរបាយការណ៍ស្ទួនទាំងម្ជុល និងរូបថត ផ្ទៀងផ្ទាត់ចម្ងាយ 15 គ.ម / តំបន់រស់នៅ និងទប់ស្កាត់កម្មវិធីបន្លំ GPS។',
+                  '• ប្រព័ន្ធការពារទីតាំងក្លែងក្លាយកំណត់រង្វង់ 150 ម៉ែត្រជុំវិញទីតាំង GPS/រូបថត ពិនិត្យរបាយការណ៍ស្រដៀងក្នុង 150m តម្រូវឱ្យបញ្ជាក់មូលហេតុពេលគាំទ្រពីចម្ងាយ និងទប់ស្កាត់កម្មវិធីបន្លំ GPS។',
       );
     }
 
@@ -453,7 +453,7 @@ class HelpAssistantService {
           ? 'I can help you with:\n'
                 '• Tracking any report (just type `#SC-20481` or `"Track my reports"`)\n'
                 '• Priority Score `P1–P5` & ministry routing across all 25 provinces\n'
-                '• Offline reporting, voice memos, privacy/EXIF & anti-spoof protection\n'
+                '• Offline reporting, voice-to-text, privacy/EXIF & 150 m anti-spoof protection\n'
                 '• Road emergency hotline `1190` or EDC power hotline `1298`'
           : 'ខ្ញុំអាចជួយអ្នកអំពី៖\n'
                 '• តាមដានរបាយការណ៍ (វាយ `#SC-20481` ឬ `"ពិនិត្យស្ថានភាពរបាយការណ៍ខ្ញុំ"`)\n'

@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:my_app/data/repositories/report_repository.dart';
-import 'package:my_app/data/services/audio_player_service.dart';
 import 'package:my_app/data/services/audio_recorder_service.dart';
 import 'package:my_app/data/services/civic_ai_service.dart';
 import 'package:my_app/data/services/comment_translation_service.dart';
@@ -30,7 +29,6 @@ import 'package:my_app/ui/features/profile/profile_page.dart';
 import 'package:my_app/ui/features/report/views/fake_gps_page.dart';
 import 'package:my_app/ui/features/report/views/report_wizard_page.dart';
 import 'package:my_app/ui/features/shell/main_shell.dart';
-import 'package:my_app/ui/features/staff/staff_console_page.dart';
 import 'package:my_app/ui/features/tracking/tracking_page.dart';
 
 const String _testPhotoDataUri =
@@ -545,56 +543,49 @@ void main() {
   );
 
   testWidgets(
-    'TrackingPage enforces distance-aware "Affects me" (allows nearby, blocks >15 km, re-enables on Undo)',
+    'TrackingPage enforces strict GPS "Affects me": instant <= 150 m on-site, mandatory Remote Province reason sheet > 150 m with WCAG 2.1 AA, and Undo cleanup',
     (tester) async {
+      final handle = tester.ensureSemantics();
       final repo = ReportRepository(
         initialSettings: const AppSettings(englishFirst: true),
       );
-      // #SC-20524 is in Sen Sok (outside default Daun Penh Home Khan)
       final target = repo.findById('#SC-20524')!;
       final beforeCount = target.affectedCitizens;
 
-      // 1. User 230 km away (Siem Reap) & outside Home Khan -> blocked cleanly
+      // 1. GPS off -> strictly blocked even if user later sets Home District
       await tester.pumpWidget(
         _wrapWithScope(
           repo,
-          TrackingPage(
+          const TrackingPage(
             reportId: '#SC-20524',
-            locationService: _FakeLocationService(
-              const LocationSuccess(
-                point: LatLng(13.3633, 103.8564),
-                accuracyMeters: 20,
-                isOutsideCambodia: false,
-              ),
-            ),
+            locationService: _FakeLocationService(LocationServiceDisabled()),
           ),
         ),
       );
       await tester.tap(find.byKey(const Key('tracking-support-btn')));
       await tester.pumpAndSettle();
-
       expect(repo.findById('#SC-20524')!.affectedCitizens, equals(beforeCount));
-      expect(find.textContaining('too far'), findsOneWidget);
-
-      // Dismiss the SnackBar before mounting the nearby location scenario
+      expect(find.textContaining('Turn on GPS'), findsOneWidget);
       ScaffoldMessenger.of(tester.element(find.byType(TrackingPage)))
           .clearSnackBars();
       await tester.pumpAndSettle();
 
-      // 2. User ~110 m away -> Verified nearby, increments count, Undo re-enables
+      // 2. Different Province (Siem Reap supporting Phnom Penh #SC-20524)
+      //    -> strictly opens "Why does this issue affect you?" sheet tagged "Remote support · Siem Reap"
       await tester.pumpWidget(
-        _wrapWithScope(
-          repo,
-          TrackingPage(
-            reportId: '#SC-20524',
-            locationService: _FakeLocationService(
-              LocationSuccess(
-                point: LatLng(
-                  target.coordinates.latitude + 0.001,
-                  target.coordinates.longitude,
+        ReportScope(
+          key: const ValueKey('tracking-remote-province'),
+          repository: repo,
+          child: MaterialApp(
+            theme: buildSrolanhCityTheme(),
+            home: const TrackingPage(
+              reportId: '#SC-20524',
+              locationService: _FakeLocationService(
+                LocationSuccess(
+                  point: LatLng(13.3633, 103.8564),
+                  accuracyMeters: 20,
+                  isOutsideCambodia: false,
                 ),
-                accuracyMeters: 8,
-                isOutsideCambodia: false,
               ),
             ),
           ),
@@ -605,29 +596,109 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
+        find.byKey(const Key('remote-support-reason-sheet')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Remote support · Siem Reap'), findsOneWidget);
+
+      // Confirm button disabled until reason chip AND >= 10 char explanation entered
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const Key('confirm-remote-support-btn')),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(
+        find.byKey(const Key('support-reason-liveOrFamilyNearby')),
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const Key('confirm-remote-support-btn')),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.enterText(
+        find.byKey(const Key('remote-support-note-field')),
+        'My parents drive through Sen Sok every morning',
+      );
+      await tester.pumpAndSettle();
+
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+      await tester.tap(find.byKey(const Key('confirm-remote-support-btn')));
+      await tester.pumpAndSettle();
+
+      expect(
         repo.findById('#SC-20524')!.affectedCitizens,
         equals(beforeCount + 1),
       );
       expect(find.byKey(const Key('support-tier-badge')), findsOneWidget);
-      expect(find.textContaining('Verified nearby'), findsWidgets);
+      expect(find.textContaining('Remote support · Siem Reap'), findsWidgets);
 
-      // Tap Undo -> refunds count and re-enables "Affects me too" button
+      // Undo removes support, comment, and re-enables button
       await tester.ensureVisible(find.byKey(const Key('undo-support-btn')));
       await tester.tap(find.byKey(const Key('undo-support-btn')));
       await tester.pumpAndSettle();
       expect(repo.findById('#SC-20524')!.affectedCitizens, equals(beforeCount));
       expect(find.text('Affects me too'), findsOneWidget);
+
+      // 3. Within <= 150 m (~110 m) 6 hours later (plausible travel time from
+      // Siem Reap) -> instant 1-tap Verified on-site (no sheet!)
+      await tester.pumpWidget(
+        ReportScope(
+          key: const ValueKey('tracking-onsite-support'),
+          repository: repo,
+          child: MaterialApp(
+            theme: buildSrolanhCityTheme(),
+            home: TrackingPage(
+              reportId: '#SC-20524',
+              locationService: _FakeLocationService(
+                LocationSuccess(
+                  point: LatLng(
+                    target.coordinates.latitude + 0.001,
+                    target.coordinates.longitude,
+                  ),
+                  accuracyMeters: 8,
+                  isOutsideCambodia: false,
+                  timestamp: DateTime.now().add(const Duration(hours: 6)),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('tracking-support-btn')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('remote-support-reason-sheet')),
+        findsNothing,
+      );
+      expect(
+        repo.findById('#SC-20524')!.affectedCitizens,
+        equals(beforeCount + 1),
+      );
+      expect(find.byKey(const Key('support-tier-badge')), findsOneWidget);
+      expect(find.textContaining('Verified on-site'), findsWidgets);
+      handle.dispose();
     },
   );
 
   testWidgets(
-    'MapPage bottom sheet shows inline distance feedback and disables to Supported after verification',
+    'MapPage bottom sheet blocks GPS-off and requires transparent Remote District reason sheet when supporting from another Khan',
     (tester) async {
       final seedRepo = ReportRepository();
       final senSokReport = seedRepo.findById('#SC-20524')!;
       final beforeCount = senSokReport.affectedCitizens;
 
-      // 1. Blocked > 15 km -> visible inline banner inside sheet, button stays enabled
+      // 1. GPS disabled -> visible inline error banner inside sheet, button stays enabled
       final blockedRepo = ReportRepository(
         initialSettings: const AppSettings(englishFirst: true),
         initialReports: [senSokReport],
@@ -635,14 +706,8 @@ void main() {
       await tester.pumpWidget(
         _wrapWithScope(
           blockedRepo,
-          MapPage(
-            locationService: const _FakeLocationService(
-              LocationSuccess(
-                point: LatLng(13.3633, 103.8564),
-                accuracyMeters: 20,
-                isOutsideCambodia: false,
-              ),
-            ),
+          const MapPage(
+            locationService: _FakeLocationService(LocationServiceDisabled()),
           ),
         ),
       );
@@ -656,31 +721,36 @@ void main() {
         find.byKey(const Key('map-support-feedback-banner')),
         findsOneWidget,
       );
-      expect(find.textContaining('too far'), findsOneWidget);
+      expect(find.textContaining('Turn on GPS'), findsOneWidget);
       expect(
         blockedRepo.findById('#SC-20524')!.affectedCitizens,
         equals(beforeCount),
       );
 
-      // Dismiss bottom sheet before pumping the Phnom Penh scenario
+      // Dismiss bottom sheet before pumping the Remote District scenario
       Navigator.of(tester.element(find.byKey(const Key('map-support-btn'))))
           .pop();
       await tester.pumpAndSettle();
 
-      // 2. Allowed ~5.3 km (City commuter) -> increments count, disables to Supported
+      // 2. Different District (Khan Daun Penh supporting Khan Sen Sok ~5.3 km)
+      //    -> opens reason sheet tagged "Remote support · Khan Daun Penh", confirms -> disables to Supported
       final allowedRepo = ReportRepository(
         initialSettings: const AppSettings(englishFirst: true),
         initialReports: [senSokReport],
       );
       await tester.pumpWidget(
-        _wrapWithScope(
-          allowedRepo,
-          MapPage(
-            locationService: const _FakeLocationService(
-              LocationSuccess(
-                point: LocationService.phnomPenhCenter,
-                accuracyMeters: 15,
-                isOutsideCambodia: false,
+        ReportScope(
+          key: const ValueKey('map-remote-district-scope'),
+          repository: allowedRepo,
+          child: MaterialApp(
+            theme: buildSrolanhCityTheme(),
+            home: const MapPage(
+              locationService: _FakeLocationService(
+                LocationSuccess(
+                  point: LocationService.phnomPenhCenter,
+                  accuracyMeters: 15,
+                  isOutsideCambodia: false,
+                ),
               ),
             ),
           ),
@@ -691,6 +761,19 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('map-support-btn')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('remote-support-reason-sheet')),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Remote support · Khan Daun Penh'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('support-reason-dailyCommute')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('confirm-remote-support-btn')));
       await tester.pumpAndSettle();
 
       expect(
@@ -701,7 +784,10 @@ void main() {
         find.byKey(const Key('map-support-feedback-banner')),
         findsOneWidget,
       );
-      expect(find.textContaining('City commuter'), findsOneWidget);
+      expect(
+        find.textContaining('Remote support · Khan Daun Penh'),
+        findsOneWidget,
+      );
       expect(find.text('Supported'), findsOneWidget);
       final supportBtn = tester.widget<OutlinedButton>(
         find.byKey(const Key('map-support-btn')),
@@ -931,12 +1017,12 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Seeded #SC-20481 is in "My Reports" -> shows "already reported" instead of "Join"
-      expect(find.textContaining('already reported'), findsOneWidget);
+      // Seeded #SC-20481 is in "My Reports" within 50 m -> self-duplicate guard shows "View your existing report"
       expect(find.textContaining('View your existing report'), findsOneWidget);
-      expect(find.textContaining('Join this report'), findsNothing);
+      expect(find.byKey(const Key('step3-join-report-btn')), findsNothing);
+      expect(find.byKey(const Key('step3-option-create-new')), findsNothing);
 
-      // Tap "It's a different problem" -> opens sheet defaulting to Other Issue
+      // Tap "Report a different category" -> opens sheet defaulting to Other Issue
       final diffBtn = find.byKey(const Key('different-problem-btn'));
       await tester.ensureVisible(diffBtn);
       await tester.tap(diffBtn);
@@ -1118,12 +1204,12 @@ void main() {
       );
       await tester.pump();
 
-      // Step 2 -> Step 3 -> Join this report
+      // Step 2 -> Step 3 -> Join selected Master Incident (#SC-20519)
       await tester.tap(find.textContaining('Confirm location'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      await tester.tap(find.textContaining('Join this report'));
+      await tester.tap(find.byKey(const Key('step3-join-report-btn')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
 
@@ -1268,13 +1354,13 @@ void main() {
   );
 
   testWidgets(
-    'ReportWizard Step 3 displays Photo GPS verified pill when EXIF matches and hard-blocks with Snap to photo location when EXIF is > 250 m away',
+    'ReportWizard Step 1 shows fail-fast Photo GPS pill and Step 3 hard-blocks > 150 m with floating & card Return to 150 m zone',
     (tester) async {
       final repo = ReportRepository(
         initialSettings: const AppSettings(englishFirst: true),
       );
 
-      // Case 1: Matching Phnom Penh EXIF (<= 250 m) -> green verified pill
+      // Case 1: Matching Phnom Penh EXIF (<= 150 m) -> Step 1 green pill + Step 3 verified pill
       await tester.pumpWidget(
         _wrapWithScope(
           repo,
@@ -1291,6 +1377,9 @@ void main() {
           ),
         ),
       );
+      expect(find.byKey(const Key('step1-photo-gps-pill')), findsOneWidget);
+      expect(find.textContaining('Photo GPS locked'), findsOneWidget);
+
       await tester.tap(find.text('Next'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
@@ -1299,10 +1388,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.byKey(const Key('step3-exif-verified-pill')), findsOneWidget);
-      expect(find.byKey(const Key('step3-photo-anchor-blocker')), findsNothing);
+      expect(find.byKey(const Key('step3-out-of-zone-blocker')), findsNothing);
 
       // Case 2: EXIF in Siem Reap while pinned in Phnom Penh (even with local PP GPS)
-      // -> hard-blocked by 250 m Photo-Anchored Fence + 1-tap Snap to photo location
+      // -> hard-blocked by 150 m Zone + floating & card Return to 150 m zone
       await tester.pumpWidget(
         _wrapWithScope(
           repo,
@@ -1335,7 +1424,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(
-        find.byKey(const Key('step3-photo-anchor-blocker')),
+        find.byKey(const Key('step3-out-of-zone-blocker')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('step3-floating-return-zone-btn')),
         findsOneWidget,
       );
       expect(
@@ -1346,14 +1439,18 @@ void main() {
             .onPressed,
         isNull,
       );
-      expect(find.byKey(const Key('step3-use-photo-gps-btn')), findsOneWidget);
+      expect(find.byKey(const Key('step3-return-to-zone-btn')), findsOneWidget);
 
-      // 1-tap "Snap to photo location" moves pin to photo EXIF and enables Submit
-      await tester.tap(find.byKey(const Key('step3-use-photo-gps-btn')));
+      // 1-tap "Return to 150 m zone" moves pin to photo EXIF and enables Submit
+      await tester.tap(find.byKey(const Key('step3-floating-return-zone-btn')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.byKey(const Key('step3-exif-verified-pill')), findsOneWidget);
+      expect(
+        find.byKey(const Key('step3-floating-return-zone-btn')),
+        findsNothing,
+      );
       expect(
         tester
             .widget<FilledButton>(
@@ -1366,7 +1463,7 @@ void main() {
   );
 
   testWidgets(
-    'ReportWizard offline records local voice memo on Step 2 and displays Voice Memo card on TrackingPage',
+    'ReportWizard Step 2 is transcript-only offline (shows honest offline notice, zero audio players)',
     (tester) async {
       final repo = ReportRepository(
         initialSettings: const AppSettings(englishFirst: true),
@@ -1389,12 +1486,15 @@ void main() {
             ),
             voiceInputService: _UnavailableTestVoiceService(),
             audioRecorderService: _WidgetFakeAudioRecorderService(),
-            audioPlayerService: _WidgetFakeAudioPlayerService(),
             civicAiService: _UnconfiguredTestAiService(),
             ipGeolocationService: const _TestIpGeoService(null),
           ),
         ),
       );
+
+      // Step 1 shows fail-fast "No GPS tag in photo" hint for non-EXIF photo
+      expect(find.byKey(const Key('step1-photo-gps-pill')), findsOneWidget);
+      expect(find.textContaining('No GPS tag in photo'), findsOneWidget);
 
       await tester.tap(find.text('Next'));
       await tester.pump();
@@ -1402,69 +1502,21 @@ void main() {
 
       expect(find.byKey(const Key('voice-offline-badge')), findsOneWidget);
 
-      // Scroll voice record button into view, tap to start & tap again to stop
+      // Tapping mic offline shows honest voice-to-text guidance (no saved audio memo)
       final recordBtn = find.byKey(const Key('voice-record-btn'));
       await tester.ensureVisible(recordBtn);
       await tester.pump();
       await tester.tap(recordBtn);
+      await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
-      await tester.tap(recordBtn);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.byKey(const Key('step2-voice-memo-player')), findsOneWidget);
-
-      // Advance to Step 3 & submit offline report
-      await tester.tap(find.textContaining('Confirm location'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.tap(find.textContaining('Submit report'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
-
-      final created = repo.reports.first;
-      expect(created.syncStatus, equals(SyncStatus.pendingSync));
-      expect(created.voiceAudioPath, equals('data:audio/webm;base64,AAAA'));
-
-      // Immediately visible on ReportSubmittedPage (never says "No comment")
+      expect(find.byKey(const Key('voice-feedback-box')), findsOneWidget);
       expect(
-        find.byKey(const Key('submitted-voice-memo-card')),
+        find.textContaining('voice-to-text requires internet'),
         findsOneWidget,
       );
-      expect(find.text('No comment'), findsNothing);
-
-      // Verify TrackingPage renders Voice Memo card right at the top (no scroll needed)
-      await tester.pumpWidget(
-        ReportScope(
-          key: const ValueKey('tracking-memo-scope'),
-          repository: repo,
-          child: MaterialApp(
-            theme: buildSrolanhCityTheme(),
-            home: TrackingPage(
-              reportId: created.id,
-              audioPlayerService: _WidgetFakeAudioPlayerService(),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('tracking-voice-memo-card')), findsOneWidget);
-
-      // Verify StaffConsolePage also displays playable Voice Memo card
-      await tester.pumpWidget(
-        ReportScope(
-          key: const ValueKey('staff-memo-scope'),
-          repository: repo,
-          child: MaterialApp(
-            theme: buildSrolanhCityTheme(),
-            home: const StaffConsolePage(),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).first, created.id);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('staff-voice-memo-card')), findsOneWidget);
+      expect(find.byKey(const Key('voice-record-memo-btn')), findsNothing);
+      expect(find.byKey(const Key('step2-voice-memo-player')), findsNothing);
     },
   );
 
@@ -2041,12 +2093,15 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 350));
 
-        // Blocked banner shown & Submit disabled
+        // Out-of-zone blocker & floating Return to 150 m zone shown, Submit disabled
         expect(
-          find.byKey(const Key('step3-location-blocked-banner')),
+          find.byKey(const Key('step3-out-of-zone-blocker')),
           findsOneWidget,
         );
-        expect(find.textContaining('Siem Reap'), findsWidgets);
+        expect(
+          find.byKey(const Key('step3-floating-return-zone-btn')),
+          findsOneWidget,
+        );
         final submitBtn = tester.widget<FilledButton>(
           find.byKey(const Key('step3-submit-report-btn')),
         );
@@ -2056,15 +2111,15 @@ void main() {
         await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
         await expectLater(tester, meetsGuideline(textContrastGuideline));
 
-        // Tap Jump to my GPS -> moves pin to Siem Reap & enables Submit
-        final jumpBtn = find.byKey(const Key('step3-jump-live-gps-btn'));
-        await tester.ensureVisible(jumpBtn);
-        await tester.tap(jumpBtn);
+        // Tap Return to 150 m zone -> moves pin to Siem Reap live GPS & enables Submit
+        final returnBtn = find.byKey(const Key('step3-return-to-zone-btn'));
+        await tester.ensureVisible(returnBtn);
+        await tester.tap(returnBtn);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
 
         expect(
-          find.byKey(const Key('step3-location-blocked-banner')),
+          find.byKey(const Key('step3-out-of-zone-blocker')),
           findsNothing,
         );
         expect(
@@ -2081,12 +2136,12 @@ void main() {
     );
 
     testWidgets(
-      'Allows Siem Reap GPS to submit in Phnom Penh when matching Photo EXIF or saved Home District verifies the pin',
+      'Allows Siem Reap GPS to submit in Phnom Penh ONLY with matching Fresh Photo EXIF (strictly blocks GPS-off even when Home District is set)',
       (tester) async {
         const siemReapGps = LatLng(13.3633, 103.8564);
         const phnomPenhSpot = LatLng(11.5318, 104.9044);
 
-        // 1. Fresh Photo EXIF at Phnom Penh pin overrides distance block
+        // 1. Fresh Photo EXIF at Phnom Penh pin verifies the 150 m zone
         final exifRepo = ReportRepository(
           initialSettings: const AppSettings(englishFirst: true),
         );
@@ -2135,11 +2190,12 @@ void main() {
           isNotNull,
         );
 
-        // 2. Saved Home District (Daun Penh) allows reporting from Siem Reap
+        // 2. Pure strictness (Option B): GPS disabled with NO EXIF is STRICTLY
+        //    blocked even when Home District is configured (zero Home bypass!)
         final homeRepo = ReportRepository(
           initialSettings: const AppSettings(englishFirst: true),
           initialProfile: const UserProfile(
-            homeProvinceCode: 'PP',
+            homeProvinceCode: 'phnom_penh',
             khmerHomeArea: 'ផ្សារថ្មី, ខណ្ឌដូនពេញ',
             englishHomeArea: 'Phsar Thmei, Daun Penh',
           ),
@@ -2148,16 +2204,12 @@ void main() {
           _wrapWithScope(
             homeRepo,
             ReportWizardPage(
-              key: const ValueKey('wizard-home-override'),
+              key: const ValueKey('wizard-strict-gps-off'),
               initialCategory: IssueCategory.trash,
-              initialCoordinates: const LatLng(11.5680, 104.9225), // Daun Penh
+              initialCoordinates: phnomPenhSpot,
               initialPhotoPaths: const [_testPhotoDataUri],
               locationService: const _FakeLocationService(
-                LocationSuccess(
-                  point: siemReapGps,
-                  accuracyMeters: 12,
-                  isOutsideCambodia: false,
-                ),
+                LocationServiceDisabled(),
               ),
               voiceInputService: _UnavailableTestVoiceService(),
               civicAiService: _UnconfiguredTestAiService(),
@@ -2173,47 +2225,57 @@ void main() {
         await tester.pump(const Duration(milliseconds: 350));
 
         expect(
-          find.byKey(const Key('step3-location-verified-pill')),
+          find.byKey(const Key('step3-location-required-banner')),
           findsOneWidget,
         );
-        expect(find.textContaining('Saved Home District'), findsOneWidget);
         expect(
           tester
               .widget<FilledButton>(
                 find.byKey(const Key('step3-submit-report-btn')),
               )
               .onPressed,
-          isNotNull,
+          isNull,
         );
       },
     );
 
     testWidgets(
-      'Dual Master Incident Check still detects neighbor Master Incident #SC-20519 when pin is placed 180 m away from photo capture location',
+      'Step 3 150 m Multi-Incident Picker lists multiple similar reports, supports in-place preview, joins chosen 2nd Master Incident, and supports 1-tap New Separate Report',
       (tester) async {
+        final handle = tester.ensureSemantics();
+        const origin = LatLng(11.5318, 104.9044);
+        final base = ReportRepository().findById('#SC-20519')!;
+        final match1 = base.copyWith(
+          coordinates: const LatLng(11.5322, 104.9044), // ~45 m
+          englishTitle: 'First Pothole Nearby',
+        );
+        final match2 = CivicReport.fromJson({
+          ...base.toJson(),
+          'id': '#SC-29950',
+          'englishTitle': 'Second Pothole Across Block',
+          'lat': 11.5318,
+          'lng': 104.9055, // ~120 m
+          'isMine': false,
+          'createdByCurrentUser': false,
+          'joinedByCurrentUser': false,
+        });
+
         final repo = ReportRepository(
           initialSettings: const AppSettings(englishFirst: true),
+          initialReports: [match2, match1],
         );
-        final master = repo.findById('#SC-20519')!;
-        final draggedPin = LatLng(
-          master.coordinates.latitude + 0.0014,
-          master.coordinates.longitude + 0.0010,
-        );
+        final beforeMatch2Count = repo.findById('#SC-29950')!.affectedCitizens;
 
         await tester.pumpWidget(
           _wrapWithScope(
             repo,
             ReportWizardPage(
-              initialCategory: master.category,
-              initialCoordinates: draggedPin,
+              initialCategory: IssueCategory.pothole,
+              initialCoordinates: origin,
               initialPhotoPaths: const [_testPhotoDataUri],
-              initialPhotoExif: PhotoExifMetadata(
-                coordinates: master.coordinates,
-                capturedAt: DateTime.now().subtract(const Duration(minutes: 2)),
-              ),
-              locationService: _FakeLocationService(
+              locationService: const _FakeLocationService(
                 LocationSuccess(
-                  point: master.coordinates,
+                  point: origin,
                   accuracyMeters: 10,
                   isOutsideCambodia: false,
                 ),
@@ -2232,17 +2294,96 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 350));
 
+        // Both matches within 150 m AND "+ Submit as a new separate report" appear
+        expect(find.byKey(const Key('step3-similar-picker')), findsOneWidget);
         expect(
-          find.textContaining('from where this photo was taken'),
+          find.byKey(const Key('similar-match-#SC-20519')),
           findsOneWidget,
         );
-        expect(find.text(master.id), findsOneWidget);
-        expect(find.byKey(const Key('step3-join-report-btn')), findsOneWidget);
+        expect(
+          find.byKey(const Key('similar-match-#SC-29950')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('step3-option-create-new')),
+          findsOneWidget,
+        );
+
+        // Pass WCAG 2.1 AA on the new Step 3 picker
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+        // Open in-place quick preview of 2nd match & tap "Select #SC-29950"
+        final previewBtn = find.byKey(const Key('preview-match-#SC-29950'));
+        await tester.ensureVisible(previewBtn);
+        await tester.tap(previewBtn);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('similar-report-preview-sheet')),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const Key('preview-select-match-btn')));
+        await tester.pumpAndSettle();
+
+        // Primary CTA now targets #SC-29950 specifically -> Join merges into #SC-29950
+        expect(find.textContaining('Join #SC-29950'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('step3-join-report-btn')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+        expect(
+          repo.findById('#SC-29950')!.affectedCitizens,
+          equals(beforeMatch2Count + 1),
+        );
+
+        // Fresh wizard at same origin -> pick "+ Submit as a new separate report here"
+        final beforeTotal = repo.reports.length;
+        await tester.pumpWidget(
+          ReportScope(
+            key: const ValueKey('wizard-create-new-in-150m'),
+            repository: repo,
+            child: MaterialApp(
+              theme: buildSrolanhCityTheme(),
+              home: ReportWizardPage(
+                initialCategory: IssueCategory.pothole,
+                initialCoordinates: origin,
+                initialPhotoPaths: const [_testPhotoDataUri],
+                locationService: const _FakeLocationService(
+                  LocationSuccess(
+                    point: origin,
+                    accuracyMeters: 10,
+                    isOutsideCambodia: false,
+                  ),
+                ),
+                voiceInputService: _UnavailableTestVoiceService(),
+                civicAiService: _UnconfiguredTestAiService(),
+                ipGeolocationService: const _TestIpGeoService(null),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Next'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.textContaining('Confirm location'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        final newOpt = find.byKey(const Key('step3-option-create-new'));
+        await tester.ensureVisible(newOpt);
+        await tester.tap(newOpt);
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('step3-submit-new-report-btn')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(repo.reports.length, equals(beforeTotal + 1));
+        expect(repo.reports.first.category, equals(IssueCategory.pothole));
+        handle.dispose();
       },
     );
 
     testWidgets(
-      'Live camera anchor hard-blocks pins > 250 m away, passes WCAG 2.1 AA, and unblocks on Snap to photo location',
+      'Live camera anchor hard-blocks pins > 150 m away, passes WCAG 2.1 AA, and unblocks on Return to 150 m zone',
       (tester) async {
         final handle = tester.ensureSemantics();
         final repo = ReportRepository(
@@ -2285,7 +2426,11 @@ void main() {
         await tester.pump(const Duration(milliseconds: 350));
 
         expect(
-          find.byKey(const Key('step3-photo-anchor-blocker')),
+          find.byKey(const Key('step3-out-of-zone-blocker')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('step3-floating-return-zone-btn')),
           findsOneWidget,
         );
         expect(
@@ -2301,7 +2446,7 @@ void main() {
         await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
         await expectLater(tester, meetsGuideline(textContrastGuideline));
 
-        await tester.tap(find.byKey(const Key('step3-use-photo-gps-btn')));
+        await tester.tap(find.byKey(const Key('step3-return-to-zone-btn')));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 350));
 
@@ -2315,96 +2460,6 @@ void main() {
           isNotNull,
         );
         handle.dispose();
-      },
-    );
-
-    testWidgets(
-      'Gallery photo without EXIF stays allowed under Rule #1 and surfaces municipal review badges on Step 3, TrackingPage, and StaffConsolePage',
-      (tester) async {
-        const tinyPngDataUri =
-            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
-        const spot = LatLng(11.5318, 104.9044);
-        final repo = ReportRepository(
-          initialSettings: const AppSettings(englishFirst: true),
-        );
-
-        await tester.pumpWidget(
-          _wrapWithScope(
-            repo,
-            ReportWizardPage(
-              initialCoordinates: spot,
-              initialDraft: const ReportDraft(
-                category: IssueCategory.pothole,
-                severity: 4,
-                description: 'Forwarded gallery photo of road crater',
-                isAnonymous: false,
-                localPhotoPaths: [tinyPngDataUri],
-              ),
-              locationService: const _FakeLocationService(
-                LocationSuccess(
-                  point: spot,
-                  accuracyMeters: 10,
-                  isOutsideCambodia: false,
-                ),
-              ),
-              voiceInputService: _UnavailableTestVoiceService(),
-              civicAiService: _UnconfiguredTestAiService(),
-              ipGeolocationService: const _TestIpGeoService(null),
-            ),
-          ),
-        );
-
-        // Draft starts on Step 2 -> advance directly to Step 3
-        await tester.tap(find.textContaining('Confirm location'));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 350));
-
-        expect(
-          find.byKey(const Key('step3-unverified-photo-pill')),
-          findsOneWidget,
-        );
-        await tester.tap(find.byKey(const Key('step3-submit-report-btn')));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 350));
-
-        final created = repo.reports.first;
-        expect(created.photoLocationUnverified, isTrue);
-
-        // Verify TrackingPage renders the unverified photo badge in a fresh MaterialApp
-        await tester.pumpWidget(
-          ReportScope(
-            key: const ValueKey('tracking-unverified-scope'),
-            repository: repo,
-            child: MaterialApp(
-              theme: buildSrolanhCityTheme(),
-              home: TrackingPage(reportId: created.id),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(
-          find.byKey(const Key('tracking-unverified-photo-badge')),
-          findsOneWidget,
-        );
-
-        // Verify StaffConsolePage renders "Verify photo spot" chip on split view
-        await tester.pumpWidget(
-          ReportScope(
-            key: const ValueKey('staff-unverified-scope'),
-            repository: repo,
-            child: MaterialApp(
-              theme: buildSrolanhCityTheme(),
-              home: const StaffConsolePage(),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-        await tester.enterText(find.byType(TextField).first, created.id);
-        await tester.pumpAndSettle();
-        expect(
-          find.byKey(const Key('staff-unverified-photo-chip')),
-          findsOneWidget,
-        );
       },
     );
 
@@ -2607,7 +2662,7 @@ class _WidgetFakeAudioRecorderService implements AudioRecorderService {
   Future<bool> hasPermission() async => true;
 
   @override
-  Future<bool> startRecording({bool persistentMemo = false}) async => true;
+  Future<bool> startRecording() async => true;
 
   @override
   Future<double> getNormalizedAmplitude() async => 0.6;
@@ -2620,20 +2675,6 @@ class _WidgetFakeAudioRecorderService implements AudioRecorderService {
 
   @override
   Future<void> deleteFile(String? path) async {}
-
-  @override
-  Future<void> dispose() async {}
-}
-
-class _WidgetFakeAudioPlayerService implements AudioPlayerService {
-  @override
-  bool get isPlaybackSupported => true;
-
-  @override
-  Future<bool> play(String source, {VoidCallback? onCompleted}) async => true;
-
-  @override
-  Future<void> stop() async {}
 
   @override
   Future<void> dispose() async {}

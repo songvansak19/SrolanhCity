@@ -408,7 +408,8 @@ class UserProfile {
   }
 }
 
-/// Unfinished report draft saved when exiting the Report Wizard mid-way.
+/// Unfinished report draft saved when exiting the Report Wizard mid-way or
+/// auto-saved when a photo GPS anchor locks on Step 1.
 class ReportDraft {
   const ReportDraft({
     required this.category,
@@ -417,8 +418,6 @@ class ReportDraft {
     required this.isAnonymous,
     required this.localPhotoPaths,
     this.voiceTranscript,
-    this.voiceAudioPath,
-    this.voiceAudioDurationSeconds,
     this.photoAnchorLat,
     this.photoAnchorLng,
     this.photoAnchorSource,
@@ -431,8 +430,6 @@ class ReportDraft {
   final bool isAnonymous;
   final List<String> localPhotoPaths;
   final String? voiceTranscript;
-  final String? voiceAudioPath;
-  final int? voiceAudioDurationSeconds;
   final double? photoAnchorLat;
   final double? photoAnchorLng;
   final String? photoAnchorSource;
@@ -451,9 +448,6 @@ class ReportDraft {
     'isAnonymous': isAnonymous,
     'localPhotoPaths': localPhotoPaths,
     'voiceTranscript': voiceTranscript,
-    if (voiceAudioPath != null) 'voiceAudioPath': voiceAudioPath,
-    if (voiceAudioDurationSeconds != null)
-      'voiceAudioDurationSeconds': voiceAudioDurationSeconds,
     if (photoAnchorLat != null) 'photoAnchorLat': photoAnchorLat,
     if (photoAnchorLng != null) 'photoAnchorLng': photoAnchorLng,
     if (photoAnchorSource != null) 'photoAnchorSource': photoAnchorSource,
@@ -474,9 +468,6 @@ class ReportDraft {
       isAnonymous: (json['isAnonymous'] as bool?) ?? false,
       localPhotoPaths: paths,
       voiceTranscript: json['voiceTranscript'] as String?,
-      voiceAudioPath: json['voiceAudioPath'] as String?,
-      voiceAudioDurationSeconds: (json['voiceAudioDurationSeconds'] as num?)
-          ?.toInt(),
       photoAnchorLat: (json['photoAnchorLat'] as num?)?.toDouble(),
       photoAnchorLng: (json['photoAnchorLng'] as num?)?.toDouble(),
       photoAnchorSource: json['photoAnchorSource'] as String?,
@@ -531,14 +522,23 @@ class TimelineEntry {
   }
 }
 
-/// How a citizen's "Affects me" community support was proximity-verified.
+/// How a citizen's "Affects me" community support was GPS-verified:
+/// - `<= 150 m`: [verifiedNearby] (instant on-site support)
+/// - `> 150 m`: transparent hierarchical remote support based on the highest
+///   differing administrative level ([remoteVillage], [remoteDistrict],
+///   or [remoteProvince]).
 enum SupportVerificationTier {
   verifiedNearby,
-  cityCommuter,
-  homeResident;
+  remoteVillage,
+  remoteDistrict,
+  remoteProvince;
+
+  bool get isRemote => this != SupportVerificationTier.verifiedNearby;
 
   static SupportVerificationTier? fromName(String? raw) {
     if (raw == null || raw.isEmpty) return null;
+    if (raw == 'cityCommuter') return SupportVerificationTier.remoteDistrict;
+    if (raw == 'homeResident') return SupportVerificationTier.remoteVillage;
     for (final value in SupportVerificationTier.values) {
       if (value.name == raw) return value;
     }
@@ -546,35 +546,93 @@ enum SupportVerificationTier {
   }
 
   String get khmerLabel => switch (this) {
-    SupportVerificationTier.verifiedNearby => 'ផ្ទៀងផ្ទាត់ជិតទីតាំង',
-    SupportVerificationTier.cityCommuter => 'អ្នកដំណើរក្នុងតំបន់',
-    SupportVerificationTier.homeResident => 'អ្នករស់នៅក្នុងតំបន់',
+    SupportVerificationTier.verifiedNearby => 'ផ្ទៀងផ្ទាត់នៅទីតាំង',
+    SupportVerificationTier.remoteVillage => 'គាំទ្រពីចម្ងាយ (ភូមិ/សង្កាត់)',
+    SupportVerificationTier.remoteDistrict => 'គាំទ្រពីចម្ងាយ (ខណ្ឌ/ស្រុក)',
+    SupportVerificationTier.remoteProvince => 'គាំទ្រពីចម្ងាយ (ខេត្ត/រាជធានី)',
   };
 
   String get englishLabel => switch (this) {
-    SupportVerificationTier.verifiedNearby => 'Verified nearby',
-    SupportVerificationTier.cityCommuter => 'City commuter',
-    SupportVerificationTier.homeResident => 'Home district resident',
+    SupportVerificationTier.verifiedNearby => 'Verified on-site',
+    SupportVerificationTier.remoteVillage => 'Remote support (Village/Commune)',
+    SupportVerificationTier.remoteDistrict => 'Remote support (District)',
+    SupportVerificationTier.remoteProvince => 'Remote support (Province)',
   };
+
+  /// Transparent privacy-safe badge label (e.g. `Remote support · Siem Reap`).
+  String formatTransparentTag({
+    required bool englishFirst,
+    String? areaKhmer,
+    String? areaEnglish,
+  }) {
+    if (!isRemote) {
+      return englishFirst ? englishLabel : khmerLabel;
+    }
+    final area = englishFirst
+        ? ((areaEnglish != null && areaEnglish.trim().isNotEmpty)
+              ? areaEnglish.trim()
+              : areaKhmer?.trim())
+        : ((areaKhmer != null && areaKhmer.trim().isNotEmpty)
+              ? areaKhmer.trim()
+              : areaEnglish?.trim());
+    if (area != null && area.isNotEmpty) {
+      return englishFirst ? 'Remote support · $area' : 'គាំទ្រពីចម្ងាយ · $area';
+    }
+    return englishFirst ? englishLabel : khmerLabel;
+  }
 }
 
-/// How a citizen's Step 3 report pin was verified under Rule #1 (Smart Distance
-/// Gate) and the 250 m Photo-Anchored Hard Fence.
+/// Structured citizen reason required when supporting an incident from outside
+/// the 150 m on-site zone.
+enum SupportReasonCategory {
+  dailyCommute(
+    khmerLabel: 'ធ្វើដំណើរទៅធ្វើការប្រចាំថ្ងៃ',
+    englishLabel: 'Daily commute / work',
+  ),
+  liveOrFamilyNearby(
+    khmerLabel: 'រស់នៅ ឬគ្រួសារនៅក្បែរនេះ',
+    englishLabel: 'Live or family nearby',
+  ),
+  schoolOrMarketRoute(
+    khmerLabel: 'ផ្លូវទៅសាលា ឬផ្សារ',
+    englishLabel: 'School / market route',
+  ),
+  businessOrDelivery(
+    khmerLabel: 'អាជីវកម្ម ឬដឹកជញ្ជូន',
+    englishLabel: 'Business / delivery',
+  ),
+  other(khmerLabel: 'មូលហេតុផ្សេង', englishLabel: 'Other reason');
+
+  const SupportReasonCategory({
+    required this.khmerLabel,
+    required this.englishLabel,
+  });
+
+  final String khmerLabel;
+  final String englishLabel;
+
+  bool get requiresWrittenNote => this == SupportReasonCategory.other;
+
+  static SupportReasonCategory? fromName(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    for (final value in SupportReasonCategory.values) {
+      if (value.name == raw) return value;
+    }
+    return null;
+  }
+}
+
+/// How a citizen's Step 3 report pin was verified under the strict universal
+/// 150 m GPS / EXIF anchor rule.
 enum ReportLocationVerificationTier {
-  /// Attached photo's pre-strip EXIF GPS matches the pin (`<= 250 m`, `<= 30 days`).
+  /// Attached photo's pre-strip EXIF GPS matches the pin (`<= 150 m`, `<= 30 days`).
   photoExifVerified,
 
-  /// Live in-app camera capture GPS matches the pin (`<= 250 m`).
+  /// Live in-app camera capture GPS matches the pin (`<= 150 m`).
   liveCameraVerified,
 
-  /// Live Cambodia GPS is right at the pinned incident (`<= 500 m`).
-  verifiedOnSite,
-
-  /// Live Cambodia GPS is within the same city / commuter radius (`500 m – 15 km`).
-  sameCityCommuter,
-
-  /// Pin lies inside the citizen's saved Home Province & District (`ខណ្ឌ / ក្រុង / ស្រុក`).
-  homeResident;
+  /// Live Cambodia GPS matches the pin (`<= 150 m`).
+  verifiedOnSite;
 
   static ReportLocationVerificationTier? fromName(String? raw) {
     if (raw == null || raw.isEmpty) return null;
@@ -585,9 +643,10 @@ enum ReportLocationVerificationTier {
   }
 }
 
-/// One citizen's field description or follow-up note attached to a shared
-/// Master Incident. Displayed with privacy-first badges (never exposing real
-/// names, phone numbers, or user IDs on public reports).
+/// One citizen's field description, follow-up note, or transparent remote
+/// support reason attached to a shared Master Incident. Displayed with
+/// privacy-first badges (never exposing real names, phone numbers, or exact
+/// supporter GPS coordinates on public reports).
 class CitizenComment {
   const CitizenComment({
     required this.id,
@@ -598,8 +657,10 @@ class CitizenComment {
     this.isAnonymous = false,
     this.severity,
     this.voiceTranscript,
-    this.voiceAudioPath,
-    this.voiceAudioDurationSeconds,
+    this.supportTier,
+    this.supportAreaKhmer,
+    this.supportAreaEnglish,
+    this.supportReasonCategory,
   });
 
   final String id;
@@ -610,13 +671,14 @@ class CitizenComment {
   final bool isAnonymous;
   final int? severity;
   final String? voiceTranscript;
-  final String? voiceAudioPath;
-  final int? voiceAudioDurationSeconds;
+  final SupportVerificationTier? supportTier;
+  final String? supportAreaKhmer;
+  final String? supportAreaEnglish;
+  final SupportReasonCategory? supportReasonCategory;
 
   bool get hasText => text.trim().isNotEmpty;
 
-  bool get hasVoiceAudioMemo =>
-      voiceAudioPath != null && voiceAudioPath!.isNotEmpty;
+  bool get isRemoteSupport => supportTier?.isRemote ?? false;
 
   CitizenComment copyWith({
     String? text,
@@ -626,8 +688,10 @@ class CitizenComment {
     bool? isAnonymous,
     int? severity,
     String? voiceTranscript,
-    String? voiceAudioPath,
-    int? voiceAudioDurationSeconds,
+    SupportVerificationTier? supportTier,
+    String? supportAreaKhmer,
+    String? supportAreaEnglish,
+    SupportReasonCategory? supportReasonCategory,
   }) {
     return CitizenComment(
       id: id,
@@ -638,9 +702,11 @@ class CitizenComment {
       isAnonymous: isAnonymous ?? this.isAnonymous,
       severity: severity ?? this.severity,
       voiceTranscript: voiceTranscript ?? this.voiceTranscript,
-      voiceAudioPath: voiceAudioPath ?? this.voiceAudioPath,
-      voiceAudioDurationSeconds:
-          voiceAudioDurationSeconds ?? this.voiceAudioDurationSeconds,
+      supportTier: supportTier ?? this.supportTier,
+      supportAreaKhmer: supportAreaKhmer ?? this.supportAreaKhmer,
+      supportAreaEnglish: supportAreaEnglish ?? this.supportAreaEnglish,
+      supportReasonCategory:
+          supportReasonCategory ?? this.supportReasonCategory,
     );
   }
 
@@ -653,9 +719,11 @@ class CitizenComment {
     'isAnonymous': isAnonymous,
     if (severity != null) 'severity': severity,
     if (voiceTranscript != null) 'voiceTranscript': voiceTranscript,
-    if (voiceAudioPath != null) 'voiceAudioPath': voiceAudioPath,
-    if (voiceAudioDurationSeconds != null)
-      'voiceAudioDurationSeconds': voiceAudioDurationSeconds,
+    if (supportTier != null) 'supportTier': supportTier!.name,
+    if (supportAreaKhmer != null) 'supportAreaKhmer': supportAreaKhmer,
+    if (supportAreaEnglish != null) 'supportAreaEnglish': supportAreaEnglish,
+    if (supportReasonCategory != null)
+      'supportReasonCategory': supportReasonCategory!.name,
   };
 
   factory CitizenComment.fromJson(Map<String, dynamic> json) {
@@ -670,9 +738,14 @@ class CitizenComment {
       isAnonymous: (json['isAnonymous'] as bool?) ?? false,
       severity: (json['severity'] as num?)?.toInt(),
       voiceTranscript: json['voiceTranscript'] as String?,
-      voiceAudioPath: json['voiceAudioPath'] as String?,
-      voiceAudioDurationSeconds: (json['voiceAudioDurationSeconds'] as num?)
-          ?.toInt(),
+      supportTier: SupportVerificationTier.fromName(
+        json['supportTier'] as String?,
+      ),
+      supportAreaKhmer: json['supportAreaKhmer'] as String?,
+      supportAreaEnglish: json['supportAreaEnglish'] as String?,
+      supportReasonCategory: SupportReasonCategory.fromName(
+        json['supportReasonCategory'] as String?,
+      ),
     );
   }
 }
@@ -715,13 +788,13 @@ class CivicReport {
     this.joinedByCurrentUser = false,
     this.userSupportTier,
     this.userSupportDistanceMeters,
+    this.userSupportAreaKhmer,
+    this.userSupportAreaEnglish,
+    this.userSupportReason,
     this.locationVerificationTier,
-    this.photoLocationUnverified = false,
     this.syncStatus = SyncStatus.synced,
     this.crewCode,
     this.voiceTranscript,
-    this.voiceAudioPath,
-    this.voiceAudioDurationSeconds,
     this.citizenRating,
     this.beforeDateLabel = '20 Nov',
     this.afterDateLabel = '22 Nov',
@@ -757,13 +830,13 @@ class CivicReport {
   final bool joinedByCurrentUser;
   final SupportVerificationTier? userSupportTier;
   final double? userSupportDistanceMeters;
+  final String? userSupportAreaKhmer;
+  final String? userSupportAreaEnglish;
+  final String? userSupportReason;
   final ReportLocationVerificationTier? locationVerificationTier;
-  final bool photoLocationUnverified;
   final SyncStatus syncStatus;
   final String? crewCode;
   final String? voiceTranscript;
-  final String? voiceAudioPath;
-  final int? voiceAudioDurationSeconds;
   final int? citizenRating;
   final String beforeDateLabel;
   final String afterDateLabel;
@@ -788,8 +861,6 @@ class CivicReport {
         isAnonymous: isAnonymous,
         severity: severity,
         voiceTranscript: voiceTranscript,
-        voiceAudioPath: voiceAudioPath,
-        voiceAudioDurationSeconds: voiceAudioDurationSeconds,
       ),
     ];
   }
@@ -814,10 +885,6 @@ class CivicReport {
   bool get hasPhoto =>
       (localPhotoPath != null && localPhotoPath!.isNotEmpty) ||
       (photoAssetPath != null && photoAssetPath!.isNotEmpty);
-
-  /// True when this report has an attached offline/local voice memo recording.
-  bool get hasVoiceAudioMemo =>
-      voiceAudioPath != null && voiceAudioPath!.isNotEmpty;
 
   PriorityBreakdown get priority => PriorityCalculator.calculate(
     trafficScore: roadClass.trafficScore,
@@ -886,14 +953,14 @@ class CivicReport {
     bool? joinedByCurrentUser,
     SupportVerificationTier? userSupportTier,
     double? userSupportDistanceMeters,
+    String? userSupportAreaKhmer,
+    String? userSupportAreaEnglish,
+    String? userSupportReason,
     bool clearUserSupportMeta = false,
     ReportLocationVerificationTier? locationVerificationTier,
-    bool? photoLocationUnverified,
     SyncStatus? syncStatus,
     String? crewCode,
     String? voiceTranscript,
-    String? voiceAudioPath,
-    int? voiceAudioDurationSeconds,
     int? citizenRating,
     String? beforeDateLabel,
     String? afterDateLabel,
@@ -938,16 +1005,20 @@ class CivicReport {
       userSupportDistanceMeters: clearUserSupportMeta
           ? null
           : (userSupportDistanceMeters ?? this.userSupportDistanceMeters),
+      userSupportAreaKhmer: clearUserSupportMeta
+          ? null
+          : (userSupportAreaKhmer ?? this.userSupportAreaKhmer),
+      userSupportAreaEnglish: clearUserSupportMeta
+          ? null
+          : (userSupportAreaEnglish ?? this.userSupportAreaEnglish),
+      userSupportReason: clearUserSupportMeta
+          ? null
+          : (userSupportReason ?? this.userSupportReason),
       locationVerificationTier:
           locationVerificationTier ?? this.locationVerificationTier,
-      photoLocationUnverified:
-          photoLocationUnverified ?? this.photoLocationUnverified,
       syncStatus: syncStatus ?? this.syncStatus,
       crewCode: crewCode ?? this.crewCode,
       voiceTranscript: voiceTranscript ?? this.voiceTranscript,
-      voiceAudioPath: voiceAudioPath ?? this.voiceAudioPath,
-      voiceAudioDurationSeconds:
-          voiceAudioDurationSeconds ?? this.voiceAudioDurationSeconds,
       citizenRating: citizenRating ?? this.citizenRating,
       beforeDateLabel: beforeDateLabel ?? this.beforeDateLabel,
       afterDateLabel: afterDateLabel ?? this.afterDateLabel,
@@ -989,16 +1060,16 @@ class CivicReport {
     'joinedByCurrentUser': joinedByCurrentUser,
     'userSupportTier': userSupportTier?.name,
     'userSupportDistanceMeters': userSupportDistanceMeters,
+    if (userSupportAreaKhmer != null)
+      'userSupportAreaKhmer': userSupportAreaKhmer,
+    if (userSupportAreaEnglish != null)
+      'userSupportAreaEnglish': userSupportAreaEnglish,
+    if (userSupportReason != null) 'userSupportReason': userSupportReason,
     if (locationVerificationTier != null)
       'locationVerificationTier': locationVerificationTier!.name,
-    if (photoLocationUnverified)
-      'photoLocationUnverified': photoLocationUnverified,
     'syncStatus': syncStatus.name,
     'crewCode': crewCode,
     'voiceTranscript': voiceTranscript,
-    if (voiceAudioPath != null) 'voiceAudioPath': voiceAudioPath,
-    if (voiceAudioDurationSeconds != null)
-      'voiceAudioDurationSeconds': voiceAudioDurationSeconds,
     'citizenRating': citizenRating,
     'beforeDateLabel': beforeDateLabel,
     'afterDateLabel': afterDateLabel,
@@ -1078,17 +1149,15 @@ class CivicReport {
       ),
       userSupportDistanceMeters: (json['userSupportDistanceMeters'] as num?)
           ?.toDouble(),
+      userSupportAreaKhmer: json['userSupportAreaKhmer'] as String?,
+      userSupportAreaEnglish: json['userSupportAreaEnglish'] as String?,
+      userSupportReason: json['userSupportReason'] as String?,
       locationVerificationTier: ReportLocationVerificationTier.fromName(
         json['locationVerificationTier'] as String?,
       ),
-      photoLocationUnverified:
-          (json['photoLocationUnverified'] as bool?) ?? false,
       syncStatus: SyncStatus.fromName(json['syncStatus'] as String?),
       crewCode: json['crewCode'] as String?,
       voiceTranscript: json['voiceTranscript'] as String?,
-      voiceAudioPath: json['voiceAudioPath'] as String?,
-      voiceAudioDurationSeconds: (json['voiceAudioDurationSeconds'] as num?)
-          ?.toInt(),
       citizenRating: (json['citizenRating'] as num?)?.toInt(),
       beforeDateLabel: (json['beforeDateLabel'] as String?) ?? '20 Nov',
       afterDateLabel: (json['afterDateLabel'] as String?) ?? '22 Nov',

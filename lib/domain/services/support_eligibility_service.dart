@@ -1,6 +1,8 @@
 import '../../data/services/location_service.dart';
+import '../../data/services/reverse_geocoding_service.dart';
 import '../models/cambodia_locations.dart';
 import '../models/report_models.dart';
+import 'gis_routing_service.dart';
 import 'spatial_clustering_service.dart';
 
 /// Typed decision returned by [SupportEligibilityService] when a citizen taps
@@ -9,11 +11,33 @@ sealed class SupportEligibilityResult {
   const SupportEligibilityResult();
 }
 
+/// Immediate 1-tap support when the citizen's live Cambodia GPS is within
+/// `<= 150 m` of the incident.
 final class SupportEligible extends SupportEligibilityResult {
   const SupportEligible({required this.tier, this.distanceMeters});
 
   final SupportVerificationTier tier;
   final double? distanceMeters;
+}
+
+/// GPS confirms the citizen is in Cambodia, but outside the `150 m` on-site
+/// radius. Strictly requires a reason ("Why does this affect you?") and tags
+/// the support transparently with the highest differing administrative level
+/// (Province, District/Khan, or Village/Sangkat).
+final class SupportRequiresRemoteReason extends SupportEligibilityResult {
+  const SupportRequiresRemoteReason({
+    required this.tier,
+    required this.distanceMeters,
+    required this.userAreaKhmer,
+    required this.userAreaEnglish,
+    required this.requiresDetailedNote,
+  });
+
+  final SupportVerificationTier tier;
+  final double distanceMeters;
+  final String userAreaKhmer;
+  final String userAreaEnglish;
+  final bool requiresDetailedNote;
 }
 
 final class SupportDeniedAlreadyContributed extends SupportEligibilityResult {
@@ -25,23 +49,17 @@ final class SupportDeniedResolved extends SupportEligibilityResult {
 }
 
 final class SupportDeniedDailyLimit extends SupportEligibilityResult {
-  const SupportDeniedDailyLimit({required this.limit});
+  const SupportDeniedDailyLimit({
+    required this.limit,
+    this.isRemoteProvinceLimit = false,
+  });
 
   final int limit;
+  final bool isRemoteProvinceLimit;
 }
 
 final class SupportDeniedMockGps extends SupportEligibilityResult {
   const SupportDeniedMockGps();
-}
-
-final class SupportDeniedTooFar extends SupportEligibilityResult {
-  const SupportDeniedTooFar({
-    required this.distanceMeters,
-    required this.maxMeters,
-  });
-
-  final double distanceMeters;
-  final double maxMeters;
 }
 
 final class SupportDeniedLocationRequired extends SupportEligibilityResult {
@@ -56,20 +74,25 @@ final class SupportDeniedLocationRequired extends SupportEligibilityResult {
   final bool outsideCambodia;
 }
 
-/// Pure distance & anti-abuse eligibility evaluator for "Affects me" voting:
-/// - `<= 500 m` -> [SupportVerificationTier.verifiedNearby]
-/// - `500 m – 15 km` -> [SupportVerificationTier.cityCommuter]
-/// - `> 15 km` -> denied unless inside the citizen's saved Home Khan
-/// - GPS off/denied/unavailable -> allowed ONLY if inside saved Home Khan
-/// - Mock/Fake GPS -> ALWAYS denied (never bypassed by Home Khan)
-/// - Daily cap -> max 10 supports per 24 hours
+/// Strict GPS-verified distance & transparent remote support evaluator:
+/// - Mock / Fake GPS -> ALWAYS denied.
+/// - GPS off / denied / unavailable / outside Cambodia -> ALWAYS denied
+///   (strict Option A — zero Home District bypass without live GPS).
+/// - `<= 150 m` -> instant [SupportEligible] (`Verified on-site`).
+/// - `> 150 m` -> [SupportRequiresRemoteReason] with transparent hierarchical
+///   area label:
+///   1. Different Province -> `Remote support · <Province>` (+ mandatory note,
+///      capped at `3/24h` to prevent cross-province brigading)
+///   2. Same Province, Different District/Khan -> `Remote support · <District>`
+///   3. Same District -> `Remote support · <Village / Sangkat>`
+/// - Daily total cap -> max `10` supports per 24 hours.
 abstract final class SupportEligibilityService {
-  static const double verifiedNearbyMeters = 500.0;
-  static const double maxCommuterDistanceMeters = 15000.0;
+  static const double verifiedNearbyMeters = 150.0;
   static const int maxSupportsPer24Hours = 10;
+  static const int maxRemoteProvinceSupportsPer24Hours = 3;
 
   /// Checks whether [report] lies inside the citizen's saved Home Province &
-  /// District (`ខណ្ឌ / ក្រុង / ស្រុក`) across all 25 provinces of Cambodia.
+  /// District (`ខណ្ឌ / ក្រុង / ស្រុក`) — kept for Home Area News features.
   static bool isInUserHomeArea({
     required CivicReport report,
     required UserProfile profile,
@@ -89,12 +112,6 @@ abstract final class SupportEligibilityService {
     );
   }
 
-  /// Backward-compatible alias for [isInUserHomeArea].
-  static bool isInUserHomeKhan({
-    required CivicReport report,
-    required UserProfile profile,
-  }) => isInUserHomeArea(report: report, profile: profile);
-
   /// Fast synchronous pre-check run before invoking platform GPS hardware.
   static SupportEligibilityResult? evaluatePreCheck({
     required CivicReport report,
@@ -112,12 +129,14 @@ abstract final class SupportEligibilityService {
     return null;
   }
 
-  /// Evaluates proximity & anti-abuse rules once [locationResult] is acquired.
+  /// Evaluates strict GPS proximity & hierarchical remote support rules once
+  /// [locationResult] is acquired.
   static SupportEligibilityResult evaluateWithLocation({
     required CivicReport report,
-    required UserProfile profile,
     required LocationFetchResult locationResult,
     required int supportsInLast24Hours,
+    int remoteProvinceSupportsInLast24Hours = 0,
+    GeocodedPlace? userGeocodedPlace,
   }) {
     final pre = evaluatePreCheck(
       report: report,
@@ -125,61 +144,122 @@ abstract final class SupportEligibilityService {
     );
     if (pre != null) return pre;
 
-    // Never allow Fake/Mock GPS to bypass via Home Khan.
+    // 1. Mock / Fake GPS is NEVER allowed.
     if (locationResult is LocationMockDetected) {
       return const SupportDeniedMockGps();
     }
 
-    final inHomeKhan = isInUserHomeKhan(report: report, profile: profile);
+    // 2. Live Cambodia GPS is strictly required (no Home District fallback).
+    if (locationResult is! LocationSuccess ||
+        locationResult.isOutsideCambodia) {
+      return switch (locationResult) {
+        LocationServiceDisabled() => const SupportDeniedLocationRequired(
+          serviceDisabled: true,
+        ),
+        LocationPermissionDenied() => const SupportDeniedLocationRequired(
+          permissionDenied: true,
+        ),
+        LocationSuccess(isOutsideCambodia: true) =>
+          const SupportDeniedLocationRequired(outsideCambodia: true),
+        _ => const SupportDeniedLocationRequired(),
+      };
+    }
 
-    if (locationResult is LocationSuccess &&
-        !locationResult.isOutsideCambodia) {
-      final meters = SpatialClusteringService.distanceMeters(
-        locationResult.point,
-        report.coordinates,
-      );
-      if (meters <= verifiedNearbyMeters) {
-        return SupportEligible(
-          tier: SupportVerificationTier.verifiedNearby,
-          distanceMeters: meters,
-        );
-      }
-      if (meters <= maxCommuterDistanceMeters) {
-        return SupportEligible(
-          tier: SupportVerificationTier.cityCommuter,
-          distanceMeters: meters,
-        );
-      }
-      if (inHomeKhan) {
-        return SupportEligible(
-          tier: SupportVerificationTier.homeResident,
-          distanceMeters: meters,
-        );
-      }
-      return SupportDeniedTooFar(
+    // 3. Measure distance from live GPS to the incident.
+    final userPoint = locationResult.point;
+    final meters = SpatialClusteringService.distanceMeters(
+      userPoint,
+      report.coordinates,
+    );
+
+    if (meters <= verifiedNearbyMeters) {
+      return SupportEligible(
+        tier: SupportVerificationTier.verifiedNearby,
         distanceMeters: meters,
-        maxMeters: maxCommuterDistanceMeters,
       );
     }
 
-    // GPS unavailable, disabled, denied, or emulator default outside Cambodia:
-    // allow strictly for reports inside the user's saved Home Khan.
-    if (inHomeKhan) {
-      return const SupportEligible(tier: SupportVerificationTier.homeResident);
+    // 4. Outside 150 m -> determine highest differing administrative level.
+    final userGis = GisRoutingService.resolve(
+      coordinates: userPoint,
+      category: report.category,
+      geocodedPlace: userGeocodedPlace,
+    );
+    final reportGis = GisRoutingService.resolve(
+      coordinates: report.coordinates,
+      category: report.category,
+    );
+
+    final reportProvinceCode = report.provinceCode.isNotEmpty
+        ? report.provinceCode
+        : reportGis.provinceCode;
+
+    // 4a. Different Province -> display Province (requires written note + 3/24h cap).
+    if (userGis.provinceCode != reportProvinceCode) {
+      if (remoteProvinceSupportsInLast24Hours >=
+          maxRemoteProvinceSupportsPer24Hours) {
+        return const SupportDeniedDailyLimit(
+          limit: maxRemoteProvinceSupportsPer24Hours,
+          isRemoteProvinceLimit: true,
+        );
+      }
+      return SupportRequiresRemoteReason(
+        tier: SupportVerificationTier.remoteProvince,
+        distanceMeters: meters,
+        userAreaKhmer: userGis.khmerProvince,
+        userAreaEnglish: userGis.englishProvince,
+        requiresDetailedNote: true,
+      );
     }
 
-    return switch (locationResult) {
-      LocationServiceDisabled() => const SupportDeniedLocationRequired(
-        serviceDisabled: true,
-      ),
-      LocationPermissionDenied() => const SupportDeniedLocationRequired(
-        permissionDenied: true,
-      ),
-      LocationSuccess(isOutsideCambodia: true) =>
-        const SupportDeniedLocationRequired(outsideCambodia: true),
-      _ => const SupportDeniedLocationRequired(),
-    };
+    // 4b. Same Province, Different District / Khan -> display District / Khan.
+    final matchedReportArea = CambodiaLocationCatalog.matchFromProfileArea(
+      khmerArea: report.khmerLocation,
+      englishArea: report.englishLocation,
+      provinceCode: reportProvinceCode,
+    );
+    final reportKhanEnglish =
+        matchedReportArea.khan?.english ?? reportGis.englishKhan;
+    final userDistrictKey = _normalizeAdmin(userGis.englishKhan);
+    final reportDistrictKey = _normalizeAdmin(reportKhanEnglish);
+    if (userDistrictKey.isNotEmpty &&
+        reportDistrictKey.isNotEmpty &&
+        userDistrictKey != reportDistrictKey) {
+      return SupportRequiresRemoteReason(
+        tier: SupportVerificationTier.remoteDistrict,
+        distanceMeters: meters,
+        userAreaKhmer: userGis.khmerKhan,
+        userAreaEnglish: userGis.englishKhan,
+        requiresDetailedNote: false,
+      );
+    }
+
+    // 4c. Same District -> display Village (if geocoded) or Sangkat / Commune.
+    final villageName = userGeocodedPlace?.village?.trim();
+    final hasVillage = villageName != null && villageName.isNotEmpty;
+    final areaEn = hasVillage ? villageName : userGis.englishSangkat;
+    final areaKh = hasVillage
+        ? (_containsKhmer(villageName) ? villageName : userGis.khmerSangkat)
+        : userGis.khmerSangkat;
+
+    return SupportRequiresRemoteReason(
+      tier: SupportVerificationTier.remoteVillage,
+      distanceMeters: meters,
+      userAreaKhmer: areaKh,
+      userAreaEnglish: areaEn,
+      requiresDetailedNote: false,
+    );
   }
+
+  static String _normalizeAdmin(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'\b(khan|krong|srok|district|municipality)\b'), '')
+        .replaceAll(RegExp(r'[^a-z0-9\u1780-\u17FF]+'), '');
+  }
+
+  static bool _containsKhmer(String value) =>
+      RegExp(r'[\u1780-\u17FF]').hasMatch(value);
 
   /// Formats [meters] cleanly in Khmer or English (`180 ម៉ែត្រ` / `3.4 គ.ម`).
   static String formatDistance(double meters, {required bool englishFirst}) {

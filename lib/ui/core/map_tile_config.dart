@@ -52,7 +52,7 @@ abstract final class MapTileConfig {
   }
 
   /// Compact, high-contrast OpenStreetMap attribution badge.
-  static Widget buildAttributionBadge() {
+  static Widget buildAttributionBadge({double bottomPadding = 6}) {
     return IgnorePointer(
       child: Align(
         alignment: Alignment.bottomRight,
@@ -60,7 +60,7 @@ abstract final class MapTileConfig {
           top: false,
           left: false,
           child: Padding(
-            padding: const EdgeInsets.only(right: 8, bottom: 6),
+            padding: EdgeInsets.only(right: 8, bottom: bottomPadding),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.92),

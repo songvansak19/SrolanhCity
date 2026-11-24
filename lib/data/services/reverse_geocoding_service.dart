@@ -13,12 +13,14 @@ class GeocodedPlace {
     required this.displayName,
     required this.countryCode,
     this.province,
+    this.village,
   });
 
   final String? roadName;
   final String? sangkat;
   final String? khan;
   final String? province;
+  final String? village;
   final String displayName;
   final String? countryCode;
 }
@@ -116,6 +118,7 @@ class ReverseGeocodingService {
           'city',
         ]),
         province: pickFirst(['state', 'province', 'region', 'city']),
+        village: pickFirst(['village', 'hamlet', 'neighbourhood', 'quarter']),
         displayName: (decoded['display_name'] as String?) ?? '',
         countryCode: (addrMap['country_code'] as String?)?.toLowerCase(),
       );
