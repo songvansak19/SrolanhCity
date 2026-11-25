@@ -308,6 +308,23 @@ class UserProfile {
   final String? homeProvinceCode;
   final String? avatarPhotoPath;
 
+  /// Returns `true` when [value] is null, blank, or the default Guest label.
+  static bool isDefaultOrEmptyName(String? value) {
+    if (value == null) return true;
+    final normalized = value.trim().toLowerCase();
+    return normalized.isEmpty || normalized == 'guest' || normalized == 'ភ្ញៀវ';
+  }
+
+  /// Returns the citizen's customized real display name, or `null` if still
+  /// using the default `Guest` / `ភ្ញៀវ` placeholder.
+  String? realDisplayName({required bool englishFirst}) {
+    final primary = englishFirst ? englishName : khmerName;
+    if (!isDefaultOrEmptyName(primary)) return primary.trim();
+    final secondary = englishFirst ? khmerName : englishName;
+    if (!isDefaultOrEmptyName(secondary)) return secondary.trim();
+    return null;
+  }
+
   /// Whether the citizen has configured a home province or neighborhood.
   bool get hasHomeArea =>
       (homeProvinceCode != null && homeProvinceCode!.trim().isNotEmpty) ||
@@ -580,6 +597,29 @@ enum SupportVerificationTier {
     }
     return englishFirst ? englishLabel : khmerLabel;
   }
+
+  /// Concise GPS-verified tag attached silently to citizen comments
+  /// (`✓ On-site` / `✓ នៅទីតាំង` or `Remote · <Area>` / `ពីចម្ងាយ · <Area>`).
+  String formatCommentLocationTag({
+    required bool englishFirst,
+    String? areaKhmer,
+    String? areaEnglish,
+  }) {
+    if (!isRemote) {
+      return englishFirst ? '✓ On-site' : '✓ នៅទីតាំង';
+    }
+    final area = englishFirst
+        ? ((areaEnglish != null && areaEnglish.trim().isNotEmpty)
+              ? areaEnglish.trim()
+              : areaKhmer?.trim())
+        : ((areaKhmer != null && areaKhmer.trim().isNotEmpty)
+              ? areaKhmer.trim()
+              : areaEnglish?.trim());
+    if (area != null && area.isNotEmpty) {
+      return englishFirst ? 'Remote · $area' : 'ពីចម្ងាយ · $area';
+    }
+    return englishFirst ? 'Remote' : 'ពីចម្ងាយ';
+  }
 }
 
 /// Structured citizen reason required when supporting an incident from outside
@@ -655,6 +695,7 @@ class CitizenComment {
     this.isOriginalReporter = false,
     this.isCurrentUser = false,
     this.isAnonymous = false,
+    this.authorName,
     this.severity,
     this.voiceTranscript,
     this.supportTier,
@@ -669,6 +710,7 @@ class CitizenComment {
   final bool isOriginalReporter;
   final bool isCurrentUser;
   final bool isAnonymous;
+  final String? authorName;
   final int? severity;
   final String? voiceTranscript;
   final SupportVerificationTier? supportTier;
@@ -686,6 +728,7 @@ class CitizenComment {
     bool? isOriginalReporter,
     bool? isCurrentUser,
     bool? isAnonymous,
+    String? authorName,
     int? severity,
     String? voiceTranscript,
     SupportVerificationTier? supportTier,
@@ -700,6 +743,7 @@ class CitizenComment {
       isOriginalReporter: isOriginalReporter ?? this.isOriginalReporter,
       isCurrentUser: isCurrentUser ?? this.isCurrentUser,
       isAnonymous: isAnonymous ?? this.isAnonymous,
+      authorName: authorName ?? this.authorName,
       severity: severity ?? this.severity,
       voiceTranscript: voiceTranscript ?? this.voiceTranscript,
       supportTier: supportTier ?? this.supportTier,
@@ -717,6 +761,8 @@ class CitizenComment {
     'isOriginalReporter': isOriginalReporter,
     'isCurrentUser': isCurrentUser,
     'isAnonymous': isAnonymous,
+    if (authorName != null && authorName!.trim().isNotEmpty)
+      'authorName': authorName!.trim(),
     if (severity != null) 'severity': severity,
     if (voiceTranscript != null) 'voiceTranscript': voiceTranscript,
     if (supportTier != null) 'supportTier': supportTier!.name,
@@ -727,6 +773,7 @@ class CitizenComment {
   };
 
   factory CitizenComment.fromJson(Map<String, dynamic> json) {
+    final rawAuthor = (json['authorName'] as String?)?.trim();
     return CitizenComment(
       id: (json['id'] as String?) ?? 'c-legacy',
       text: (json['text'] as String?) ?? '',
@@ -736,6 +783,9 @@ class CitizenComment {
       isOriginalReporter: (json['isOriginalReporter'] as bool?) ?? false,
       isCurrentUser: (json['isCurrentUser'] as bool?) ?? false,
       isAnonymous: (json['isAnonymous'] as bool?) ?? false,
+      authorName: (rawAuthor != null && rawAuthor.isNotEmpty)
+          ? rawAuthor
+          : null,
       severity: (json['severity'] as num?)?.toInt(),
       voiceTranscript: json['voiceTranscript'] as String?,
       supportTier: SupportVerificationTier.fromName(

@@ -333,24 +333,61 @@ void main() {
       expect(duplicate, isNull);
     });
 
-    test('dispatches crew, resolves with proof, and fires alerts', () {
+    test('dispatches crew, resolves with proof, and fires alerts only when contributed by current user', () {
       final repo = ReportRepository();
       final initialAlerts = repo.alerts.length;
 
-      final dispatched = repo.approveAndDispatch('#SC-20519', crewCode: 'B-07');
-      expect(dispatched?.status, equals(ReportStatus.crewDispatched));
-      expect(repo.alerts.length, equals(initialAlerts + 1));
+      // #SC-20519 is not owned/supported by the current user -> no alerts fired.
+      final unrelated = repo.findById('#SC-20519')!;
+      expect(unrelated.isContributedByCurrentUser, isFalse);
 
-      final resolved = repo.markResolvedWithProof('#SC-20519');
-      expect(resolved?.status, equals(ReportStatus.resolved));
+      final dispatchedUnrelated = repo.approveAndDispatch(
+        '#SC-20519',
+        crewCode: 'B-07',
+      );
+      expect(dispatchedUnrelated?.status, equals(ReportStatus.crewDispatched));
+      expect(repo.alerts.length, equals(initialAlerts));
+
+      final resolvedUnrelated = repo.markResolvedWithProof('#SC-20519');
+      expect(resolvedUnrelated?.status, equals(ReportStatus.resolved));
       expect(
-        resolved?.resolvedAfterAssetPath,
+        resolvedUnrelated?.resolvedAfterAssetPath,
         equals('assets/pothole-after.jpg'),
       );
-      expect(repo.alerts.length, equals(initialAlerts + 2));
+      expect(repo.alerts.length, equals(initialAlerts));
 
       final rated = repo.rateResolvedReport('#SC-20519', 5);
       expect(rated?.citizenRating, equals(5));
+
+      // Supporting/contributing to #SC-20524 enables targeted notifications with location.
+      final supported = repo.supportReport(
+        '#SC-20524',
+        tier: SupportVerificationTier.verifiedNearby,
+        distanceMeters: 45,
+      )!;
+      expect(supported.isContributedByCurrentUser, isTrue);
+
+      repo.approveAndDispatch('#SC-20524', crewCode: 'C-02');
+      expect(repo.alerts.length, equals(initialAlerts + 1));
+      expect(
+        repo.alerts.first.englishSubtitle,
+        contains(supported.englishLocation),
+      );
+      expect(
+        repo.alerts.first.khmerSubtitle,
+        contains(supported.khmerLocation),
+      );
+
+      repo.markResolvedWithProof('#SC-20524');
+      expect(repo.alerts.length, equals(initialAlerts + 2));
+      expect(
+        repo.alerts.first.englishSubtitle,
+        contains(supported.englishLocation),
+      );
+      expect(
+        repo.alerts.first.khmerSubtitle,
+        contains(supported.khmerLocation),
+      );
     });
   });
 
@@ -1269,8 +1306,19 @@ void main() {
           'kampot',
         ]),
       );
-      expect(byCode['phnom_penh']!.count, equals(13));
+      expect(byCode['phnom_penh']!.count, equals(12));
       expect(byCode['siem_reap']!.count, equals(2));
+
+      // Opt-in includeResolved: true includes resolved #SC-20290 in Phnom Penh (13)
+      final withResolvedClusters = MapClusterService.clusterForZoom(
+        reports: repo.reports,
+        zoom: 7.6,
+        includeResolved: true,
+      );
+      final ppWithResolved = withResolvedClusters
+          .whereType<ProvinceClusterItem>()
+          .firstWhere((item) => item.province.code == 'phnom_penh');
+      expect(ppWithResolved.count, equals(13));
 
       // Mid-zoom over Phnom Penh -> produces spatial AreaClusterItem bubbles
       final ppBounds = LatLngBounds(
@@ -1284,15 +1332,21 @@ void main() {
       );
       expect(areaItems.any((item) => item is AreaClusterItem), isTrue);
 
-      // Street zoom -> individual SingleReportPinItem pins only
+      // Street zoom -> individual SingleReportPinItem pins only (excluding resolved #SC-20290)
       final streetItems = MapClusterService.clusterForZoom(
         reports: repo.reports,
         zoom: 15.0,
         visibleBounds: ppBounds,
       );
       expect(streetItems.every((item) => item is SingleReportPinItem), isTrue);
+      expect(
+        streetItems.whereType<SingleReportPinItem>().any(
+          (item) => item.report.id == '#SC-20290',
+        ),
+        isFalse,
+      );
 
-      // Viewport filter centered on Phnom Penh excludes Siem Reap (#SC-20531)
+      // Viewport filter centered on Phnom Penh excludes Siem Reap (#SC-20531) and resolved #SC-20290
       final ppViewport = MapClusterService.reportsInViewport(
         reports: repo.reports,
         bounds: ppBounds,
@@ -1300,6 +1354,7 @@ void main() {
       );
       expect(ppViewport.any((r) => r.id == '#SC-20481'), isTrue);
       expect(ppViewport.any((r) => r.id == '#SC-20531'), isFalse);
+      expect(ppViewport.any((r) => r.id == '#SC-20290'), isFalse);
 
       // Backend viewport query helper
       final query = repo.buildMapViewportQuery(
@@ -2571,6 +2626,321 @@ void main() {
       expect(vm.hardSelfBlockedMatch?.masterReport.id, equals('#SC-20540'));
       expect(vm.selectedMasterMatch?.masterReport.id, equals('#SC-20540'));
       vm.dispose();
+    });
+  });
+
+  group('R1–R4 Comment GPS Tags, Real Author Names & Deletable Alerts', () {
+    test('R1: SupportEligibilityService.evaluateCommentLocation validates Cambodia GPS and resolves 3-level remote hierarchy without ownership/cap blocks', () {
+      final repo = ReportRepository();
+      // Even an already-supported report can be commented on.
+      final supported = repo.supportReport(
+        '#SC-20519',
+        tier: SupportVerificationTier.verifiedNearby,
+        distanceMeters: 25,
+      )!;
+      expect(supported.isContributedByCurrentUser, isTrue);
+
+      // Mock GPS -> denied
+      final mockDecision = SupportEligibilityService.evaluateCommentLocation(
+        report: supported,
+        locationResult: LocationMockDetected(
+          point: supported.coordinates,
+          detectedLabel: 'Fake GPS JoyStick',
+        ),
+      );
+      expect(mockDecision, isA<CommentLocationMockGps>());
+
+      // GPS off -> denied
+      final disabledDecision =
+          SupportEligibilityService.evaluateCommentLocation(
+            report: supported,
+            locationResult: const LocationServiceDisabled(),
+          );
+      expect(
+        disabledDecision,
+        isA<CommentLocationDenied>().having(
+          (d) => d.serviceDisabled,
+          'serviceDisabled',
+          isTrue,
+        ),
+      );
+
+      // Outside Cambodia -> denied
+      final outsideDecision = SupportEligibilityService.evaluateCommentLocation(
+        report: supported,
+        locationResult: const LocationSuccess(
+          point: LatLng(37.422, -122.084),
+          accuracyMeters: 15,
+          isOutsideCambodia: true,
+        ),
+      );
+      expect(
+        outsideDecision,
+        isA<CommentLocationDenied>().having(
+          (d) => d.outsideCambodia,
+          'outsideCambodia',
+          isTrue,
+        ),
+      );
+
+      // <= 150 m -> verifiedNearby (`✓ On-site`)
+      final onsiteDecision = SupportEligibilityService.evaluateCommentLocation(
+        report: supported,
+        locationResult: LocationSuccess(
+          point: LatLng(
+            supported.coordinates.latitude + 0.0005,
+            supported.coordinates.longitude,
+          ),
+          accuracyMeters: 8,
+          isOutsideCambodia: false,
+        ),
+      );
+      expect(
+        onsiteDecision,
+        isA<CommentLocationVerified>().having(
+          (r) => r.tier,
+          'tier',
+          SupportVerificationTier.verifiedNearby,
+        ),
+      );
+      expect(
+        SupportVerificationTier.verifiedNearby.formatCommentLocationTag(
+          englishFirst: true,
+        ),
+        equals('✓ On-site'),
+      );
+      expect(
+        SupportVerificationTier.verifiedNearby.formatCommentLocationTag(
+          englishFirst: false,
+        ),
+        equals('✓ នៅទីតាំង'),
+      );
+
+      // Same district > 150 m with village -> remoteVillage (`Remote · <Village>`)
+      final villageDecision = SupportEligibilityService.evaluateCommentLocation(
+        report: supported,
+        locationResult: LocationSuccess(
+          point: LatLng(
+            supported.coordinates.latitude + 0.003,
+            supported.coordinates.longitude,
+          ),
+          accuracyMeters: 12,
+          isOutsideCambodia: false,
+        ),
+        userGeocodedPlace: const GeocodedPlace(
+          roadName: 'Street 178',
+          sangkat: 'Chey Chumneah',
+          khan: 'Daun Penh',
+          village: 'Phum 4',
+          displayName: 'Phum 4, Chey Chumneah, Daun Penh',
+          countryCode: 'kh',
+        ),
+      ) as CommentLocationVerified;
+      expect(
+        villageDecision.tier,
+        equals(SupportVerificationTier.remoteVillage),
+      );
+      expect(
+        villageDecision.tier.formatCommentLocationTag(
+          englishFirst: true,
+          areaKhmer: villageDecision.userAreaKhmer,
+          areaEnglish: villageDecision.userAreaEnglish,
+        ),
+        equals('Remote · Phum 4'),
+      );
+
+      // Same province, different Khan -> remoteDistrict (`Remote · <District>`)
+      final senSokReport = repo.findById('#SC-20524')!;
+      final districtDecision =
+          SupportEligibilityService.evaluateCommentLocation(
+            report: senSokReport,
+            locationResult: const LocationSuccess(
+              point: LocationService.phnomPenhCenter,
+              accuracyMeters: 15,
+              isOutsideCambodia: false,
+            ),
+          ) as CommentLocationVerified;
+      expect(
+        districtDecision.tier,
+        equals(SupportVerificationTier.remoteDistrict),
+      );
+      expect(
+        districtDecision.tier.formatCommentLocationTag(
+          englishFirst: true,
+          areaKhmer: districtDecision.userAreaKhmer,
+          areaEnglish: districtDecision.userAreaEnglish,
+        ),
+        equals('Remote · Khan Daun Penh'),
+      );
+
+      // Different province -> remoteProvince (`Remote · <Province>`)
+      final provinceDecision =
+          SupportEligibilityService.evaluateCommentLocation(
+            report: senSokReport,
+            locationResult: const LocationSuccess(
+              point: LatLng(13.3633, 103.8564),
+              accuracyMeters: 20,
+              isOutsideCambodia: false,
+            ),
+          ) as CommentLocationVerified;
+      expect(
+        provinceDecision.tier,
+        equals(SupportVerificationTier.remoteProvince),
+      );
+      expect(
+        provinceDecision.tier.formatCommentLocationTag(
+          englishFirst: true,
+          areaKhmer: provinceDecision.userAreaKhmer,
+          areaEnglish: provinceDecision.userAreaEnglish,
+        ),
+        equals('Remote · Siem Reap'),
+      );
+      expect(
+        provinceDecision.tier.formatCommentLocationTag(
+          englishFirst: false,
+          areaKhmer: provinceDecision.userAreaKhmer,
+          areaEnglish: provinceDecision.userAreaEnglish,
+        ),
+        equals('ពីចម្ងាយ · ខេត្តសៀមរាប'),
+      );
+    });
+
+    test('R2: CitizenComment persists optional authorName with backward-compatible JSON and Guest/Anonymous rules', () {
+      // Legacy JSON lacking authorName deserializes cleanly with null authorName
+      final legacyComment = CitizenComment.fromJson({
+        'id': 'c-legacy-1',
+        'text': 'Water rising quickly',
+        'createdAt': '2026-11-20T10:00:00.000Z',
+        'isOriginalReporter': false,
+        'isCurrentUser': true,
+        'isAnonymous': false,
+      });
+      expect(legacyComment.authorName, isNull);
+      expect(legacyComment.toJson().containsKey('authorName'), isFalse);
+
+      // Non-empty authorName round-trips through JSON
+      final namedComment = legacyComment.copyWith(authorName: 'Dara Sok');
+      final roundTripped = CitizenComment.fromJson(namedComment.toJson());
+      expect(roundTripped.authorName, equals('Dara Sok'));
+
+      // UserProfile helper detects Guest / Khmer Guest / empty
+      expect(UserProfile.isDefaultOrEmptyName(null), isTrue);
+      expect(UserProfile.isDefaultOrEmptyName('  '), isTrue);
+      expect(UserProfile.isDefaultOrEmptyName('Guest'), isTrue);
+      expect(UserProfile.isDefaultOrEmptyName('ភ្ញៀវ'), isTrue);
+      expect(UserProfile.isDefaultOrEmptyName('Dara Sok'), isFalse);
+      expect(const UserProfile().realDisplayName(englishFirst: true), isNull);
+      expect(
+        const UserProfile(
+          englishName: 'Dara Sok',
+          khmerName: 'តារា សុខ',
+        ).realDisplayName(englishFirst: false),
+        equals('តារា សុខ'),
+      );
+
+      // Repository attaches authorName only when !isAnonymous and non-Guest
+      final guestRepo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+      final guestNote = guestRepo
+          .addCitizenComment(
+            '#SC-20481',
+            text: 'Guest note',
+            isAnonymous: false,
+          )!
+          .effectiveComments
+          .last;
+      expect(guestNote.authorName, isNull);
+
+      guestRepo.updateProfile(
+        const UserProfile(englishName: 'Dara Sok', khmerName: 'តារា សុខ'),
+      );
+      final namedNote = guestRepo
+          .addCitizenComment(
+            '#SC-20481',
+            text: 'Real name note',
+            isAnonymous: false,
+            supportTier: SupportVerificationTier.verifiedNearby,
+          )!
+          .effectiveComments
+          .last;
+      expect(namedNote.authorName, equals('Dara Sok'));
+      expect(
+        namedNote.supportTier,
+        equals(SupportVerificationTier.verifiedNearby),
+      );
+
+      final anonNote = guestRepo
+          .addCitizenComment(
+            '#SC-20481',
+            text: 'Anonymous note',
+            isAnonymous: true,
+          )!
+          .effectiveComments
+          .last;
+      expect(anonNote.authorName, isNull);
+      expect(anonNote.isAnonymous, isTrue);
+    });
+
+    test('R3 & R4: reportCountForProvince excludes resolved when requested, and alert removal/clear/restore/hydrate never delete CivicReports', () async {
+      final storage = _InMemoryLocalStorage(null);
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+        storage: storage,
+      );
+
+      // R3 province count distinction (AreaNews all=13 vs Map active=12)
+      expect(
+        repo.reportCountForProvince(CambodiaLocationCatalog.phnomPenh),
+        equals(13),
+      );
+      expect(
+        repo.reportCountForProvince(
+          CambodiaLocationCatalog.phnomPenh,
+          includeResolved: false,
+        ),
+        equals(12),
+      );
+
+      // R4: remove single alert + restore at original index; underlying report intact
+      final initialReportCount = repo.reports.length;
+      final initialAlerts = repo.alerts.toList();
+      expect(initialAlerts.length, greaterThanOrEqualTo(3));
+      final targetAlert = initialAlerts[1];
+      expect(repo.findById(targetAlert.reportId), isNotNull);
+
+      final removed = repo.removeAlert(targetAlert.id);
+      expect(removed, isNotNull);
+      expect(removed!.index, equals(1));
+      expect(repo.alerts.length, equals(initialAlerts.length - 1));
+      expect(repo.reports.length, equals(initialReportCount));
+      expect(repo.findById(targetAlert.reportId), isNotNull);
+
+      repo.restoreAlert(removed.alert, index: removed.index);
+      expect(repo.alerts.length, equals(initialAlerts.length));
+      expect(repo.alerts[1].id, equals(targetAlert.id));
+
+      // R4: clearReadAlerts removes only read alerts
+      repo.markAlertRead(initialAlerts.first.id);
+      final clearedRead = repo.clearReadAlerts();
+      expect(clearedRead.isNotEmpty, isTrue);
+      expect(repo.alerts.any((a) => a.isRead), isFalse);
+      expect(repo.reports.length, equals(initialReportCount));
+      repo.restoreAlerts(clearedRead);
+      expect(repo.alerts.length, equals(initialAlerts.length));
+
+      // R4: clearAllAlerts empties alerts and persists empty list across hydrate()
+      final clearedAll = repo.clearAllAlerts();
+      expect(clearedAll.length, equals(initialAlerts.length));
+      expect(repo.alerts, isEmpty);
+      expect(repo.reports.length, equals(initialReportCount));
+
+      // Wait for fire-and-forget _persist() microtask then re-hydrate
+      await Future<void>.delayed(Duration.zero);
+      final rehydratedRepo = ReportRepository(storage: storage);
+      await rehydratedRepo.hydrate();
+      expect(rehydratedRepo.alerts, isEmpty);
+      expect(rehydratedRepo.reports.length, equals(initialReportCount));
     });
   });
 }

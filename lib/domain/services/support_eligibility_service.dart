@@ -1,9 +1,47 @@
+import 'package:latlong2/latlong.dart';
+
 import '../../data/services/location_service.dart';
 import '../../data/services/reverse_geocoding_service.dart';
 import '../models/cambodia_locations.dart';
 import '../models/report_models.dart';
 import 'gis_routing_service.dart';
 import 'spatial_clustering_service.dart';
+
+/// Typed decision returned by [SupportEligibilityService.evaluateCommentLocation]
+/// when a citizen comments on another citizen's incident.
+sealed class CommentLocationResult {
+  const CommentLocationResult();
+}
+
+final class CommentLocationVerified extends CommentLocationResult {
+  const CommentLocationVerified({
+    required this.tier,
+    required this.distanceMeters,
+    this.userAreaKhmer,
+    this.userAreaEnglish,
+  });
+
+  final SupportVerificationTier tier;
+  final double distanceMeters;
+  final String? userAreaKhmer;
+  final String? userAreaEnglish;
+}
+
+final class CommentLocationMockGps extends CommentLocationResult {
+  const CommentLocationMockGps();
+}
+
+final class CommentLocationDenied extends CommentLocationResult {
+  const CommentLocationDenied({
+    this.permissionDenied = false,
+    this.serviceDisabled = false,
+    this.outsideCambodia = false,
+  });
+
+  final bool permissionDenied;
+  final bool serviceDisabled;
+  final bool outsideCambodia;
+}
 
 /// Typed decision returned by [SupportEligibilityService] when a citizen taps
 /// "Affects me" on an open civic incident.
@@ -180,6 +218,96 @@ abstract final class SupportEligibilityService {
     }
 
     // 4. Outside 150 m -> determine highest differing administrative level.
+    final remote = _resolveRemoteLocation(
+      report: report,
+      userPoint: userPoint,
+      userGeocodedPlace: userGeocodedPlace,
+    );
+
+    // 4a. Different Province -> display Province (requires written note + 3/24h cap).
+    if (remote.tier == SupportVerificationTier.remoteProvince) {
+      if (remoteProvinceSupportsInLast24Hours >=
+          maxRemoteProvinceSupportsPer24Hours) {
+        return const SupportDeniedDailyLimit(
+          limit: maxRemoteProvinceSupportsPer24Hours,
+          isRemoteProvinceLimit: true,
+        );
+      }
+      return SupportRequiresRemoteReason(
+        tier: remote.tier,
+        distanceMeters: meters,
+        userAreaKhmer: remote.areaKhmer,
+        userAreaEnglish: remote.areaEnglish,
+        requiresDetailedNote: true,
+      );
+    }
+
+    return SupportRequiresRemoteReason(
+      tier: remote.tier,
+      distanceMeters: meters,
+      userAreaKhmer: remote.areaKhmer,
+      userAreaEnglish: remote.areaEnglish,
+      requiresDetailedNote: false,
+    );
+  }
+
+  /// Evaluates silent live Cambodia GPS verification when commenting on another
+  /// citizen's report (no ownership/already-supported block and no daily cap).
+  static CommentLocationResult evaluateCommentLocation({
+    required CivicReport report,
+    required LocationFetchResult locationResult,
+    GeocodedPlace? userGeocodedPlace,
+  }) {
+    if (locationResult is LocationMockDetected) {
+      return const CommentLocationMockGps();
+    }
+    if (locationResult is! LocationSuccess ||
+        locationResult.isOutsideCambodia) {
+      return switch (locationResult) {
+        LocationServiceDisabled() => const CommentLocationDenied(
+          serviceDisabled: true,
+        ),
+        LocationPermissionDenied() => const CommentLocationDenied(
+          permissionDenied: true,
+        ),
+        LocationSuccess(isOutsideCambodia: true) => const CommentLocationDenied(
+          outsideCambodia: true,
+        ),
+        _ => const CommentLocationDenied(),
+      };
+    }
+
+    final userPoint = locationResult.point;
+    final meters = SpatialClusteringService.distanceMeters(
+      userPoint,
+      report.coordinates,
+    );
+    if (meters <= verifiedNearbyMeters) {
+      return CommentLocationVerified(
+        tier: SupportVerificationTier.verifiedNearby,
+        distanceMeters: meters,
+      );
+    }
+
+    final remote = _resolveRemoteLocation(
+      report: report,
+      userPoint: userPoint,
+      userGeocodedPlace: userGeocodedPlace,
+    );
+    return CommentLocationVerified(
+      tier: remote.tier,
+      distanceMeters: meters,
+      userAreaKhmer: remote.areaKhmer,
+      userAreaEnglish: remote.areaEnglish,
+    );
+  }
+
+  static ({SupportVerificationTier tier, String areaKhmer, String areaEnglish})
+  _resolveRemoteLocation({
+    required CivicReport report,
+    required LatLng userPoint,
+    GeocodedPlace? userGeocodedPlace,
+  }) {
     final userGis = GisRoutingService.resolve(
       coordinates: userPoint,
       category: report.category,
@@ -194,21 +322,12 @@ abstract final class SupportEligibilityService {
         ? report.provinceCode
         : reportGis.provinceCode;
 
-    // 4a. Different Province -> display Province (requires written note + 3/24h cap).
+    // 4a. Different Province -> display Province.
     if (userGis.provinceCode != reportProvinceCode) {
-      if (remoteProvinceSupportsInLast24Hours >=
-          maxRemoteProvinceSupportsPer24Hours) {
-        return const SupportDeniedDailyLimit(
-          limit: maxRemoteProvinceSupportsPer24Hours,
-          isRemoteProvinceLimit: true,
-        );
-      }
-      return SupportRequiresRemoteReason(
+      return (
         tier: SupportVerificationTier.remoteProvince,
-        distanceMeters: meters,
-        userAreaKhmer: userGis.khmerProvince,
-        userAreaEnglish: userGis.englishProvince,
-        requiresDetailedNote: true,
+        areaKhmer: userGis.khmerProvince,
+        areaEnglish: userGis.englishProvince,
       );
     }
 
@@ -225,12 +344,10 @@ abstract final class SupportEligibilityService {
     if (userDistrictKey.isNotEmpty &&
         reportDistrictKey.isNotEmpty &&
         userDistrictKey != reportDistrictKey) {
-      return SupportRequiresRemoteReason(
+      return (
         tier: SupportVerificationTier.remoteDistrict,
-        distanceMeters: meters,
-        userAreaKhmer: userGis.khmerKhan,
-        userAreaEnglish: userGis.englishKhan,
-        requiresDetailedNote: false,
+        areaKhmer: userGis.khmerKhan,
+        areaEnglish: userGis.englishKhan,
       );
     }
 
@@ -242,12 +359,10 @@ abstract final class SupportEligibilityService {
         ? (_containsKhmer(villageName) ? villageName : userGis.khmerSangkat)
         : userGis.khmerSangkat;
 
-    return SupportRequiresRemoteReason(
+    return (
       tier: SupportVerificationTier.remoteVillage,
-      distanceMeters: meters,
-      userAreaKhmer: areaKh,
-      userAreaEnglish: areaEn,
-      requiresDetailedNote: false,
+      areaKhmer: areaKh,
+      areaEnglish: areaEn,
     );
   }
 

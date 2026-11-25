@@ -219,14 +219,19 @@ class ReportRepository extends ChangeNotifier {
   }
 
   /// Counts total reports in a given [province] (used for 25-province pickers).
-  int reportCountForProvince(ProvinceOption province) => _reports
+  int reportCountForProvince(
+    ProvinceOption province, {
+    bool includeResolved = true,
+  }) => _reports
       .where(
-        (report) => CambodiaLocationCatalog.locationMatchesArea(
-          khmerLocation: report.khmerLocation,
-          englishLocation: report.englishLocation,
-          reportProvinceCode: report.provinceCode,
-          province: province,
-        ),
+        (report) =>
+            (includeResolved || report.status != ReportStatus.resolved) &&
+            CambodiaLocationCatalog.locationMatchesArea(
+              khmerLocation: report.khmerLocation,
+              englishLocation: report.englishLocation,
+              reportProvinceCode: report.provinceCode,
+              province: province,
+            ),
       )
       .length;
 
@@ -339,16 +344,14 @@ class ReportRepository extends ChangeNotifier {
     }
 
     final rawAlerts = data['alerts'];
-    if (rawAlerts is List && rawAlerts.isNotEmpty) {
+    if (rawAlerts is List) {
       final parsed = rawAlerts
           .whereType<Map<String, dynamic>>()
           .map(AlertItem.fromJson)
           .toList();
-      if (parsed.isNotEmpty) {
-        _alerts
-          ..clear()
-          ..addAll(parsed);
-      }
+      _alerts
+        ..clear()
+        ..addAll(parsed);
     }
 
     final rawSettings = data['settings'];
@@ -729,6 +732,7 @@ class ReportRepository extends ChangeNotifier {
         isOriginalReporter: false,
         isCurrentUser: true,
         isAnonymous: isAnonymous,
+        authorName: _resolveCommentAuthorName(isAnonymous: isAnonymous),
         severity: clampedSeverity,
         voiceTranscript: voiceTranscript,
       );
@@ -836,6 +840,7 @@ class ReportRepository extends ChangeNotifier {
           isOriginalReporter: true,
           isCurrentUser: true,
           isAnonymous: isAnonymous,
+          authorName: _resolveCommentAuthorName(isAnonymous: isAnonymous),
           severity: clampedSeverity,
           voiceTranscript: voiceTranscript,
         ),
@@ -949,12 +954,20 @@ class ReportRepository extends ChangeNotifier {
     return updated;
   }
 
+  String? _resolveCommentAuthorName({required bool isAnonymous}) {
+    if (isAnonymous) return null;
+    return _profile.realDisplayName(englishFirst: _settings.englishFirst);
+  }
+
   /// Appends a citizen field comment directly to a shared Master Incident
   /// (e.g., from TrackingPage "+ Add note"). Rejects blank input.
   CivicReport? addCitizenComment(
     String reportId, {
     required String text,
     bool? isAnonymous,
+    SupportVerificationTier? supportTier,
+    String? supportAreaKhmer,
+    String? supportAreaEnglish,
     DateTime? now,
   }) {
     final trimmed = text.trim();
@@ -964,13 +977,18 @@ class ReportRepository extends ChangeNotifier {
 
     final existing = _reports[index];
     final eventTime = now ?? DateTime.now();
+    final effectiveAnonymous = isAnonymous ?? _settings.anonymousByDefault;
     final note = CitizenComment(
       id: 'c-note-${eventTime.microsecondsSinceEpoch}',
       text: trimmed,
       createdAt: eventTime,
       isOriginalReporter: false,
       isCurrentUser: true,
-      isAnonymous: isAnonymous ?? _settings.anonymousByDefault,
+      isAnonymous: effectiveAnonymous,
+      authorName: _resolveCommentAuthorName(isAnonymous: effectiveAnonymous),
+      supportTier: supportTier,
+      supportAreaKhmer: supportAreaKhmer,
+      supportAreaEnglish: supportAreaEnglish,
     );
     final updated = existing.copyWith(
       citizenComments: [...existing.effectiveComments, note],
@@ -1008,10 +1026,18 @@ class ReportRepository extends ChangeNotifier {
     required String reportId,
     required String text,
     required bool isAnonymous,
+    String? authorName,
+    SupportVerificationTier? supportTier,
+    String? supportAreaEnglish,
   }) => <String, dynamic>{
     'report_id': reportId,
     'text': text.trim(),
     'is_anonymous': isAnonymous,
+    if (!isAnonymous && authorName != null && authorName.trim().isNotEmpty)
+      'author_name': authorName.trim(),
+    if (supportTier != null) 'verification_tier': supportTier.name,
+    if (supportAreaEnglish != null && supportAreaEnglish.trim().isNotEmpty)
+      'remote_area': supportAreaEnglish.trim(),
   };
 
   /// Undoes a citizen's `+1 Support` or duplicate join without deleting
@@ -1118,6 +1144,9 @@ class ReportRepository extends ChangeNotifier {
         isOriginalReporter: false,
         isCurrentUser: true,
         isAnonymous: _settings.anonymousByDefault,
+        authorName: _resolveCommentAuthorName(
+          isAnonymous: _settings.anonymousByDefault,
+        ),
         supportTier: tier,
         supportAreaKhmer: supportAreaKhmer,
         supportAreaEnglish: supportAreaEnglish,
@@ -1208,19 +1237,22 @@ class ReportRepository extends ChangeNotifier {
       ),
     );
     _reports[index] = updated;
-    _alerts.insert(
-      0,
-      AlertItem(
-        id: 'alert-dispatch-${eventTime.microsecondsSinceEpoch}',
-        reportId: updated.id,
-        khmerTitle: 'ក្រុមជួសជុល $crewCode នៅទីតាំងហើយ',
-        englishTitle: 'Crew $crewCode dispatched on-site',
-        khmerSubtitle: '${updated.khmerTitle} · ${updated.khmerLocation}',
-        englishSubtitle: '${updated.englishTitle} · ${updated.englishLocation}',
-        createdAt: eventTime,
-        isRead: false,
-      ),
-    );
+    if (updated.isContributedByCurrentUser) {
+      _alerts.insert(
+        0,
+        AlertItem(
+          id: 'alert-dispatch-${eventTime.microsecondsSinceEpoch}',
+          reportId: updated.id,
+          khmerTitle: 'ក្រុមជួសជុល $crewCode នៅទីតាំងហើយ',
+          englishTitle: 'Crew $crewCode dispatched on-site',
+          khmerSubtitle: '${updated.khmerTitle} · ${updated.khmerLocation}',
+          englishSubtitle:
+              '${updated.englishTitle} · ${updated.englishLocation}',
+          createdAt: eventTime,
+          isRead: false,
+        ),
+      );
+    }
     _persist();
     notifyListeners();
     return updated;
@@ -1251,19 +1283,23 @@ class ReportRepository extends ChangeNotifier {
       ),
     );
     _reports[index] = updated;
-    _alerts.insert(
-      0,
-      AlertItem(
-        id: 'alert-resolved-${eventTime.microsecondsSinceEpoch}',
-        reportId: updated.id,
-        khmerTitle: 'បានដោះស្រាយ · មើលរូបក្រោយជួសជុល',
-        englishTitle: 'Resolved · See after photo',
-        khmerSubtitle: 'ក្រុម $crew បានបញ្ចូលរូបភាពបញ្ជាក់ការជួសជុលរួចរាល់',
-        englishSubtitle: 'Crew $crew uploaded completion Before & After proof',
-        createdAt: eventTime,
-        isRead: false,
-      ),
-    );
+    if (updated.isContributedByCurrentUser) {
+      _alerts.insert(
+        0,
+        AlertItem(
+          id: 'alert-resolved-${eventTime.microsecondsSinceEpoch}',
+          reportId: updated.id,
+          khmerTitle: 'បានដោះស្រាយ · មើលរូបក្រោយជួសជុល',
+          englishTitle: 'Resolved · See after photo',
+          khmerSubtitle:
+              '${updated.khmerLocation} · ក្រុម $crew បានបញ្ចូលរូបភាពបញ្ជាក់ការជួសជុលរួចរាល់',
+          englishSubtitle:
+              '${updated.englishLocation} · Crew $crew uploaded completion Before & After proof',
+          createdAt: eventTime,
+          isRead: false,
+        ),
+      );
+    }
     _persist();
     notifyListeners();
     return updated;
@@ -1299,6 +1335,60 @@ class ReportRepository extends ChangeNotifier {
       _persist();
       notifyListeners();
     }
+  }
+
+  /// Deletes a single [AlertItem] log entry without modifying any [CivicReport].
+  ({AlertItem alert, int index})? removeAlert(String alertId) {
+    final index = _alerts.indexWhere((a) => a.id == alertId);
+    if (index == -1) return null;
+    final removed = _alerts.removeAt(index);
+    _persist();
+    notifyListeners();
+    return (alert: removed, index: index);
+  }
+
+  /// Restores a previously deleted [AlertItem] log entry (used for Undo).
+  void restoreAlert(AlertItem alert, {int? index}) {
+    if (_alerts.any((a) => a.id == alert.id)) return;
+    final targetIndex = (index ?? 0).clamp(0, _alerts.length);
+    _alerts.insert(targetIndex, alert);
+    _persist();
+    notifyListeners();
+  }
+
+  /// Clears all read [AlertItem] log entries without modifying any [CivicReport].
+  List<AlertItem> clearReadAlerts() {
+    final removed = _alerts.where((a) => a.isRead).toList(growable: false);
+    if (removed.isEmpty) return const [];
+    _alerts.removeWhere((a) => a.isRead);
+    _persist();
+    notifyListeners();
+    return removed;
+  }
+
+  /// Clears all [AlertItem] log entries without modifying any [CivicReport].
+  List<AlertItem> clearAllAlerts() {
+    if (_alerts.isEmpty) return const [];
+    final removed = List<AlertItem>.of(_alerts);
+    _alerts.clear();
+    _persist();
+    notifyListeners();
+    return removed;
+  }
+
+  /// Restores multiple cleared [AlertItem] log entries (used for Undo).
+  void restoreAlerts(List<AlertItem> items) {
+    var changed = false;
+    for (final item in items) {
+      if (!_alerts.any((a) => a.id == item.id)) {
+        _alerts.add(item);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    _alerts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    _persist();
+    notifyListeners();
   }
 
   void updateSettings(AppSettings next) {

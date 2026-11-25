@@ -80,13 +80,19 @@ abstract final class MapClusterService {
     required List<CivicReport> reports,
     required double zoom,
     LatLngBounds? visibleBounds,
+    bool includeResolved = false,
   }) {
-    if (reports.isEmpty) return const [];
+    final source = includeResolved
+        ? reports
+        : reports
+              .where((r) => r.status != ReportStatus.resolved)
+              .toList(growable: false);
+    if (source.isEmpty) return const [];
 
     final tier = tierForZoom(zoom);
     if (tier == MapClusterTier.province) {
       final byProvince = <String, List<CivicReport>>{};
-      for (final report in reports) {
+      for (final report in source) {
         final code = report.provinceCode.isNotEmpty
             ? report.provinceCode
             : CambodiaLocationCatalog.inferProvince(
@@ -125,12 +131,13 @@ abstract final class MapClusterService {
     }
 
     final candidates = visibleBounds == null
-        ? reports
+        ? source
         : reportsInViewport(
-            reports: reports,
+            reports: source,
             bounds: visibleBounds,
             center: visibleBounds.center,
             paddingFraction: 0.35,
+            includeResolved: includeResolved,
           );
 
     if (tier == MapClusterTier.single) {
@@ -185,8 +192,14 @@ abstract final class MapClusterService {
     required LatLngBounds? bounds,
     required LatLng center,
     double paddingFraction = 0.22,
+    bool includeResolved = false,
   }) {
-    if (reports.isEmpty) return const [];
+    final source = includeResolved
+        ? reports
+        : reports
+              .where((r) => r.status != ReportStatus.resolved)
+              .toList(growable: false);
+    if (source.isEmpty) return const [];
 
     List<CivicReport> visible;
     if (bounds != null) {
@@ -197,7 +210,7 @@ abstract final class MapClusterService {
       final minLng = bounds.west - lngSpan * paddingFraction;
       final maxLng = bounds.east + lngSpan * paddingFraction;
 
-      visible = reports
+      visible = source
           .where(
             (r) =>
                 r.coordinates.latitude >= minLat &&
@@ -207,7 +220,7 @@ abstract final class MapClusterService {
           )
           .toList();
     } else {
-      visible = reports
+      visible = source
           .where(
             (r) =>
                 SpatialClusteringService.distanceMeters(
@@ -217,8 +230,8 @@ abstract final class MapClusterService {
                 25000,
           )
           .toList();
-      if (visible.isEmpty && reports.length <= 20) {
-        visible = List<CivicReport>.of(reports);
+      if (visible.isEmpty && source.length <= 20) {
+        visible = List<CivicReport>.of(source);
       }
     }
 

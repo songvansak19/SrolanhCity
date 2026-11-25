@@ -10,6 +10,7 @@ import 'package:my_app/data/services/exif_stripper.dart';
 import 'package:my_app/data/services/ip_geolocation_service.dart';
 import 'package:my_app/data/services/location_service.dart';
 import 'package:my_app/data/services/photo_media_types.dart';
+import 'package:my_app/data/services/reverse_geocoding_service.dart';
 import 'package:my_app/data/services/voice_input_service.dart';
 import 'package:my_app/domain/models/report_models.dart';
 import 'package:my_app/domain/services/report_location_eligibility_service.dart';
@@ -19,6 +20,7 @@ import 'package:my_app/ui/core/theme.dart';
 import 'package:my_app/ui/core/widgets/before_after_slider.dart';
 import 'package:my_app/ui/core/widgets/user_avatar.dart';
 import 'package:my_app/ui/core/widgets/voice_waveform.dart';
+import 'package:my_app/ui/features/alerts/alert_detail_page.dart';
 import 'package:my_app/ui/features/alerts/alerts_page.dart';
 import 'package:my_app/ui/features/help/help_center_page.dart';
 import 'package:my_app/ui/features/map/map_page.dart';
@@ -2579,6 +2581,601 @@ void main() {
       },
     );
   });
+
+  group('R1–R4 Feature & UX Widget Tests', () {
+    testWidgets(
+      'R1 & R2: Own-report comments skip GPS & show real name / Guest · You / Anonymous · Original reporter with delete preserved',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+
+        // 1. Default Guest profile on own report (#SC-20481) with GPS disabled -> still posts with no GPS tag
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            const TrackingPage(
+              reportId: '#SC-20481',
+              locationService: _FakeLocationService(LocationServiceDisabled()),
+            ),
+          ),
+        );
+        expect(
+          find.textContaining('Guest · You · Original reporter'),
+          findsOneWidget,
+        );
+
+        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('add-comment-field')),
+          'Own report note without GPS',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('submit-comment-btn')));
+        await tester.pumpAndSettle();
+
+        final note1 = repo.findById('#SC-20481')!.effectiveComments.last;
+        expect(note1.supportTier, isNull);
+        expect(note1.authorName, isNull);
+        expect(
+          find.byKey(Key('comment-location-tag-${note1.id}')),
+          findsNothing,
+        );
+        expect(find.byKey(Key('delete-comment-${note1.id}')), findsOneWidget);
+
+        // 2. Real profile name replaces Guest · You with <Name> · Original reporter
+        repo.updateProfile(
+          const UserProfile(englishName: 'Dara Sok', khmerName: 'តារា សុខ'),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('Dara Sok · Original reporter'),
+          findsWidgets,
+        );
+
+        // 3. Anonymous toggle on own report shows Anonymous · Original reporter & preserves delete button
+        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('add-comment-field')),
+          'Own anonymous follow-up',
+        );
+        await tester.tap(find.byKey(const Key('add-comment-anon-switch')));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('submit-comment-btn')));
+        await tester.pumpAndSettle();
+
+        final anonNote = repo.findById('#SC-20481')!.effectiveComments.last;
+        expect(anonNote.isAnonymous, isTrue);
+        expect(anonNote.authorName, isNull);
+        expect(
+          find.textContaining('Anonymous · Original reporter'),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(Key('delete-comment-${anonNote.id}')),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'R1 & R2: Other-report comments block Mock/Off/Outside-Cambodia GPS and silently attach ✓ On-site or Remote · <Area> with real name',
+      (tester) async {
+        final seedRepo = ReportRepository();
+        final target = seedRepo.findById('#SC-20524')!;
+
+        // 1. Mock GPS -> navigates to FakeGpsPage and blocks comment
+        final mockRepo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        await tester.pumpWidget(
+          _wrapWithScope(
+            mockRepo,
+            TrackingPage(
+              reportId: '#SC-20524',
+              locationService: _FakeLocationService(
+                LocationMockDetected(
+                  point: target.coordinates,
+                  detectedLabel: 'Fake GPS App',
+                ),
+              ),
+            ),
+          ),
+        );
+        final beforeCount = mockRepo
+            .findById('#SC-20524')!
+            .effectiveComments
+            .length;
+        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('add-comment-field')),
+          'Spoofed note',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('submit-comment-btn')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+        expect(find.byType(FakeGpsPage), findsOneWidget);
+        expect(
+          mockRepo.findById('#SC-20524')!.effectiveComments.length,
+          equals(beforeCount),
+        );
+
+        // 2. GPS off -> SnackBar error and blocks comment
+        await tester.pumpWidget(
+          ReportScope(
+            key: const ValueKey('other-comment-gps-off-scope'),
+            repository: mockRepo,
+            child: MaterialApp(
+              theme: buildSrolanhCityTheme(),
+              home: const TrackingPage(
+                reportId: '#SC-20524',
+                locationService: _FakeLocationService(
+                  LocationServiceDisabled(),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('add-comment-field')),
+          'No GPS note',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('submit-comment-btn')));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Turn on GPS'), findsOneWidget);
+        expect(
+          mockRepo.findById('#SC-20524')!.effectiveComments.length,
+          equals(beforeCount),
+        );
+
+        // 3. Outside Cambodia -> SnackBar error and blocks comment
+        await tester.pumpWidget(
+          _wrapWithScope(
+            mockRepo,
+            const TrackingPage(
+              key: ValueKey('other-comment-outside-kh'),
+              reportId: '#SC-20524',
+              locationService: _FakeLocationService(
+                LocationSuccess(
+                  point: LatLng(37.422, -122.084),
+                  accuracyMeters: 15,
+                  isOutsideCambodia: true,
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('add-comment-field')),
+          'Abroad note',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('submit-comment-btn')));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('outside Cambodia'), findsOneWidget);
+        expect(
+          mockRepo.findById('#SC-20524')!.effectiveComments.length,
+          equals(beforeCount),
+        );
+
+        // 4. Live GPS <= 150 m -> silently posts with `✓ On-site` & real name (no reason sheet)
+        final onsiteRepo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+          initialProfile: const UserProfile(
+            englishName: 'Sokha Chan',
+            khmerName: 'សុខា ចាន់',
+          ),
+        );
+        await tester.pumpWidget(
+          _wrapWithScope(
+            onsiteRepo,
+            TrackingPage(
+              key: const ValueKey('other-comment-onsite'),
+              reportId: '#SC-20524',
+              locationService: _FakeLocationService(
+                LocationSuccess(
+                  point: LatLng(
+                    target.coordinates.latitude + 0.0004,
+                    target.coordinates.longitude,
+                  ),
+                  accuracyMeters: 8,
+                  isOutsideCambodia: false,
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('add-comment-field')),
+          'Standing right next to this drain',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('submit-comment-btn')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('remote-support-reason-sheet')),
+          findsNothing,
+        );
+        final onsiteComment = onsiteRepo
+            .findById('#SC-20524')!
+            .effectiveComments
+            .last;
+        expect(
+          onsiteComment.supportTier,
+          equals(SupportVerificationTier.verifiedNearby),
+        );
+        expect(onsiteComment.authorName, equals('Sokha Chan'));
+        expect(
+          find.byKey(Key('comment-location-tag-${onsiteComment.id}')),
+          findsOneWidget,
+        );
+        expect(find.text('✓ On-site'), findsOneWidget);
+        expect(find.text('Sokha Chan'), findsOneWidget);
+
+        // 5. Live GPS > 150 m -> silently posts with `Remote · <Village>` (geocoded)
+        final remoteRepo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+          initialProfile: const UserProfile(
+            englishName: 'Sokha Chan',
+            khmerName: 'សុខា ចាន់',
+          ),
+        );
+        await tester.pumpWidget(
+          _wrapWithScope(
+            remoteRepo,
+            TrackingPage(
+              key: const ValueKey('other-comment-remote-village'),
+              reportId: '#SC-20524',
+              locationService: _FakeLocationService(
+                LocationSuccess(
+                  point: LatLng(
+                    target.coordinates.latitude + 0.004,
+                    target.coordinates.longitude,
+                  ),
+                  accuracyMeters: 12,
+                  isOutsideCambodia: false,
+                ),
+              ),
+              geocodingService: _FakeGeocodingService(
+                const GeocodedPlace(
+                  roadName: 'Street 1986',
+                  sangkat: 'Phnom Penh Thmei',
+                  khan: 'Sen Sok',
+                  village: 'Phum Bayab',
+                  displayName: 'Phum Bayab, Sen Sok, Phnom Penh',
+                  countryCode: 'kh',
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('add-comment-btn')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('add-comment-field')),
+          'Traffic backing up from nearby village',
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('submit-comment-btn')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('remote-support-reason-sheet')),
+          findsNothing,
+        );
+        final remoteComment = remoteRepo
+            .findById('#SC-20524')!
+            .effectiveComments
+            .last;
+        expect(
+          remoteComment.supportTier,
+          equals(SupportVerificationTier.remoteVillage),
+        );
+        expect(find.text('Remote · Phum Bayab'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'R3: Normal MapPage hides resolved #SC-20290 while MapPage(focusedReportId: #SC-20290) isolates green ✓ pin & auto-opens bottom sheet',
+      (tester) async {
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+
+        // 1. Normal MapPage: All (17) instead of 18, #SC-20290 hidden, Phnom Penh province count = 12
+        await tester.pumpWidget(_wrapWithScope(repo, const MapPage()));
+        await tester.pump();
+        expect(find.text('All (17)'), findsOneWidget);
+        expect(find.text('#SC-20290'), findsNothing);
+        expect(find.text('✓'), findsNothing);
+
+        await tester.tap(find.byKey(const Key('map-province-filter-btn')));
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('map-jump-province-phnom_penh')),
+            matching: find.text('12'),
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const Key('map-jump-all-cambodia')));
+        await tester.pumpAndSettle();
+
+        // 2. Focused resolved MapPage(#SC-20290): ONLY green ✓ pin + auto-opened bottom sheet
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            const MapPage(
+              key: ValueKey('focused-resolved-map'),
+              focusedReportId: '#SC-20290',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('map-focused-resolved-pill')),
+          findsOneWidget,
+        );
+        expect(find.text('All (17)'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(MarkerLayer),
+            matching: find.text('✓'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byType(MarkerLayer),
+            matching: find.text('P5'),
+          ),
+          findsNothing,
+        );
+        expect(
+          find.descendant(
+            of: find.byType(MarkerLayer),
+            matching: find.text('P4'),
+          ),
+          findsNothing,
+        );
+        expect(
+          tester.widget<MarkerLayer>(find.byType(MarkerLayer)).markers.length,
+          equals(1),
+        );
+        expect(
+          find.byKey(const Key('map-sheet-resolved-badge')),
+          findsOneWidget,
+        );
+        expect(find.text('#SC-20290'), findsWidgets);
+        expect(find.text('Track Repair'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'R3: AlertDetailPage (active & resolved) and TrackingPage._buildResolvedView display View location on map and open focused MapPage',
+      (tester) async {
+        tester.view.physicalSize = const Size(390 * 2, 844 * 2);
+        tester.view.devicePixelRatio = 2.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+
+        // 1. AlertDetailPage for active report (#SC-20481)
+        final activeAlert = repo.alerts.firstWhere(
+          (a) => a.reportId == '#SC-20481',
+        );
+        await tester.pumpWidget(
+          _wrapWithScope(repo, AlertDetailPage(alert: activeAlert)),
+        );
+        await tester.pumpAndSettle();
+        final activeMapBtn = find.byKey(const Key('alert-detail-view-map-btn'));
+        await tester.scrollUntilVisible(activeMapBtn, 150);
+        await tester.pumpAndSettle();
+        expect(find.text('View location on map'), findsOneWidget);
+
+        // 2. AlertDetailPage for resolved report (#SC-20290) -> pushes focused MapPage
+        final resolvedAlert = repo.alerts.firstWhere(
+          (a) => a.reportId == '#SC-20290',
+        );
+        await tester.pumpWidget(
+          _wrapWithScope(
+            repo,
+            AlertDetailPage(
+              key: const ValueKey('resolved-alert-detail'),
+              alert: resolvedAlert,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final resolvedAlertMapBtn = find.byKey(
+          const Key('alert-detail-view-map-btn'),
+        );
+        await tester.scrollUntilVisible(resolvedAlertMapBtn, 150);
+        await tester.pumpAndSettle();
+        await tester.tap(resolvedAlertMapBtn);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MapPage), findsOneWidget);
+        expect(
+          find.byKey(const Key('map-focused-resolved-pill')),
+          findsOneWidget,
+        );
+        expect(find.text('✓'), findsOneWidget);
+
+        // 3. TrackingPage._buildResolvedView (#SC-20290) at 390px -> View location on map
+        await tester.pumpWidget(
+          ReportScope(
+            key: const ValueKey('resolved-tracking-view-map-scope'),
+            repository: repo,
+            child: MaterialApp(
+              theme: buildSrolanhCityTheme(),
+              home: const TrackingPage(reportId: '#SC-20290'),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final trackingMapBtn = find.byKey(const Key('resolved-view-map-btn'));
+        expect(trackingMapBtn, findsOneWidget);
+        expect(find.text('View location on map'), findsOneWidget);
+        await tester.tap(trackingMapBtn);
+        await tester.pumpAndSettle();
+        expect(find.byType(MapPage), findsOneWidget);
+        expect(
+          find.byKey(const Key('map-focused-resolved-pill')),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'R4: AlertsPage supports >= 48dp accessible delete button, Dismissible swipe, Undo, Clear read/all & WCAG 2.1 AA without deleting CivicReports',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        final initialReportCount = repo.reports.length;
+        final initialAlerts = repo.alerts.toList();
+        final firstAlert = initialAlerts.first;
+        final secondAlert = initialAlerts[1];
+
+        await tester.pumpWidget(
+          _wrapWithScope(repo, const Scaffold(body: AlertsPage())),
+        );
+        await tester.pumpAndSettle();
+
+        // Check >= 48dp accessible delete button & WCAG 2.1 AA guidelines
+        final deleteBtn = find.byKey(Key('delete-alert-${firstAlert.id}'));
+        expect(deleteBtn, findsOneWidget);
+        final btnSize = tester.getSize(deleteBtn);
+        expect(btnSize.width, greaterThanOrEqualTo(48));
+        expect(btnSize.height, greaterThanOrEqualTo(48));
+
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+        // 1. Delete via icon button + Undo restores
+        await tester.tap(deleteBtn);
+        await tester.pumpAndSettle();
+        expect(repo.alerts.length, equals(initialAlerts.length - 1));
+        expect(repo.reports.length, equals(initialReportCount));
+        expect(repo.findById(firstAlert.reportId), isNotNull);
+
+        await tester.tap(find.text('Undo'));
+        await tester.pumpAndSettle();
+        expect(repo.alerts.length, equals(initialAlerts.length));
+
+        // 2. Swipe-to-delete via Dismissible + Undo restores
+        await tester.drag(
+          find.byKey(ValueKey('alert-dismissible-${secondAlert.id}')),
+          const Offset(-500, 0),
+        );
+        await tester.pumpAndSettle();
+        expect(repo.alerts.length, equals(initialAlerts.length - 1));
+        expect(repo.reports.length, equals(initialReportCount));
+        expect(repo.findById(secondAlert.reportId), isNotNull);
+
+        await tester.tap(find.text('Undo'));
+        await tester.pumpAndSettle();
+        expect(repo.alerts.length, equals(initialAlerts.length));
+
+        // 3. Clear read removes only read alerts
+        repo.markAlertRead(firstAlert.id);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('alerts-clear-read-btn')));
+        await tester.pumpAndSettle();
+        expect(repo.alerts.any((a) => a.isRead), isFalse);
+        expect(repo.reports.length, equals(initialReportCount));
+
+        // 4. Clear all clears remaining alerts without touching reports
+        await tester.tap(find.byKey(const Key('alerts-clear-all-btn')));
+        await tester.pumpAndSettle();
+        expect(repo.alerts, isEmpty);
+        expect(repo.reports.length, equals(initialReportCount));
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'R4: AlertDetailPage >= 48dp delete button deletes alert, pops to AlertsPage, preserves CivicReport, and supports Undo',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        final repo = ReportRepository(
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        final initialReportCount = repo.reports.length;
+        final initialAlerts = repo.alerts.length;
+        final targetAlert = repo.alerts.first;
+
+        await tester.pumpWidget(
+          _wrapWithScope(repo, const Scaffold(body: AlertsPage())),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text(targetAlert.englishTitle));
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDetailPage), findsOneWidget);
+
+        final detailDeleteBtn = find.byKey(
+          const Key('alert-detail-delete-btn'),
+        );
+        final size = tester.getSize(detailDeleteBtn);
+        expect(size.width, greaterThanOrEqualTo(48));
+        expect(size.height, greaterThanOrEqualTo(48));
+
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+        await tester.tap(detailDeleteBtn);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDetailPage), findsNothing);
+        expect(repo.alerts.length, equals(initialAlerts - 1));
+        expect(repo.reports.length, equals(initialReportCount));
+        expect(repo.findById(targetAlert.reportId), isNotNull);
+
+        await tester.tap(find.text('Undo'));
+        await tester.pumpAndSettle();
+        expect(repo.alerts.length, equals(initialAlerts));
+        handle.dispose();
+      },
+    );
+  });
 }
 
 class _FakeLocationService extends LocationService {
@@ -2591,6 +3188,15 @@ class _FakeLocationService extends LocationService {
     bool enforceMockCheck = true,
     bool fastFix = false,
   }) async => result;
+}
+
+class _FakeGeocodingService extends ReverseGeocodingService {
+  _FakeGeocodingService(this.place);
+
+  final GeocodedPlace? place;
+
+  @override
+  Future<GeocodedPlace?> reverseGeocode(LatLng point) async => place;
 }
 
 class _UnavailableTestVoiceService implements VoiceInputService {

@@ -74,6 +74,7 @@ class _MapPageState extends State<MapPage> {
   bool _isLocating = false;
   bool _mapReady = false;
   bool _didApplyInitialFocus = false;
+  bool _didAutoOpenFocusedSheet = false;
 
   @override
   void initState() {
@@ -93,6 +94,17 @@ class _MapPageState extends State<MapPage> {
           _activeReportId = focused.id;
           _zoom = MapTileConfig.streetFocusZoom;
           _clusterTier = MapClusterService.tierForZoom(_zoom);
+          if (focused.status == ReportStatus.resolved &&
+              !_didAutoOpenFocusedSheet) {
+            _didAutoOpenFocusedSheet = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _openIncidentSheet(
+                focused,
+                Bilingual(repo.settings.englishFirst),
+              );
+            });
+          }
         }
       } else if (repo.profile.hasHomeArea) {
         final homeProvince = CambodiaLocationCatalog.matchFromProfileArea(
@@ -113,6 +125,36 @@ class _MapPageState extends State<MapPage> {
   }
 
   @override
+  void didUpdateWidget(covariant MapPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.focusedReportId != oldWidget.focusedReportId &&
+        widget.focusedReportId != null) {
+      final repo = ReportScope.read(context);
+      final focused = repo.findById(widget.focusedReportId!);
+      if (focused != null) {
+        _didAutoOpenFocusedSheet = false;
+        _center = focused.coordinates;
+        _activeReportId = focused.id;
+        _zoom = MapTileConfig.streetFocusZoom;
+        _clusterTier = MapClusterService.tierForZoom(_zoom);
+        if (_mapReady) {
+          _mapController.move(
+            focused.coordinates,
+            MapTileConfig.streetFocusZoom,
+          );
+        }
+        if (focused.status == ReportStatus.resolved) {
+          _didAutoOpenFocusedSheet = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _openIncidentSheet(focused, Bilingual(repo.settings.englishFirst));
+          });
+        }
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _viewportDebounce?.cancel();
     _searchController.dispose();
@@ -125,6 +167,7 @@ class _MapPageState extends State<MapPage> {
     final q = _query.trim().toLowerCase();
     return reports
         .where((report) {
+          if (report.status == ReportStatus.resolved) return false;
           if (_selectedCategory != null &&
               report.category != _selectedCategory) {
             return false;
@@ -326,7 +369,7 @@ class _MapPageState extends State<MapPage> {
                             ),
                             Chip(
                               label: Text(
-                                '${repo.reports.length}',
+                                '${repo.reports.where((r) => r.status != ReportStatus.resolved).length}',
                                 style: AppFonts.displayStyle(
                                   fontSize: 11.5,
                                   color: AppColors.ink,
@@ -388,6 +431,7 @@ class _MapPageState extends State<MapPage> {
                                 final province = matches[index];
                                 final count = repo.reportCountForProvince(
                                   province,
+                                  includeResolved: false,
                                 );
                                 final isSelected =
                                     activeProvince?.code == province.code;
@@ -751,6 +795,17 @@ class _MapPageState extends State<MapPage> {
               builder: (context, _) {
                 final live = repo.findById(report.id) ?? report;
                 final priority = live.priority;
+                final isResolved = live.status == ReportStatus.resolved;
+                final sheetAssetPath = isResolved
+                    ? (live.resolvedAfterAssetPath ?? live.photoAssetPath)
+                    : live.photoAssetPath;
+                final sheetLocalPath =
+                    isResolved && live.resolvedAfterAssetPath != null
+                    ? null
+                    : live.localPhotoPath;
+                final sheetHasPhoto =
+                    (sheetLocalPath != null && sheetLocalPath.isNotEmpty) ||
+                    (sheetAssetPath != null && sheetAssetPath.isNotEmpty);
                 final alreadyContributed = live.isContributedByCurrentUser;
                 final isOwnReport =
                     live.createdByCurrentUser ||
@@ -792,9 +847,9 @@ class _MapPageState extends State<MapPage> {
                         Row(
                           children: [
                             Semantics(
-                              button: live.hasPhoto,
-                              excludeSemantics: live.hasPhoto,
-                              label: live.hasPhoto
+                              button: sheetHasPhoto,
+                              excludeSemantics: sheetHasPhoto,
+                              label: sheetHasPhoto
                                   ? tr.primary(
                                       'មើលរូបភាពពេញអេក្រង់',
                                       'View full photo',
@@ -804,13 +859,13 @@ class _MapPageState extends State<MapPage> {
                                       'No photo attached',
                                     ),
                               child: InkWell(
-                                onTap: live.hasPhoto
+                                onTap: sheetHasPhoto
                                     ? () => PhotoLightboxPage.open(
                                         context,
                                         category: live.category,
                                         bilingual: tr,
-                                        localPhotoPath: live.localPhotoPath,
-                                        assetPath: live.photoAssetPath,
+                                        localPhotoPath: sheetLocalPath,
+                                        assetPath: sheetAssetPath,
                                         title: tr.primary(
                                           live.khmerTitle,
                                           live.englishTitle,
@@ -821,8 +876,8 @@ class _MapPageState extends State<MapPage> {
                                 borderRadius: BorderRadius.circular(16),
                                 child: ReportPhoto(
                                   category: live.category,
-                                  localPhotoPath: live.localPhotoPath,
-                                  assetPath: live.photoAssetPath,
+                                  localPhotoPath: sheetLocalPath,
+                                  assetPath: sheetAssetPath,
                                   width: 76,
                                   height: 76,
                                   borderRadius: 16,
@@ -835,7 +890,11 @@ class _MapPageState extends State<MapPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 4,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
                                     children: [
                                       Text(
                                         live.id,
@@ -844,12 +903,38 @@ class _MapPageState extends State<MapPage> {
                                           color: AppColors.teal,
                                         ),
                                       ),
-                                      const SizedBox(width: 8),
                                       PriorityBadge(
                                         breakdown: priority,
                                         bilingual: tr,
                                         compact: true,
                                       ),
+                                      if (isResolved)
+                                        Container(
+                                          key: const Key(
+                                            'map-sheet-resolved-badge',
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.successSoft,
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            tr.primary(
+                                              '✓ បានដោះស្រាយ',
+                                              '✓ Resolved',
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: AppColors.success,
+                                            ),
+                                          ),
+                                        ),
                                     ],
                                   ),
                                   const SizedBox(height: 4),
@@ -1189,28 +1274,43 @@ class _MapPageState extends State<MapPage> {
   Widget build(BuildContext context) {
     final repo = ReportScope.of(context);
     final tr = Bilingual(repo.settings.englishFirst);
-    final filteredReports = _filterReports(repo.reports);
+    final openReports = repo.reports
+        .where((r) => r.status != ReportStatus.resolved)
+        .toList(growable: false);
+    final focusedReport = widget.focusedReportId == null
+        ? null
+        : repo.findById(widget.focusedReportId!);
+    final isFocusedResolvedMode =
+        focusedReport != null && focusedReport.status == ReportStatus.resolved;
+    final filteredReports = isFocusedResolvedMode
+        ? <CivicReport>[focusedReport]
+        : _filterReports(openReports);
     final highlightedId = _activeReportId ?? widget.focusedReportId;
-    final clusterItems = MapClusterService.clusterForZoom(
-      reports: filteredReports,
-      zoom: _zoom,
-      visibleBounds: _visibleBounds,
-    );
-    final viewportReports =
-        _zoom < MapClusterService.provinceClusterMaxZoom ||
-            _query.trim().isNotEmpty
-        ? filteredReports
-        : MapClusterService.reportsInViewport(
+    final clusterItems = isFocusedResolvedMode
+        ? <MapClusterItem>[SingleReportPinItem(report: focusedReport)]
+        : MapClusterService.clusterForZoom(
             reports: filteredReports,
-            bounds: _carouselBounds ?? _visibleBounds,
-            center: _center,
+            zoom: _zoom,
+            visibleBounds: _visibleBounds,
           );
+    final viewportReports = isFocusedResolvedMode
+        ? const <CivicReport>[]
+        : (_zoom < MapClusterService.provinceClusterMaxZoom ||
+                  _query.trim().isNotEmpty
+              ? filteredReports
+              : MapClusterService.reportsInViewport(
+                  reports: filteredReports,
+                  bounds: _carouselBounds ?? _visibleBounds,
+                  center: _center,
+                ));
     final isOverviewZoom = _zoom < MapClusterService.provinceClusterMaxZoom;
     final showBottomCarousel =
+        !isFocusedResolvedMode &&
         _customPin == null &&
         (!isOverviewZoom || _query.trim().isNotEmpty) &&
         viewportReports.isNotEmpty;
     final showEmptyAreaBanner =
+        !isFocusedResolvedMode &&
         _customPin == null &&
         !isOverviewZoom &&
         viewportReports.isEmpty &&
@@ -1243,6 +1343,15 @@ class _MapPageState extends State<MapPage> {
                 ),
                 onMapReady: () {
                   _mapReady = true;
+                  if (widget.focusedReportId != null) {
+                    final focused = repo.findById(widget.focusedReportId!);
+                    if (focused != null) {
+                      _mapController.move(
+                        focused.coordinates,
+                        MapTileConfig.streetFocusZoom,
+                      );
+                    }
+                  }
                   _visibleBounds = _mapController.camera.visibleBounds;
                   _carouselBounds = _visibleBounds;
                   if (mounted) setState(() {});
@@ -1253,6 +1362,7 @@ class _MapPageState extends State<MapPage> {
                       hasGesture: hasGesture,
                     ),
                 onTap: (_, point) {
+                  if (isFocusedResolvedMode) return;
                   HapticFeedback.selectionClick();
                   setState(() {
                     _customPin = point;
@@ -1350,10 +1460,16 @@ class _MapPageState extends State<MapPage> {
                             label: report.status == ReportStatus.resolved
                                 ? '✓'
                                 : 'P${report.priority.level}',
-                            semanticLabel: tr.primary(
-                              '${report.khmerTitle} · P${report.priority.level}',
-                              '${report.englishTitle}, Priority P${report.priority.level}',
-                            ),
+                            semanticLabel:
+                                report.status == ReportStatus.resolved
+                                ? tr.primary(
+                                    '${report.khmerTitle} · បានដោះស្រាយ',
+                                    '${report.englishTitle}, Resolved',
+                                  )
+                                : tr.primary(
+                                    '${report.khmerTitle} · P${report.priority.level}',
+                                    '${report.englishTitle}, Priority P${report.priority.level}',
+                                  ),
                             color: report.status == ReportStatus.resolved
                                 ? AppColors.success
                                 : AppColors.priorityColor(
@@ -1411,192 +1527,240 @@ class _MapPageState extends State<MapPage> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Expanded(
-                        child: SearchBar(
-                          controller: _searchController,
-                          backgroundColor: const WidgetStatePropertyAll(
-                            Colors.white,
-                          ),
-                          hintText: tr.primary(
-                            'ស្វែងរកផ្លូវ ទីតាំង ឬលេខកូដ...',
-                            'Search street, place, or ID...',
-                          ),
-                          leading: _isSearchingPlace
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
+                      if (isFocusedResolvedMode)
+                        Expanded(
+                          child: Material(
+                            color: Colors.white,
+                            elevation: 3,
+                            borderRadius: BorderRadius.circular(999),
+                            child: InkWell(
+                              key: const Key('map-focused-resolved-pill'),
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: () =>
+                                  _openIncidentSheet(focusedReport, tr),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  minHeight: 48,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 10,
                                   ),
-                                )
-                              : const Icon(Icons.search),
-                          trailing: [
-                            if (_query.isNotEmpty)
-                              IconButton(
-                                tooltip: tr.primary(
-                                  'សម្អាតការស្វែងរក',
-                                  'Clear search',
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.check_circle_rounded,
+                                        color: AppColors.success,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          '${focusedReport.id} · ${tr.primary(focusedReport.khmerTitle, focusedReport.englishTitle)}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.ink,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                icon: const Icon(Icons.close, size: 18),
-                                onPressed: () {
-                                  _searchController.clear();
-                                  setState(() => _query = '');
-                                },
-                              ),
-                            Semantics(
-                              toggled: _showLegend,
-                              child: IconButton(
-                                key: const Key('map-legend-toggle'),
-                                tooltip: tr.primary(
-                                  'កម្រិតអាទិភាព P1–P5',
-                                  'Priority legend',
-                                ),
-                                icon: Icon(
-                                  _showLegend
-                                      ? Icons.info_rounded
-                                      : Icons.info_outline_rounded,
-                                  size: 20,
-                                  color: _showLegend
-                                      ? AppColors.teal
-                                      : AppColors.muted,
-                                ),
-                                onPressed: () {
-                                  HapticFeedback.selectionClick();
-                                  setState(() => _showLegend = !_showLegend);
-                                },
                               ),
                             ),
-                          ],
-                          elevation: const WidgetStatePropertyAll(3),
-                          onChanged: (value) => setState(() => _query = value),
-                          onSubmitted: (value) =>
-                              _handleSearchSubmit(value, repo.reports, tr),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        ActionChip(
-                          key: const Key('map-province-filter-btn'),
-                          backgroundColor: AppColors.teal,
-                          side: BorderSide.none,
-                          avatar: const Icon(
-                            Icons.public_rounded,
-                            size: 16,
-                            color: Colors.white,
                           ),
-                          label: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                currentProvince == null
-                                    ? tr.primary(
-                                        'ទូទាំងកម្ពុជា',
-                                        'All Cambodia',
-                                      )
-                                    : tr.primary(
-                                        currentProvince.shortKhmer,
-                                        currentProvince.english,
-                                      ),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12,
+                        )
+                      else
+                        Expanded(
+                          child: SearchBar(
+                            controller: _searchController,
+                            backgroundColor: const WidgetStatePropertyAll(
+                              Colors.white,
+                            ),
+                            hintText: tr.primary(
+                              'ស្វែងរកផ្លូវ ទីតាំង ឬលេខកូដ...',
+                              'Search street, place, or ID...',
+                            ),
+                            leading: _isSearchingPlace
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.search),
+                            trailing: [
+                              if (_query.isNotEmpty)
+                                IconButton(
+                                  tooltip: tr.primary(
+                                    'សម្អាតការស្វែងរក',
+                                    'Clear search',
+                                  ),
+                                  icon: const Icon(Icons.close, size: 18),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    setState(() => _query = '');
+                                  },
                                 ),
-                              ),
-                              const SizedBox(width: 2),
-                              const Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                size: 16,
-                                color: Colors.white,
+                              Semantics(
+                                toggled: _showLegend,
+                                child: IconButton(
+                                  key: const Key('map-legend-toggle'),
+                                  tooltip: tr.primary(
+                                    'កម្រិតអាទិភាព P1–P5',
+                                    'Priority legend',
+                                  ),
+                                  icon: Icon(
+                                    _showLegend
+                                        ? Icons.info_rounded
+                                        : Icons.info_outline_rounded,
+                                    size: 20,
+                                    color: _showLegend
+                                        ? AppColors.teal
+                                        : AppColors.muted,
+                                  ),
+                                  onPressed: () {
+                                    HapticFeedback.selectionClick();
+                                    setState(() => _showLegend = !_showLegend);
+                                  },
+                                ),
                               ),
                             ],
+                            elevation: const WidgetStatePropertyAll(3),
+                            onChanged: (value) =>
+                                setState(() => _query = value),
+                            onSubmitted: (value) =>
+                                _handleSearchSubmit(value, openReports, tr),
                           ),
-                          onPressed: () {
-                            HapticFeedback.selectionClick();
-                            _openProvinceJumpSheet(repo, tr);
-                          },
                         ),
-                        const SizedBox(width: 6),
-                        FilterChip(
-                          label: Text(
-                            tr.primary(
-                              'ទាំងអស់ (${repo.reports.length})',
-                              'All (${repo.reports.length})',
+                    ],
+                  ),
+                  if (!isFocusedResolvedMode) ...[
+                    const SizedBox(height: 10),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          ActionChip(
+                            key: const Key('map-province-filter-btn'),
+                            backgroundColor: AppColors.teal,
+                            side: BorderSide.none,
+                            avatar: const Icon(
+                              Icons.public_rounded,
+                              size: 16,
+                              color: Colors.white,
                             ),
+                            label: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  currentProvince == null
+                                      ? tr.primary(
+                                          'ទូទាំងកម្ពុជា',
+                                          'All Cambodia',
+                                        )
+                                      : tr.primary(
+                                          currentProvince.shortKhmer,
+                                          currentProvince.english,
+                                        ),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(width: 2),
+                                const Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                              ],
+                            ),
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              _openProvinceJumpSheet(repo, tr);
+                            },
                           ),
-                          selected: _selectedCategory == null,
-                          backgroundColor: Colors.white,
-                          onSelected: (_) {
-                            setState(() => _selectedCategory = null);
-                            if (_carouselController.hasClients) {
-                              _carouselController.jumpToPage(0);
-                            }
-                          },
-                        ),
-                        const SizedBox(width: 6),
-                        for (final cat in IssueCategory.values) ...[
+                          const SizedBox(width: 6),
                           FilterChip(
-                            label: Text(tr.categoryPrimary(cat)),
-                            selected: _selectedCategory == cat,
+                            label: Text(
+                              tr.primary(
+                                'ទាំងអស់ (${openReports.length})',
+                                'All (${openReports.length})',
+                              ),
+                            ),
+                            selected: _selectedCategory == null,
                             backgroundColor: Colors.white,
-                            onSelected: (selected) {
-                              setState(
-                                () => _selectedCategory = selected ? cat : null,
-                              );
+                            onSelected: (_) {
+                              setState(() => _selectedCategory = null);
                               if (_carouselController.hasClients) {
                                 _carouselController.jumpToPage(0);
                               }
                             },
                           ),
                           const SizedBox(width: 6),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (_showLegend)
-                    Container(
-                      margin: const EdgeInsets.only(top: 8),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: AppColors.cardShadow,
-                      ),
-                      child: Wrap(
-                        spacing: 10,
-                        runSpacing: 6,
-                        children: [
-                          _LegendDot(
-                            color: AppColors.priorityColor(5),
-                            label: 'P5 ${tr.primary('បន្ទាន់', 'Critical')}',
-                          ),
-                          _LegendDot(
-                            color: AppColors.priorityColor(4),
-                            label: 'P4 ${tr.primary('ខ្ពស់', 'High')}',
-                          ),
-                          _LegendDot(
-                            color: AppColors.priorityColor(3),
-                            label: 'P3 ${tr.primary('មធ្យម', 'Medium')}',
-                          ),
-                          _LegendDot(
-                            color: AppColors.priorityColor(2),
-                            label: 'P2 ${tr.primary('ទាប', 'Low')}',
-                          ),
-                          _LegendDot(
-                            color: AppColors.success,
-                            label: '✓ ${tr.primary('ជួសជុលរួច', 'Resolved')}',
-                          ),
+                          for (final cat in IssueCategory.values) ...[
+                            FilterChip(
+                              label: Text(tr.categoryPrimary(cat)),
+                              selected: _selectedCategory == cat,
+                              backgroundColor: Colors.white,
+                              onSelected: (selected) {
+                                setState(
+                                  () =>
+                                      _selectedCategory = selected ? cat : null,
+                                );
+                                if (_carouselController.hasClients) {
+                                  _carouselController.jumpToPage(0);
+                                }
+                              },
+                            ),
+                            const SizedBox(width: 6),
+                          ],
                         ],
                       ),
                     ),
+                    if (_showLegend)
+                      Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: AppColors.cardShadow,
+                        ),
+                        child: Wrap(
+                          spacing: 10,
+                          runSpacing: 6,
+                          children: [
+                            _LegendDot(
+                              color: AppColors.priorityColor(5),
+                              label: 'P5 ${tr.primary('បន្ទាន់', 'Critical')}',
+                            ),
+                            _LegendDot(
+                              color: AppColors.priorityColor(4),
+                              label: 'P4 ${tr.primary('ខ្ពស់', 'High')}',
+                            ),
+                            _LegendDot(
+                              color: AppColors.priorityColor(3),
+                              label: 'P3 ${tr.primary('មធ្យម', 'Medium')}',
+                            ),
+                            _LegendDot(
+                              color: AppColors.priorityColor(2),
+                              label: 'P2 ${tr.primary('ទាប', 'Low')}',
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                   if (_outsideCambodiaDetected && _rawOutsidePoint != null)
                     Semantics(
                       container: true,

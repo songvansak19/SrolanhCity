@@ -6,8 +6,10 @@ import '../../../data/services/comment_translation_service.dart';
 import '../../../data/services/location_service.dart';
 import '../../../data/services/reverse_geocoding_service.dart';
 import '../../../domain/models/report_models.dart';
+import '../../../domain/services/anti_spoof_service.dart';
 import '../../../domain/services/priority_calculator.dart';
 import '../../../domain/services/relative_time_formatter.dart';
+import '../../../domain/services/spatial_clustering_service.dart';
 import '../../../domain/services/support_eligibility_service.dart';
 import '../../core/l10n.dart';
 import '../../core/report_scope.dart';
@@ -22,6 +24,7 @@ import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/priority_donut_chart.dart';
 import '../../core/widgets/report_photo.dart';
 import '../map/map_page.dart';
+import '../report/views/fake_gps_page.dart';
 
 class TrackingPage extends StatefulWidget {
   const TrackingPage({
@@ -439,6 +442,11 @@ class _TrackingPageState extends State<TrackingPage> {
                         report: report,
                         tr: tr,
                         allowAddNote: false,
+                        isOwnReport:
+                            report.createdByCurrentUser ||
+                            (report.isMine && !report.joinedByCurrentUser),
+                        locationService: widget.locationService,
+                        geocodingService: widget.geocodingService,
                         translationService: widget.translationService,
                       ),
                       const SizedBox(height: 18),
@@ -511,33 +519,43 @@ class _TrackingPageState extends State<TrackingPage> {
 
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
-                  child: Row(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      OutlinedButton.icon(
-                        onPressed: () => Navigator.push<void>(
-                          context,
-                          MaterialPageRoute<void>(
-                            builder: (_) => MapPage(focusedReportId: report.id),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: OutlinedButton.icon(
+                          key: const Key('resolved-view-map-btn'),
+                          onPressed: () => Navigator.push<void>(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  MapPage(focusedReportId: report.id),
+                            ),
+                          ),
+                          icon: const Icon(Icons.map_outlined, size: 18),
+                          label: Text(
+                            tr.primary(
+                              'មើលទីតាំងលើផែនទី',
+                              'View location on map',
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        icon: const Icon(Icons.map_outlined, size: 18),
-                        label: Text(tr.primary('ផែនទី', 'Map')),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(0, 52),
-                        ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: SizedBox(
-                          height: 52,
-                          child: FilledButton.icon(
-                            onPressed: () => _shareResolvedReport(report, tr),
-                            icon: const Icon(Icons.share_outlined, size: 18),
-                            label: Text(
-                              tr.primary('ចែករំលែកដំណឹងល្អ', 'Share good news'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: FilledButton.icon(
+                          onPressed: () => _shareResolvedReport(report, tr),
+                          icon: const Icon(Icons.share_outlined, size: 18),
+                          label: Text(
+                            tr.primary('ចែករំលែកដំណឹងល្អ', 'Share good news'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ),
@@ -893,6 +911,11 @@ class _TrackingPageState extends State<TrackingPage> {
                         report: report,
                         tr: tr,
                         allowAddNote: true,
+                        isOwnReport:
+                            report.createdByCurrentUser ||
+                            (report.isMine && !report.joinedByCurrentUser),
+                        locationService: widget.locationService,
+                        geocodingService: widget.geocodingService,
                         translationService: widget.translationService,
                       ),
                       if (allPhotos.length > 1) ...[
@@ -1495,12 +1518,18 @@ class _CitizenCommentsCard extends StatefulWidget {
     required this.report,
     required this.tr,
     required this.allowAddNote,
+    required this.isOwnReport,
+    this.locationService = const LocationService(),
+    this.geocodingService,
     this.translationService,
   });
 
   final CivicReport report;
   final Bilingual tr;
   final bool allowAddNote;
+  final bool isOwnReport;
+  final LocationService locationService;
+  final ReverseGeocodingService? geocodingService;
   final CommentTranslationService? translationService;
 
   @override
@@ -1509,6 +1538,7 @@ class _CitizenCommentsCard extends StatefulWidget {
 
 class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
   bool _showAll = false;
+  bool _isVerifyingCommentLocation = false;
   late final CommentTranslationService _translator =
       widget.translationService ?? HttpCommentTranslationService.instance;
   final Map<String, String> _translations = <String, String>{};
@@ -1572,30 +1602,51 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
     });
   }
 
-  String _authorLabel(CitizenComment comment, int index, Bilingual tr) {
-    if (comment.isOriginalReporter) {
+  String _authorLabel(
+    CitizenComment comment,
+    int index,
+    Bilingual tr,
+    UserProfile profile,
+  ) {
+    final showOriginalReporterSuffix =
+        comment.isOriginalReporter ||
+        (widget.isOwnReport && comment.isCurrentUser);
+    final suffix = tr.primary(' · អ្នករាយការណ៍ដើម', ' · Original reporter');
+
+    if (comment.isAnonymous) {
       if (comment.isCurrentUser) {
-        return comment.isAnonymous
-            ? tr.primary(
-                'អ្នក (អនាមិក) · អ្នករាយការណ៍ដើម',
-                'You (Anonymous) · Original reporter',
-              )
-            : tr.primary('អ្នក · អ្នករាយការណ៍ដើម', 'You · Original reporter');
+        final base = tr.primary('អនាមិក', 'Anonymous');
+        return showOriginalReporterSuffix ? '$base$suffix' : base;
       }
+      if (comment.isOriginalReporter) {
+        return '${tr.primary('អនាមិក', 'Anonymous')}$suffix';
+      }
+      final num = index + 1;
+      return tr.primary('ប្រជាពលរដ្ឋអនាមិក #$num', 'Anonymous citizen #$num');
+    }
+
+    if (comment.isCurrentUser) {
+      final stored = !UserProfile.isDefaultOrEmptyName(comment.authorName)
+          ? comment.authorName!.trim()
+          : null;
+      final live = profile.realDisplayName(englishFirst: tr.englishFirst);
+      final base = stored ?? live ?? tr.primary('ភ្ញៀវ · អ្នក', 'Guest · You');
+      return showOriginalReporterSuffix ? '$base$suffix' : base;
+    }
+
+    if (!UserProfile.isDefaultOrEmptyName(comment.authorName)) {
+      final base = comment.authorName!.trim();
+      return showOriginalReporterSuffix ? '$base$suffix' : base;
+    }
+    if (comment.isOriginalReporter) {
       return tr.primary('អ្នករាយការណ៍ដើម', 'Original reporter');
     }
-    if (comment.isCurrentUser) {
-      return comment.isAnonymous
-          ? tr.primary('អ្នក (អនាមិក)', 'You (Anonymous)')
-          : tr.primary('អ្នក', 'You');
-    }
     final num = index + 1;
-    return comment.isAnonymous
-        ? tr.primary('ប្រជាពលរដ្ឋអនាមិក #$num', 'Anonymous citizen #$num')
-        : tr.primary('ប្រជាពលរដ្ឋ #$num', 'Citizen #$num');
+    return tr.primary('ប្រជាពលរដ្ឋ #$num', 'Citizen #$num');
   }
 
   Future<void> _openAddCommentSheet() async {
+    if (_isVerifyingCommentLocation) return;
     final repo = ReportScope.read(context);
     final tr = widget.tr;
     HapticFeedback.selectionClick();
@@ -1613,23 +1664,176 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
         );
 
     if (submitted == null || !mounted) return;
-    final updated = repo.addCitizenComment(
-      widget.report.id,
-      text: submitted.text,
-      isAnonymous: submitted.anonymous,
-    );
-    if (updated != null && mounted) {
-      setState(() => _showAll = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            tr.primary(
-              'បានបន្ថែមមតិលើរបាយការណ៍ ${widget.report.id}',
-              'Added your note to ${widget.report.id}.',
+
+    // R1: Own report skips GPS verification and attaches no remote/on-site tag.
+    if (widget.isOwnReport) {
+      final updated = repo.addCitizenComment(
+        widget.report.id,
+        text: submitted.text,
+        isAnonymous: submitted.anonymous,
+      );
+      if (updated != null && mounted) {
+        setState(() => _showAll = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              tr.primary(
+                'បានបន្ថែមមតិលើរបាយការណ៍ ${widget.report.id}',
+                'Added your note to ${widget.report.id}.',
+              ),
             ),
           ),
-        ),
+        );
+      }
+      return;
+    }
+
+    // R1: Other user's report silently requires live Cambodia GPS and attaches
+    // `✓ On-site` (<= 150 m) or `Remote · <Village / District / Province>` (> 150 m).
+    setState(() => _isVerifyingCommentLocation = true);
+    try {
+      var locationResult = await widget.locationService.getCurrentLocation(
+        enforceMockCheck: true,
+        fastFix: true,
       );
+      if (!mounted) return;
+
+      GeocodedPlace? userGeocodedPlace;
+      if (locationResult is LocationSuccess &&
+          !locationResult.isOutsideCambodia) {
+        final gpsAssessment = AntiSpoofService.evaluateGpsFix(
+          current: locationResult.toReadingSample(),
+          lastCheckpoint: repo.lastVerifiedGpsCheckpoint,
+        );
+        if (gpsAssessment.isBlocked) {
+          locationResult = LocationMockDetected(
+            point: locationResult.point,
+            detectedLabel:
+                gpsAssessment.detectedLabel ?? 'Mock GPS / Spoofing Provider',
+            reasonKhmer: gpsAssessment.khmerSummary,
+            reasonEnglish: gpsAssessment.englishSummary,
+          );
+        } else {
+          final meters = SpatialClusteringService.distanceMeters(
+            locationResult.point,
+            widget.report.coordinates,
+          );
+          if (meters > SupportEligibilityService.verifiedNearbyMeters &&
+              repo.isOnline &&
+              widget.geocodingService != null) {
+            try {
+              userGeocodedPlace = await widget.geocodingService!
+                  .reverseGeocode(locationResult.point)
+                  .timeout(const Duration(seconds: 2), onTimeout: () => null);
+            } catch (_) {
+              userGeocodedPlace = null;
+            }
+            if (!mounted) return;
+          }
+        }
+      }
+
+      final decision = SupportEligibilityService.evaluateCommentLocation(
+        report: widget.report,
+        locationResult: locationResult,
+        userGeocodedPlace: userGeocodedPlace,
+      );
+
+      switch (decision) {
+        case CommentLocationMockGps():
+          final mockResult = locationResult is LocationMockDetected
+              ? locationResult
+              : null;
+          await Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => FakeGpsPage(
+                detectedAppLabel:
+                    mockResult?.detectedLabel ?? 'Mock GPS / Spoofing Provider',
+                detailKhmer: mockResult?.reasonKhmer,
+                detailEnglish: mockResult?.reasonEnglish,
+                onOpenSettings: widget.locationService.openLocationSettings,
+                onTryAgain: () => Navigator.pop(context),
+              ),
+            ),
+          );
+          return;
+
+        case CommentLocationDenied(
+          :final serviceDisabled,
+          :final permissionDenied,
+          :final outsideCambodia,
+        ):
+          final message = outsideCambodia
+              ? tr.primary(
+                  'ទីតាំង GPS នៅក្រៅប្រទេសកម្ពុជា — ត្រូវការ GPS ក្នុងកម្ពុជាដើម្បីបញ្ចេញមតិ',
+                  'Device GPS is outside Cambodia — live Cambodia GPS is required to comment.',
+                )
+              : serviceDisabled
+              ? tr.primary(
+                  'សូមបើក GPS ដើម្បីផ្ទៀងផ្ទាត់ទីតាំងរបស់អ្នកមុនបញ្ចេញមតិ',
+                  'Turn on GPS to verify your location before commenting.',
+                )
+              : permissionDenied
+              ? tr.primary(
+                  'ត្រូវការសិទ្ធិ GPS ដើម្បីផ្ទៀងផ្ទាត់ទីតាំងរបស់អ្នកមុនបញ្ចេញមតិ',
+                  'Location permission is required to verify your location before commenting.',
+                )
+              : tr.primary(
+                  'មិនអាចផ្ទៀងផ្ទាត់ទីតាំង GPS បានទេ — សូមព្យាយាមម្តងទៀត',
+                  'Could not verify live Cambodia GPS — please try again.',
+                );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message),
+              action: (serviceDisabled || permissionDenied)
+                  ? SnackBarAction(
+                      label: tr.primary('បើក GPS', 'Open GPS'),
+                      onPressed: widget.locationService.openLocationSettings,
+                    )
+                  : null,
+            ),
+          );
+          return;
+
+        case CommentLocationVerified(
+          :final tier,
+          :final userAreaKhmer,
+          :final userAreaEnglish,
+        ):
+          if (locationResult is LocationSuccess &&
+              !locationResult.isOutsideCambodia) {
+            repo.recordVerifiedGpsCheckpoint(
+              locationResult.point,
+              timestamp: locationResult.timestamp,
+            );
+          }
+          final updated = repo.addCitizenComment(
+            widget.report.id,
+            text: submitted.text,
+            isAnonymous: submitted.anonymous,
+            supportTier: tier,
+            supportAreaKhmer: userAreaKhmer,
+            supportAreaEnglish: userAreaEnglish,
+          );
+          if (updated != null && mounted) {
+            setState(() => _showAll = true);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  tr.primary(
+                    'បានបន្ថែមមតិលើរបាយការណ៍ ${widget.report.id}',
+                    'Added your note to ${widget.report.id}.',
+                  ),
+                ),
+              ),
+            );
+          }
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isVerifyingCommentLocation = false);
+      }
     }
   }
 
@@ -1647,6 +1851,7 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
 
   @override
   Widget build(BuildContext context) {
+    final repo = ReportScope.of(context);
     final report = widget.report;
     final tr = widget.tr;
     final comments = report.effectiveComments;
@@ -1690,7 +1895,9 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
               if (widget.allowAddNote)
                 TextButton.icon(
                   key: const Key('add-comment-btn'),
-                  onPressed: _openAddCommentSheet,
+                  onPressed: _isVerifyingCommentLocation
+                      ? null
+                      : _openAddCommentSheet,
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -1698,13 +1905,21 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
                     ),
                     minimumSize: const Size(48, 44),
                   ),
-                  icon: const Icon(
-                    Icons.add_comment_outlined,
-                    size: 15,
-                    color: AppColors.teal,
-                  ),
+                  icon: _isVerifyingCommentLocation
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(
+                          Icons.add_comment_outlined,
+                          size: 15,
+                          color: AppColors.teal,
+                        ),
                   label: Text(
-                    tr.primary('បន្ថែមមតិ', 'Add note'),
+                    _isVerifyingCommentLocation
+                        ? tr.primary('កំពុងផ្ទៀងផ្ទាត់...', 'Verifying...')
+                        : tr.primary('បន្ថែមមតិ', 'Add note'),
                     style: const TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w700,
@@ -1728,7 +1943,12 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
                   if (i > 0) const SizedBox(height: 8),
                   _CitizenCommentTile(
                     comment: visibleComments[i],
-                    authorLabel: _authorLabel(visibleComments[i], i, tr),
+                    authorLabel: _authorLabel(
+                      visibleComments[i],
+                      i,
+                      tr,
+                      repo.profile,
+                    ),
                     tr: tr,
                     translatedText:
                         _showingTranslationIds.contains(visibleComments[i].id)
@@ -1982,77 +2202,99 @@ class _CitizenCommentTile extends StatelessWidget {
               ],
             ],
           ),
-          if (comment.isRemoteSupport) ...[
+          if (comment.supportTier != null && !comment.isOriginalReporter) ...[
             const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                Container(
-                  key: Key('comment-remote-tag-${comment.id}'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.saffronSoft,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: AppColors.saffron.withValues(alpha: 0.55),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.location_searching_rounded,
-                        size: 11,
-                        color: AppColors.saffronInk,
+            Builder(
+              builder: (context) {
+                final tier = comment.supportTier!;
+                final isOnSite = tier == SupportVerificationTier.verifiedNearby;
+                final tagText = comment.supportReasonCategory != null
+                    ? tier.formatTransparentTag(
+                        englishFirst: tr.englishFirst,
+                        areaKhmer: comment.supportAreaKhmer,
+                        areaEnglish: comment.supportAreaEnglish,
+                      )
+                    : tier.formatCommentLocationTag(
+                        englishFirst: tr.englishFirst,
+                        areaKhmer: comment.supportAreaKhmer,
+                        areaEnglish: comment.supportAreaEnglish,
+                      );
+                final pillBg = isOnSite
+                    ? AppColors.successSoft
+                    : AppColors.saffronSoft;
+                final pillBorder = isOnSite
+                    ? AppColors.success.withValues(alpha: 0.45)
+                    : AppColors.saffron.withValues(alpha: 0.55);
+                final pillFg = isOnSite
+                    ? AppColors.tealDark
+                    : AppColors.saffronInk;
+                return Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    Container(
+                      key: Key('comment-location-tag-${comment.id}'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
                       ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          comment.supportTier!.formatTransparentTag(
-                            englishFirst: tr.englishFirst,
-                            areaKhmer: comment.supportAreaKhmer,
-                            areaEnglish: comment.supportAreaEnglish,
+                      decoration: BoxDecoration(
+                        color: pillBg,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: pillBorder),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isOnSite
+                                ? Icons.verified_rounded
+                                : Icons.location_searching_rounded,
+                            size: 11,
+                            color: pillFg,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              tagText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: pillFg,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (comment.supportReasonCategory != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Text(
+                          tr.primary(
+                            comment.supportReasonCategory!.khmerLabel,
+                            comment.supportReasonCategory!.englishLabel,
+                          ),
                           style: const TextStyle(
                             fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.saffronInk,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink,
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                if (comment.supportReasonCategory != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Text(
-                      tr.primary(
-                        comment.supportReasonCategory!.khmerLabel,
-                        comment.supportReasonCategory!.englishLabel,
-                      ),
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                  ),
-              ],
+                  ],
+                );
+              },
             ),
           ],
           if (comment.supportReasonCategory == null ||
@@ -2329,7 +2571,7 @@ class _AddCommentSheetState extends State<_AddCommentSheet> {
                 ),
                 subtitle: Text(
                   tr.primary(
-                    'លាក់ស្លាក "អ្នក" ហើយបង្ហាញថា អនាមិក',
+                    'លាក់ឈ្មោះរបស់អ្នក ហើយបង្ហាញថា អនាមិក',
                     'Labels your note as Anonymous',
                   ),
                   style: const TextStyle(fontSize: 11.5),
