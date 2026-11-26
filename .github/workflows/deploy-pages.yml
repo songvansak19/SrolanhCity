@@ -32,7 +32,14 @@ jobs:
         run: flutter pub get
 
       - name: Build Flutter Web for GitHub Pages
-        run: flutter build web --release --base-href "/SrolanhCity/" --no-web-resources-cdn
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [ -n "$API_BASE_URL" ]; then
+            flutter build web --release --base-href "/SrolanhCity/" --no-web-resources-cdn --dart-define="API_BASE_URL=$API_BASE_URL"
+          else
+            flutter build web --release --base-href "/SrolanhCity/" --no-web-resources-cdn
+          fi
 
       - name: Add SPA 404 fallback & disable Jekyll
         run: |
