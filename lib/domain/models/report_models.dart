@@ -4,6 +4,25 @@ import '../services/priority_calculator.dart';
 import '../services/relative_time_formatter.dart';
 import 'cambodia_locations.dart';
 
+DateTime? _parseIsoDateTime(String? raw) {
+  final trimmed = raw?.trim();
+  if (trimmed == null || trimmed.isEmpty) return null;
+  var normalized = trimmed;
+  final tIndex = normalized.indexOf('T');
+  if (tIndex != -1) {
+    final timePart = normalized.substring(tIndex + 1);
+    final hasTz =
+        timePart.endsWith('Z') ||
+        timePart.endsWith('z') ||
+        timePart.contains('+') ||
+        timePart.contains('-');
+    if (!hasTz) {
+      normalized = '${normalized}Z';
+    }
+  }
+  return DateTime.tryParse(normalized)?.toLocal();
+}
+
 /// Supported sort modes for Area News and My Reports lists.
 enum ReportSortOption {
   newest(khmerLabel: 'ថ្មីបំផុត', englishLabel: 'Newest'),
@@ -522,7 +541,7 @@ class TimelineEntry {
     'khmerSubtitle': khmerSubtitle,
     'englishSubtitle': englishSubtitle,
     'complete': complete,
-    if (timestamp != null) 'timestamp': timestamp!.toIso8601String(),
+    if (timestamp != null) 'timestamp': timestamp!.toUtc().toIso8601String(),
   };
 
   factory TimelineEntry.fromJson(Map<String, dynamic> json) {
@@ -546,7 +565,7 @@ class TimelineEntry {
           (json['english_subtitle'] as String?) ??
           '',
       complete: (json['complete'] as bool?) ?? false,
-      timestamp: rawTs == null ? null : DateTime.tryParse(rawTs),
+      timestamp: _parseIsoDateTime(rawTs),
     );
   }
 }
@@ -769,7 +788,7 @@ class CitizenComment {
   Map<String, dynamic> toJson() => {
     'id': id,
     'text': text,
-    'createdAt': createdAt.toIso8601String(),
+    'createdAt': createdAt.toUtc().toIso8601String(),
     'isOriginalReporter': isOriginalReporter,
     'isCurrentUser': isCurrentUser,
     'isAnonymous': isAnonymous,
@@ -792,10 +811,8 @@ class CitizenComment {
       id: (json['id'] as String?) ?? 'c-legacy',
       text: (json['text'] as String?) ?? '',
       createdAt:
-          DateTime.tryParse(
-            (json['createdAt'] as String?) ??
-                (json['created_at'] as String?) ??
-                '',
+          _parseIsoDateTime(
+            (json['createdAt'] as String?) ?? (json['created_at'] as String?),
           ) ??
           DateTime.now(),
       isOriginalReporter:
@@ -1159,7 +1176,7 @@ class CivicReport {
     'afterDateLabel': afterDateLabel,
     'fixedDurationKhmer': fixedDurationKhmer,
     'fixedDurationEnglish': fixedDurationEnglish,
-    'createdAt': createdAt.toIso8601String(),
+    'createdAt': createdAt.toUtc().toIso8601String(),
     'timeline': timeline.map((e) => e.toJson()).toList(),
     'citizenComments': citizenComments.map((c) => c.toJson()).toList(),
   };
@@ -1324,10 +1341,8 @@ class CivicReport {
           (json['fixed_duration_english'] as String?) ??
           'Fixed in 2 days',
       createdAt:
-          DateTime.tryParse(
-            (json['createdAt'] as String?) ??
-                (json['created_at'] as String?) ??
-                '',
+          _parseIsoDateTime(
+            (json['createdAt'] as String?) ?? (json['created_at'] as String?),
           ) ??
           DateTime.now(),
       timeline: entries,
@@ -1385,13 +1400,13 @@ class AlertItem {
     'englishTitle': englishTitle,
     'khmerSubtitle': khmerSubtitle,
     'englishSubtitle': englishSubtitle,
-    'createdAt': createdAt.toIso8601String(),
+    'createdAt': createdAt.toUtc().toIso8601String(),
     'isRead': isRead,
   };
 
   factory AlertItem.fromJson(Map<String, dynamic> json) {
-    final parsedDate = DateTime.tryParse(
-      (json['createdAt'] as String?) ?? (json['created_at'] as String?) ?? '',
+    final parsedDate = _parseIsoDateTime(
+      (json['createdAt'] as String?) ?? (json['created_at'] as String?),
     );
     return AlertItem(
       id: (json['id'] as String?) ?? 'alert-0',

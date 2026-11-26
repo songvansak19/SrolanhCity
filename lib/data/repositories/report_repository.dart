@@ -63,6 +63,7 @@ class ReportRepository extends ChangeNotifier {
   final List<AlertItem> _alerts;
   final List<DateTime> _supportVoteTimestamps = <DateTime>[];
   final List<DateTime> _remoteProvinceSupportTimestamps = <DateTime>[];
+  final Map<String, String> _localToServerIdMap = <String, String>{};
   final LocalStorageService? storage;
   final CivicBackendApiService apiService;
   AppSettings _settings;
@@ -606,9 +607,13 @@ class ReportRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  String _resolveReportId(String reportId) =>
+      _localToServerIdMap[reportId] ?? reportId;
+
   CivicReport? findById(String id) {
+    final resolvedId = _resolveReportId(id);
     for (final report in _reports) {
-      if (report.id == id) return report;
+      if (report.id == resolvedId) return report;
     }
     return null;
   }
@@ -922,7 +927,8 @@ class ReportRepository extends ChangeNotifier {
   /// Withdraws a report created by the current citizen if it is still
   /// [ReportStatus.submitted] and within [CivicReport.withdrawalWindow].
   ReportRemovalResult withdrawUserReport(String reportId, {DateTime? now}) {
-    final index = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedId = _resolveReportId(reportId);
+    final index = _reports.indexWhere((r) => r.id == resolvedId);
     if (index == -1) return const RemovalNotAllowed();
 
     final report = _reports[index];
@@ -935,11 +941,11 @@ class ReportRepository extends ChangeNotifier {
     }
 
     _reports.removeAt(index);
-    _alerts.removeWhere((a) => a.reportId == reportId);
+    _alerts.removeWhere((a) => a.reportId == resolvedId);
     _persist();
     notifyListeners();
     if (_isOnline && apiService.isConfigured) {
-      unawaited(_syncWithSession(() => apiService.withdrawReport(reportId)));
+      unawaited(_syncWithSession(() => apiService.withdrawReport(resolvedId)));
     }
     return const ReportRemoved();
   }
@@ -952,7 +958,8 @@ class ReportRepository extends ChangeNotifier {
     required int severity,
     DateTime? now,
   }) {
-    final index = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedId = _resolveReportId(reportId);
+    final index = _reports.indexWhere((r) => r.id == resolvedId);
     if (index == -1) return null;
 
     final existing = _reports[index];
@@ -991,7 +998,7 @@ class ReportRepository extends ChangeNotifier {
       unawaited(
         _syncWithSession(
           () => apiService.quickEditReport(
-            reportId: reportId,
+            reportId: resolvedId,
             description: trimmedDesc,
             severity: nextSeverity,
           ),
@@ -1019,7 +1026,8 @@ class ReportRepository extends ChangeNotifier {
   }) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return null;
-    final index = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedId = _resolveReportId(reportId);
+    final index = _reports.indexWhere((r) => r.id == resolvedId);
     if (index == -1) return null;
 
     final existing = _reports[index];
@@ -1047,9 +1055,9 @@ class ReportRepository extends ChangeNotifier {
       unawaited(
         _syncWithSession(
           () => apiService.addComment(
-            reportId: reportId,
+            reportId: resolvedId,
             payload: buildCommentApiPayload(
-              reportId: reportId,
+              reportId: resolvedId,
               text: note.text,
               isAnonymous: note.isAnonymous,
               authorName: note.authorName,
@@ -1066,7 +1074,8 @@ class ReportRepository extends ChangeNotifier {
   /// Removes a follow-up comment added by the current citizen.
   /// Never removes the original reporter's primary entry.
   CivicReport? deleteCitizenComment(String reportId, String commentId) {
-    final index = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedId = _resolveReportId(reportId);
+    final index = _reports.indexWhere((r) => r.id == resolvedId);
     if (index == -1) return null;
     final existing = _reports[index];
     final current = existing.effectiveComments;
@@ -1086,7 +1095,7 @@ class ReportRepository extends ChangeNotifier {
       unawaited(
         _syncWithSession(
           () => apiService.deleteComment(
-            reportId: reportId,
+            reportId: resolvedId,
             commentId: commentId,
           ),
         ),
@@ -1118,7 +1127,8 @@ class ReportRepository extends ChangeNotifier {
   /// another neighbor's Master Incident, refunding the citizen's daily slot
   /// and cleaning up any remote-support comment/metadata.
   CivicReport? undoSupportReport(String reportId) {
-    final index = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedId = _resolveReportId(reportId);
+    final index = _reports.indexWhere((r) => r.id == resolvedId);
     if (index == -1) return null;
 
     final existing = _reports[index];
@@ -1153,12 +1163,12 @@ class ReportRepository extends ChangeNotifier {
       _remoteProvinceSupportTimestamps.removeLast();
     }
     _alerts.removeWhere(
-      (a) => a.reportId == reportId && a.id.startsWith('alert-join-'),
+      (a) => a.reportId == resolvedId && a.id.startsWith('alert-join-'),
     );
     _persist();
     notifyListeners();
     if (_isOnline && apiService.isConfigured) {
-      unawaited(_syncWithSession(() => apiService.removeSupport(reportId)));
+      unawaited(_syncWithSession(() => apiService.removeSupport(resolvedId)));
     }
     return updated;
   }
@@ -1177,7 +1187,8 @@ class ReportRepository extends ChangeNotifier {
     String? reasonNote,
     DateTime? now,
   }) {
-    final index = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedId = _resolveReportId(reportId);
+    final index = _reports.indexWhere((r) => r.id == resolvedId);
     if (index == -1) return null;
 
     final existing = _reports[index];
@@ -1252,7 +1263,7 @@ class ReportRepository extends ChangeNotifier {
     notifyListeners();
     if (_isOnline && apiService.isConfigured) {
       final supportPayload = buildSupportApiPayload(
-        reportId: reportId,
+        reportId: resolvedId,
         tier: tier ?? SupportVerificationTier.verifiedNearby,
         distanceMeters: distanceMeters,
         supportAreaEnglish: supportAreaEnglish,
@@ -1262,7 +1273,7 @@ class ReportRepository extends ChangeNotifier {
       unawaited(
         _syncWithSession(
           () => apiService.addSupport(
-            reportId: reportId,
+            reportId: resolvedId,
             payload: supportPayload,
           ),
         ),
@@ -1297,7 +1308,8 @@ class ReportRepository extends ChangeNotifier {
 
   /// Records a citizen's 1–5 emoji satisfaction rating on a resolved repair.
   CivicReport? rateResolvedReport(String reportId, int rating) {
-    final index = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedId = _resolveReportId(reportId);
+    final index = _reports.indexWhere((r) => r.id == resolvedId);
     if (index == -1) return null;
     final clamped = rating.clamp(1, 5);
     final updated = _reports[index].copyWith(citizenRating: clamped);
@@ -1307,7 +1319,7 @@ class ReportRepository extends ChangeNotifier {
     if (_isOnline && apiService.isConfigured) {
       unawaited(
         _syncWithSession(
-          () => apiService.rateReport(reportId: reportId, rating: clamped),
+          () => apiService.rateReport(reportId: resolvedId, rating: clamped),
         ),
       );
     }
@@ -1320,7 +1332,8 @@ class ReportRepository extends ChangeNotifier {
     String crewCode = 'B-07',
     DateTime? now,
   }) {
-    final index = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedId = _resolveReportId(reportId);
+    final index = _reports.indexWhere((r) => r.id == resolvedId);
     if (index == -1) return null;
     final eventTime = now ?? DateTime.now();
     final existing = _reports[index];
@@ -1540,6 +1553,9 @@ class ReportRepository extends ChangeNotifier {
     if (!await _ensureBackendSession()) return;
     final serverReport = await apiService.createReport(created);
     if (serverReport == null) return;
+    if (serverReport.id != created.id) {
+      _localToServerIdMap[created.id] = serverReport.id;
+    }
     final idx = _reports.indexWhere((r) => r.id == created.id);
     if (idx != -1) {
       _reports[idx] = serverReport.copyWith(

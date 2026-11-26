@@ -24,6 +24,12 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 CurrentUser = Annotated[TokenClaims, Depends(get_current_user)]
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=UTC)
+
+
 def _to_alert_out(row: Alert) -> AlertItemOut:
     return AlertItemOut(
         id=row.id,
@@ -32,7 +38,7 @@ def _to_alert_out(row: Alert) -> AlertItemOut:
         english_title=row.english_title,
         khmer_subtitle=row.khmer_subtitle,
         english_subtitle=row.english_subtitle,
-        created_at=row.created_at,
+        created_at=_as_utc(row.created_at) or row.created_at,
         is_read=row.is_read,
     )
 

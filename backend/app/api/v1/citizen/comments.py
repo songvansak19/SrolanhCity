@@ -26,6 +26,12 @@ CurrentUser = Annotated[TokenClaims, Depends(get_current_user)]
 OptionalUser = Annotated[TokenClaims | None, Depends(get_current_user_optional)]
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=UTC)
+
+
 def _to_comment_out(
     row: ReportComment,
     *,
@@ -34,7 +40,7 @@ def _to_comment_out(
     return CitizenCommentOut(
         id=row.id,
         text=row.text,
-        created_at=row.created_at,
+        created_at=_as_utc(row.created_at) or row.created_at,
         is_original_reporter=row.is_original_reporter,
         is_current_user=(current_user_id is not None and row.user_id == current_user_id),
         is_anonymous=row.is_anonymous,

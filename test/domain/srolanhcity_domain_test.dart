@@ -3165,6 +3165,256 @@ void main() {
         );
       },
     );
+
+    test('CivicReport.fromJson treats timezone-less ISO timestamps as UTC', () {
+      final now = DateTime.now();
+      final naiveUtc = now.toUtc().toIso8601String().replaceFirst('Z', '');
+      final report = CivicReport.fromJson(<String, dynamic>{
+        'id': '#SC-UTC1',
+        'category': 'pothole',
+        'khmer_title': 'រន្ធផ្លូវ',
+        'english_title': 'Pothole',
+        'description': 'Test',
+        'khmer_location': 'ភ្នំពេញ',
+        'english_location': 'Phnom Penh',
+        'lat': 11.55,
+        'lng': 104.92,
+        'severity': 3,
+        'affected_citizens': 1,
+        'status': 'submitted',
+        'khmer_agency': 'មន្ទីរ',
+        'english_agency': 'DPWT',
+        'created_at': naiveUtc,
+        'timeline': const <Map<String, dynamic>>[],
+        'citizen_comments': const <Map<String, dynamic>>[],
+      });
+
+      expect(
+        report.createdAt.difference(now).abs(),
+        lessThan(const Duration(seconds: 5)),
+      );
+    });
+
+    test('ReportRepository allows commenting with local ID after server ID remap', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/guest' &&
+            request.method == 'POST') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{
+                'access_token': 'tok-remap',
+                'token_type': 'bearer',
+                'role': 'citizen',
+                'user_id': 'guest-remap',
+              }),
+            ),
+            200,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (request.url.path == '/api/v1/reports' && request.method == 'POST') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{
+                'id': '#SC-SRV1',
+                'category': 'pothole',
+                'khmer_title': 'រន្ធផ្លូវ',
+                'english_title': 'Pothole',
+                'description': 'Initial desc',
+                'khmer_location': 'ភ្នំពេញ',
+                'english_location': 'Phnom Penh',
+                'lat': 11.55,
+                'lng': 104.92,
+                'severity': 3,
+                'affected_citizens': 1,
+                'status': 'submitted',
+                'khmer_agency': 'មន្ទីរ',
+                'english_agency': 'DPWT',
+                'created_by_current_user': true,
+                'is_mine': true,
+                'created_at': DateTime.now().toUtc().toIso8601String(),
+                'timeline': const <Map<String, dynamic>>[],
+                'citizen_comments': const <Map<String, dynamic>>[],
+              }),
+            ),
+            201,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (request.url.path == '/api/v1/reports/%23SC-SRV1/comments' &&
+            request.method == 'POST') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{
+                'id': 'c-srv-1',
+                'text': 'Follow up note',
+                'created_at': DateTime.now().toUtc().toIso8601String(),
+                'is_original_reporter': false,
+                'is_current_user': true,
+                'is_anonymous': false,
+              }),
+            ),
+            201,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final api = CivicBackendApiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      final repo = ReportRepository(initialReports: const [], apiService: api);
+      final result = repo.submitReport(
+        category: IssueCategory.pothole,
+        description: 'Initial desc',
+        severity: 3,
+        coordinates: const LatLng(11.55, 104.92),
+        isAnonymous: false,
+      );
+      final localId = result.report.id;
+
+      // Let background _syncCreatedReport finish remapping localId -> #SC-SRV1.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(repo.findById(localId)?.id, equals('#SC-SRV1'));
+      final updated = repo.addCitizenComment(localId, text: 'Follow up note');
+      expect(updated, isNotNull);
+      expect(updated!.citizenComments.last.text, equals('Follow up note'));
+      repo.dispose();
+    });
+
+    test('CivicReport.fromJson treats timezone-less ISO timestamps as UTC', () {
+      final now = DateTime.now();
+      final naiveUtc = now.toUtc().toIso8601String().replaceFirst('Z', '');
+      final report = CivicReport.fromJson(<String, dynamic>{
+        'id': '#SC-UTC1',
+        'category': 'pothole',
+        'khmer_title': 'រន្ធផ្លូវ',
+        'english_title': 'Pothole',
+        'description': 'Test',
+        'khmer_location': 'ភ្នំពេញ',
+        'english_location': 'Phnom Penh',
+        'lat': 11.55,
+        'lng': 104.92,
+        'severity': 3,
+        'affected_citizens': 1,
+        'status': 'submitted',
+        'khmer_agency': 'មន្ទីរ',
+        'english_agency': 'DPWT',
+        'created_at': naiveUtc,
+        'timeline': const <Map<String, dynamic>>[],
+        'citizen_comments': const <Map<String, dynamic>>[],
+      });
+
+      expect(
+        report.createdAt.difference(now).abs(),
+        lessThan(const Duration(seconds: 5)),
+      );
+    });
+
+    test('ReportRepository allows commenting with local ID after server ID remap', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/guest' &&
+            request.method == 'POST') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{
+                'access_token': 'tok-remap',
+                'token_type': 'bearer',
+                'role': 'citizen',
+                'user_id': 'guest-remap',
+              }),
+            ),
+            200,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (request.url.path == '/api/v1/reports' && request.method == 'POST') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{
+                'id': '#SC-SRV1',
+                'category': 'pothole',
+                'khmer_title': 'រន្ធផ្លូវ',
+                'english_title': 'Pothole',
+                'description': 'Initial desc',
+                'khmer_location': 'ភ្នំពេញ',
+                'english_location': 'Phnom Penh',
+                'lat': 11.55,
+                'lng': 104.92,
+                'severity': 3,
+                'affected_citizens': 1,
+                'status': 'submitted',
+                'khmer_agency': 'មន្ទីរ',
+                'english_agency': 'DPWT',
+                'created_by_current_user': true,
+                'is_mine': true,
+                'created_at': DateTime.now().toUtc().toIso8601String(),
+                'timeline': const <Map<String, dynamic>>[],
+                'citizen_comments': const <Map<String, dynamic>>[],
+              }),
+            ),
+            201,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (request.url.path == '/api/v1/reports/%23SC-SRV1/comments' &&
+            request.method == 'POST') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{
+                'id': 'c-srv-1',
+                'text': 'Follow up note',
+                'created_at': DateTime.now().toUtc().toIso8601String(),
+                'is_original_reporter': false,
+                'is_current_user': true,
+                'is_anonymous': false,
+              }),
+            ),
+            201,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final api = CivicBackendApiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      final repo = ReportRepository(initialReports: const [], apiService: api);
+      final result = repo.submitReport(
+        category: IssueCategory.pothole,
+        description: 'Initial desc',
+        severity: 3,
+        coordinates: const LatLng(11.55, 104.92),
+        isAnonymous: false,
+      );
+      final localId = result.report.id;
+
+      // Let background _syncCreatedReport finish remapping localId -> #SC-SRV1.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(repo.findById(localId)?.id, equals('#SC-SRV1'));
+      final updated = repo.addCitizenComment(localId, text: 'Follow up note');
+      expect(updated, isNotNull);
+      expect(updated!.citizenComments.last.text, equals('Follow up note'));
+      repo.dispose();
+    });
   });
 }
 

@@ -58,6 +58,12 @@ OptionalUser = Annotated[TokenClaims | None, Depends(get_current_user_optional)]
 _WITHDRAWAL_WINDOW = timedelta(minutes=15)
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=UTC)
+
+
 def report_to_response(
     row: Report,
     *,
@@ -92,7 +98,7 @@ def report_to_response(
         CitizenCommentOut(
             id=c.id,
             text=c.text,
-            created_at=c.created_at,
+            created_at=_as_utc(c.created_at) or c.created_at,
             is_original_reporter=c.is_original_reporter,
             is_current_user=(current_user_id is not None and c.user_id == current_user_id),
             is_anonymous=c.is_anonymous,
@@ -123,7 +129,7 @@ def report_to_response(
             khmer_subtitle=t.khmer_subtitle,
             english_subtitle=t.english_subtitle,
             complete=t.complete,
-            timestamp=t.timestamp,
+            timestamp=_as_utc(t.timestamp),
         )
         for t in (timeline or [])
     ]
@@ -198,7 +204,7 @@ def report_to_response(
         after_date_label=row.after_date_label or "",
         fixed_duration_khmer=row.fixed_duration_khmer or "",
         fixed_duration_english=row.fixed_duration_english or "",
-        created_at=row.created_at,
+        created_at=_as_utc(row.created_at) or row.created_at,
         priority=priority_schema,
         timeline=timeline_items,
         citizen_comments=comment_items,

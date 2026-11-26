@@ -47,13 +47,24 @@ class AnalyticsService:
             level = report.priority.level if report.priority else 2
             sla_hours = PriorityCalculator.tier_for_level(level).sla_hours
 
+            created_at = (
+                report.created_at
+                if report.created_at.tzinfo is not None
+                else report.created_at.replace(tzinfo=UTC)
+            )
+
             if report.status.value == "resolved":
                 resolved_count += 1
                 resolved_ts = resolved_map.get(report.id)
                 if resolved_ts is not None:
+                    resolved_ts_utc = (
+                        resolved_ts
+                        if resolved_ts.tzinfo is not None
+                        else resolved_ts.replace(tzinfo=UTC)
+                    )
                     elapsed_h = max(
                         0.0,
-                        (resolved_ts - report.created_at).total_seconds() / 3600.0,
+                        (resolved_ts_utc - created_at).total_seconds() / 3600.0,
                     )
                     mttr_hours_samples.append(elapsed_h)
                     if elapsed_h > sla_hours:
@@ -62,7 +73,7 @@ class AnalyticsService:
                 open_reports += 1
                 if level == 5:
                     critical_p5_count += 1
-                age_h = max(0.0, (current_time - report.created_at).total_seconds() / 3600.0)
+                age_h = max(0.0, (current_time - created_at).total_seconds() / 3600.0)
                 if age_h > sla_hours:
                     sla_breach_count += 1
 
