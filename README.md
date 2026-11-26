@@ -64,12 +64,45 @@ lib/
     └── features/      # Welcome, Home, Map, Report Wizard, Tracking, Area News, Alerts, Profile
 ```
 
-### Connecting the Backend API (Optional)
-AI photo classification (`/api/v1/ai/classify-issue`) and voice transcription (`/api/v1/ai/transcribe-voice`) stay cleanly in client draft mode until you point the build at your SrolanhCity backend server:
+### APIs & External Services
+
+#### Third-party network APIs used by the app
+
+| Service | Endpoint(s) | Purpose |
+| --- | --- | --- |
+| OpenStreetMap tile service | `GET https://tile.openstreetmap.org/{z}/{x}/{y}.png` | Displays map tiles; visited tiles can be cached by the Web service worker. |
+| OpenStreetMap Nominatim | `GET https://nominatim.openstreetmap.org/reverse` and `GET https://nominatim.openstreetmap.org/search` | Reverse-geocodes report locations and searches for places in Cambodia. |
+| Google Translate (unofficial endpoint) | `GET https://translate.googleapis.com/translate_a/single` | Primary Khmer ↔ English comment translation provider. |
+| MyMemory Translation | `GET https://api.mymemory.translated.net/get` | Fallback Khmer ↔ English comment translation provider. |
+| ipwho.is | `GET https://ipwho.is/` | Optional, coarse IP-country check for anti-spoofing; it does not block users when unavailable. |
+
+These services are called directly by the client and do not require API keys in the app. Geocoding sends coordinates or place-search text to Nominatim; translation sends the comment text to its provider; IP geolocation necessarily exposes the request's IP address to ipwho.is.
+
+#### Optional SrolanhCity backend
+
+The following AI endpoints are implemented in the client but make no network calls until `API_BASE_URL` is configured. The backend is responsible for AI provider credentials:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/ai/classify-issue` | Analyze a report photo and suggest its issue category and severity. |
+| `POST` | `/api/v1/ai/transcribe-voice` | Transcribe a temporary voice recording. |
+| `POST` | `/api/v1/ai/help-chat` | Answer Help Center questions using the backend assistant. |
+
+Configure the backend base URL when running the app:
 
 ```bash
 flutter run --dart-define=API_BASE_URL=https://api.yourdomain.com
 ```
+
+#### Backend-ready report API contracts (not yet connected)
+
+The app currently stores reports locally. It prepares data for these future server operations, but does not send these requests yet:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/reports` | Load reports for a map viewport (`min_lat`, `min_lng`, `max_lat`, `max_lng`, `zoom`, and optional filters). |
+| `POST` | `/api/v1/reports/{id}/comments` | Submit a report comment. |
+| `POST` | `/api/v1/reports/{id}/support` | Submit support for a report. |
 
 ---
 
