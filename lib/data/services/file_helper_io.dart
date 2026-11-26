@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -9,6 +10,11 @@ import 'photo_media_types.dart';
 
 Future<Uint8List?> readLocalFileBytes(String path) async {
   try {
+    if (path.startsWith('data:')) {
+      final commaIdx = path.indexOf(',');
+      if (commaIdx == -1) return null;
+      return base64Decode(path.substring(commaIdx + 1));
+    }
     final file = File(path);
     if (!file.existsSync()) return null;
     return await file.readAsBytes();
@@ -18,7 +24,7 @@ Future<Uint8List?> readLocalFileBytes(String path) async {
 }
 
 Future<void> deleteLocalFile(String? path) async {
-  if (path == null || path.isEmpty) return;
+  if (path == null || path.isEmpty || path.startsWith('data:')) return;
   try {
     final file = File(path);
     if (file.existsSync()) {

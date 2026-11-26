@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'civic_backend_api_service.dart';
+
 /// Injectable Khmer ↔ English comment translation contract.
 abstract class CommentTranslationService {
   /// Translates [text] into [targetLang] (`'km'` or `'en'`).
@@ -38,15 +40,21 @@ abstract class CommentTranslationService {
 /// CORS-friendly dual-provider Khmer ↔ English translation client with
 /// in-memory LRU caching and zero API keys required.
 class HttpCommentTranslationService implements CommentTranslationService {
-  HttpCommentTranslationService({this.httpClient});
+  HttpCommentTranslationService({this.httpClient, String? baseUrl})
+    : _baseUrl = resolveBackendBaseUrl(baseUrl ?? _envBaseUrl);
 
   static final HttpCommentTranslationService instance =
       HttpCommentTranslationService();
+  static const String _envBaseUrl = String.fromEnvironment('API_BASE_URL');
+  static const String translatePath = '/api/v1/ai/translate';
   static const Duration requestTimeout = Duration(seconds: 5);
   static const int _maxCacheEntries = 120;
 
   final http.Client? httpClient;
+  final String _baseUrl;
   final Map<String, String> _cache = <String, String>{};
+
+  String get normalizedBaseUrl => _baseUrl;
 
   @override
   Future<String?> translate({
@@ -66,6 +74,18 @@ class HttpCommentTranslationService implements CommentTranslationService {
     final client = httpClient ?? http.Client();
     final shouldClose = httpClient == null;
     try {
+      if (normalizedBaseUrl.isNotEmpty) {
+        final backend = await _translateWithBackend(
+          client: client,
+          text: trimmed,
+          targetLang: normalizedTarget,
+        );
+        if (backend != null && backend.isNotEmpty) {
+          _storeCache(cacheKey, backend);
+          return backend;
+        }
+      }
+
       final primary = await _translateWithGoogle(
         client: client,
         text: trimmed,
@@ -98,6 +118,33 @@ class HttpCommentTranslationService implements CommentTranslationService {
       _cache.remove(_cache.keys.first);
     }
     _cache[key] = value;
+  }
+
+  Future<String?> _translateWithBackend({
+    required http.Client client,
+    required String text,
+    required String targetLang,
+  }) async {
+    try {
+      final uri = Uri.parse('$normalizedBaseUrl$translatePath');
+      final response = await client
+          .post(
+            uri,
+            headers: const <String, String>{'Content-Type': 'application/json'},
+            body: jsonEncode(<String, dynamic>{
+              'text': text,
+              'target_lang': targetLang,
+            }),
+          )
+          .timeout(requestTimeout);
+      if (response.statusCode != 200) return null;
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return null;
+      final translated = (decoded['translated_text'] as String?)?.trim();
+      return (translated == null || translated.isEmpty) ? null : translated;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String?> _translateWithGoogle({

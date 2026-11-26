@@ -529,10 +529,22 @@ class TimelineEntry {
     final rawTs = json['timestamp'] as String?;
     return TimelineEntry(
       stage: ReportStatus.fromName(json['stage'] as String?),
-      khmerTitle: (json['khmerTitle'] as String?) ?? '',
-      englishTitle: (json['englishTitle'] as String?) ?? '',
-      khmerSubtitle: (json['khmerSubtitle'] as String?) ?? '',
-      englishSubtitle: (json['englishSubtitle'] as String?) ?? '',
+      khmerTitle:
+          (json['khmerTitle'] as String?) ??
+          (json['khmer_title'] as String?) ??
+          '',
+      englishTitle:
+          (json['englishTitle'] as String?) ??
+          (json['english_title'] as String?) ??
+          '',
+      khmerSubtitle:
+          (json['khmerSubtitle'] as String?) ??
+          (json['khmer_subtitle'] as String?) ??
+          '',
+      englishSubtitle:
+          (json['englishSubtitle'] as String?) ??
+          (json['english_subtitle'] as String?) ??
+          '',
       complete: (json['complete'] as bool?) ?? false,
       timestamp: rawTs == null ? null : DateTime.tryParse(rawTs),
     );
@@ -773,28 +785,50 @@ class CitizenComment {
   };
 
   factory CitizenComment.fromJson(Map<String, dynamic> json) {
-    final rawAuthor = (json['authorName'] as String?)?.trim();
+    final rawAuthor =
+        ((json['authorName'] as String?) ?? (json['author_name'] as String?))
+            ?.trim();
     return CitizenComment(
       id: (json['id'] as String?) ?? 'c-legacy',
       text: (json['text'] as String?) ?? '',
       createdAt:
-          DateTime.tryParse((json['createdAt'] as String?) ?? '') ??
+          DateTime.tryParse(
+            (json['createdAt'] as String?) ??
+                (json['created_at'] as String?) ??
+                '',
+          ) ??
           DateTime.now(),
-      isOriginalReporter: (json['isOriginalReporter'] as bool?) ?? false,
-      isCurrentUser: (json['isCurrentUser'] as bool?) ?? false,
-      isAnonymous: (json['isAnonymous'] as bool?) ?? false,
+      isOriginalReporter:
+          (json['isOriginalReporter'] as bool?) ??
+          (json['is_original_reporter'] as bool?) ??
+          false,
+      isCurrentUser:
+          (json['isCurrentUser'] as bool?) ??
+          (json['is_current_user'] as bool?) ??
+          false,
+      isAnonymous:
+          (json['isAnonymous'] as bool?) ??
+          (json['is_anonymous'] as bool?) ??
+          false,
       authorName: (rawAuthor != null && rawAuthor.isNotEmpty)
           ? rawAuthor
           : null,
       severity: (json['severity'] as num?)?.toInt(),
-      voiceTranscript: json['voiceTranscript'] as String?,
+      voiceTranscript:
+          (json['voiceTranscript'] as String?) ??
+          (json['voice_transcript'] as String?),
       supportTier: SupportVerificationTier.fromName(
-        json['supportTier'] as String?,
+        (json['supportTier'] as String?) ?? (json['support_tier'] as String?),
       ),
-      supportAreaKhmer: json['supportAreaKhmer'] as String?,
-      supportAreaEnglish: json['supportAreaEnglish'] as String?,
+      supportAreaKhmer:
+          (json['supportAreaKhmer'] as String?) ??
+          (json['support_area_khmer'] as String?),
+      supportAreaEnglish:
+          (json['supportAreaEnglish'] as String?) ??
+          (json['support_area_english'] as String?),
       supportReasonCategory: SupportReasonCategory.fromName(
-        json['supportReasonCategory'] as String?,
+        (json['supportReasonCategory'] as String?) ??
+            (json['support_reason_category'] as String?),
       ),
     );
   }
@@ -1138,27 +1172,39 @@ class CivicReport {
               .map(TimelineEntry.fromJson)
               .toList()
         : const <TimelineEntry>[];
-    final rawComments = json['citizenComments'];
+    final rawComments = json['citizenComments'] ?? json['citizen_comments'];
     final comments = rawComments is List
         ? rawComments
               .whereType<Map<String, dynamic>>()
               .map(CitizenComment.fromJson)
               .toList()
         : const <CitizenComment>[];
-    final rawExtras = json['additionalLocalPhotoPaths'];
+    final rawExtras =
+        json['additionalLocalPhotoPaths'] ??
+        json['additional_local_photo_paths'];
     final extras = rawExtras is List
         ? rawExtras.whereType<String>().toList()
         : const <String>[];
     final rawCategory = IssueCategory.fromName(json['category'] as String?);
-    final rawPhotoAsset = json['photoAssetPath'] as String?;
+    final rawPhotoAsset =
+        (json['photoAssetPath'] as String?) ??
+        (json['photo_asset_path'] as String?);
     final coords = LatLng(
       (json['lat'] as num?)?.toDouble() ?? 11.5564,
       (json['lng'] as num?)?.toDouble() ?? 104.9282,
     );
-    final khLoc = (json['khmerLocation'] as String?) ?? '';
-    final enLoc = (json['englishLocation'] as String?) ?? '';
+    final khLoc =
+        (json['khmerLocation'] as String?) ??
+        (json['khmer_location'] as String?) ??
+        '';
+    final enLoc =
+        (json['englishLocation'] as String?) ??
+        (json['english_location'] as String?) ??
+        '';
+    final provinceCodeRaw =
+        (json['provinceCode'] as String?) ?? (json['province_code'] as String?);
     final inferredProvince = CambodiaLocationCatalog.inferProvince(
-      provinceCode: json['provinceCode'] as String?,
+      provinceCode: provinceCodeRaw,
       khmerLocation: khLoc,
       englishLocation: enLoc,
       coordinates: coords,
@@ -1166,57 +1212,123 @@ class CivicReport {
     return CivicReport(
       id: (json['id'] as String?) ?? '#SC-00000',
       category: rawCategory,
-      khmerTitle: (json['khmerTitle'] as String?) ?? '',
-      englishTitle: (json['englishTitle'] as String?) ?? '',
+      khmerTitle:
+          (json['khmerTitle'] as String?) ??
+          (json['khmer_title'] as String?) ??
+          '',
+      englishTitle:
+          (json['englishTitle'] as String?) ??
+          (json['english_title'] as String?) ??
+          '',
       description: (json['description'] as String?) ?? '',
       khmerLocation: khLoc,
       englishLocation: enLoc,
       coordinates: coords,
-      provinceCode: (json['provinceCode'] as String?) ?? inferredProvince.code,
+      provinceCode: provinceCodeRaw ?? inferredProvince.code,
       khmerProvince:
-          (json['khmerProvince'] as String?) ?? inferredProvince.khmer,
+          (json['khmerProvince'] as String?) ??
+          (json['khmer_province'] as String?) ??
+          inferredProvince.khmer,
       englishProvince:
-          (json['englishProvince'] as String?) ?? inferredProvince.english,
-      roadClass: RoadClass.fromName(json['roadClass'] as String?),
+          (json['englishProvince'] as String?) ??
+          (json['english_province'] as String?) ??
+          inferredProvince.english,
+      roadClass: RoadClass.fromName(
+        (json['roadClass'] as String?) ?? (json['road_class'] as String?),
+      ),
       severity: (json['severity'] as num?)?.toInt() ?? 3,
-      affectedCitizens: (json['affectedCitizens'] as num?)?.toInt() ?? 1,
+      affectedCitizens:
+          (json['affectedCitizens'] as num?)?.toInt() ??
+          (json['affected_citizens'] as num?)?.toInt() ??
+          1,
       status: ReportStatus.fromName(json['status'] as String?),
-      khmerAgency: (json['khmerAgency'] as String?) ?? '',
-      englishAgency: (json['englishAgency'] as String?) ?? '',
+      khmerAgency:
+          (json['khmerAgency'] as String?) ??
+          (json['khmer_agency'] as String?) ??
+          '',
+      englishAgency:
+          (json['englishAgency'] as String?) ??
+          (json['english_agency'] as String?) ??
+          '',
       photoAssetPath: (rawPhotoAsset != null && rawPhotoAsset.isNotEmpty)
           ? rawPhotoAsset
           : null,
-      localPhotoPath: json['localPhotoPath'] as String?,
+      localPhotoPath:
+          (json['localPhotoPath'] as String?) ??
+          (json['local_photo_path'] as String?),
       additionalLocalPhotoPaths: extras,
-      resolvedAfterAssetPath: json['resolvedAfterAssetPath'] as String?,
-      isAnonymous: (json['isAnonymous'] as bool?) ?? false,
-      exifStripped: (json['exifStripped'] as bool?) ?? true,
-      isMine: (json['isMine'] as bool?) ?? false,
-      createdByCurrentUser: (json['createdByCurrentUser'] as bool?) ?? false,
-      joinedByCurrentUser: (json['joinedByCurrentUser'] as bool?) ?? false,
+      resolvedAfterAssetPath:
+          (json['resolvedAfterAssetPath'] as String?) ??
+          (json['resolved_after_asset_path'] as String?),
+      isAnonymous:
+          (json['isAnonymous'] as bool?) ??
+          (json['is_anonymous'] as bool?) ??
+          false,
+      exifStripped:
+          (json['exifStripped'] as bool?) ??
+          (json['exif_stripped'] as bool?) ??
+          true,
+      isMine: (json['isMine'] as bool?) ?? (json['is_mine'] as bool?) ?? false,
+      createdByCurrentUser:
+          (json['createdByCurrentUser'] as bool?) ??
+          (json['created_by_current_user'] as bool?) ??
+          false,
+      joinedByCurrentUser:
+          (json['joinedByCurrentUser'] as bool?) ??
+          (json['joined_by_current_user'] as bool?) ??
+          false,
       userSupportTier: SupportVerificationTier.fromName(
-        json['userSupportTier'] as String?,
+        (json['userSupportTier'] as String?) ??
+            (json['user_support_tier'] as String?),
       ),
-      userSupportDistanceMeters: (json['userSupportDistanceMeters'] as num?)
-          ?.toDouble(),
-      userSupportAreaKhmer: json['userSupportAreaKhmer'] as String?,
-      userSupportAreaEnglish: json['userSupportAreaEnglish'] as String?,
-      userSupportReason: json['userSupportReason'] as String?,
+      userSupportDistanceMeters:
+          (json['userSupportDistanceMeters'] as num?)?.toDouble() ??
+          (json['user_support_distance_meters'] as num?)?.toDouble(),
+      userSupportAreaKhmer:
+          (json['userSupportAreaKhmer'] as String?) ??
+          (json['user_support_area_khmer'] as String?),
+      userSupportAreaEnglish:
+          (json['userSupportAreaEnglish'] as String?) ??
+          (json['user_support_area_english'] as String?),
+      userSupportReason:
+          (json['userSupportReason'] as String?) ??
+          (json['user_support_reason'] as String?),
       locationVerificationTier: ReportLocationVerificationTier.fromName(
-        json['locationVerificationTier'] as String?,
+        (json['locationVerificationTier'] as String?) ??
+            (json['location_verification_tier'] as String?),
       ),
-      syncStatus: SyncStatus.fromName(json['syncStatus'] as String?),
-      crewCode: json['crewCode'] as String?,
-      voiceTranscript: json['voiceTranscript'] as String?,
-      citizenRating: (json['citizenRating'] as num?)?.toInt(),
-      beforeDateLabel: (json['beforeDateLabel'] as String?) ?? '20 Nov',
-      afterDateLabel: (json['afterDateLabel'] as String?) ?? '22 Nov',
+      syncStatus: SyncStatus.fromName(
+        (json['syncStatus'] as String?) ?? (json['sync_status'] as String?),
+      ),
+      crewCode: (json['crewCode'] as String?) ?? (json['crew_code'] as String?),
+      voiceTranscript:
+          (json['voiceTranscript'] as String?) ??
+          (json['voice_transcript'] as String?),
+      citizenRating:
+          (json['citizenRating'] as num?)?.toInt() ??
+          (json['citizen_rating'] as num?)?.toInt(),
+      beforeDateLabel:
+          (json['beforeDateLabel'] as String?) ??
+          (json['before_date_label'] as String?) ??
+          '20 Nov',
+      afterDateLabel:
+          (json['afterDateLabel'] as String?) ??
+          (json['after_date_label'] as String?) ??
+          '22 Nov',
       fixedDurationKhmer:
-          (json['fixedDurationKhmer'] as String?) ?? 'ជួសជុលរួចក្នុង ២ ថ្ងៃ',
+          (json['fixedDurationKhmer'] as String?) ??
+          (json['fixed_duration_khmer'] as String?) ??
+          'ជួសជុលរួចក្នុង ២ ថ្ងៃ',
       fixedDurationEnglish:
-          (json['fixedDurationEnglish'] as String?) ?? 'Fixed in 2 days',
+          (json['fixedDurationEnglish'] as String?) ??
+          (json['fixed_duration_english'] as String?) ??
+          'Fixed in 2 days',
       createdAt:
-          DateTime.tryParse((json['createdAt'] as String?) ?? '') ??
+          DateTime.tryParse(
+            (json['createdAt'] as String?) ??
+                (json['created_at'] as String?) ??
+                '',
+          ) ??
           DateTime.now(),
       timeline: entries,
       citizenComments: comments,
@@ -1278,18 +1390,35 @@ class AlertItem {
   };
 
   factory AlertItem.fromJson(Map<String, dynamic> json) {
-    final parsedDate = DateTime.tryParse((json['createdAt'] as String?) ?? '');
+    final parsedDate = DateTime.tryParse(
+      (json['createdAt'] as String?) ?? (json['created_at'] as String?) ?? '',
+    );
     return AlertItem(
       id: (json['id'] as String?) ?? 'alert-0',
-      reportId: (json['reportId'] as String?) ?? '#SC-20481',
-      khmerTitle: (json['khmerTitle'] as String?) ?? '',
-      englishTitle: (json['englishTitle'] as String?) ?? '',
-      khmerSubtitle: (json['khmerSubtitle'] as String?) ?? '',
-      englishSubtitle: (json['englishSubtitle'] as String?) ?? '',
+      reportId:
+          (json['reportId'] as String?) ??
+          (json['report_id'] as String?) ??
+          '#SC-20481',
+      khmerTitle:
+          (json['khmerTitle'] as String?) ??
+          (json['khmer_title'] as String?) ??
+          '',
+      englishTitle:
+          (json['englishTitle'] as String?) ??
+          (json['english_title'] as String?) ??
+          '',
+      khmerSubtitle:
+          (json['khmerSubtitle'] as String?) ??
+          (json['khmer_subtitle'] as String?) ??
+          '',
+      englishSubtitle:
+          (json['englishSubtitle'] as String?) ??
+          (json['english_subtitle'] as String?) ??
+          '',
       createdAt:
           parsedDate ??
           _inferLegacyTimestamp(json['englishTimeAgo'] as String?),
-      isRead: (json['isRead'] as bool?) ?? false,
+      isRead: (json['isRead'] as bool?) ?? (json['is_read'] as bool?) ?? false,
     );
   }
 

@@ -1,12 +1,16 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:srolanhcity/data/repositories/report_repository.dart';
 import 'package:srolanhcity/data/services/audio_recorder_service.dart';
 import 'package:srolanhcity/data/services/civic_ai_service.dart';
+import 'package:srolanhcity/data/services/civic_backend_api_service.dart';
 import 'package:srolanhcity/data/services/comment_translation_service.dart';
 import 'package:srolanhcity/data/services/exif_stripper.dart';
 import 'package:srolanhcity/data/services/ip_geolocation_service.dart';
@@ -2944,6 +2948,223 @@ void main() {
       expect(rehydratedRepo.alerts, isEmpty);
       expect(rehydratedRepo.reports.length, equals(initialReportCount));
     });
+  });
+
+  group('Backend integration models & services', () {
+    test('fromJson factories parse FastAPI snake_case payloads', () {
+      final report = CivicReport.fromJson(<String, dynamic>{
+        'id': '#SC-90001',
+        'category': 'pothole',
+        'khmer_title': 'រន្ធផ្លូវធំ',
+        'english_title': 'Large pothole',
+        'description': 'Deep pothole near intersection',
+        'khmer_location': 'ខណ្ឌដូនពេញ, រាជធានីភ្នំពេញ',
+        'english_location': 'Daun Penh, Phnom Penh',
+        'lat': 11.57,
+        'lng': 104.92,
+        'province_code': 'PP',
+        'khmer_province': 'រាជធានីភ្នំពេញ',
+        'english_province': 'Phnom Penh',
+        'road_class': 'primary',
+        'severity': 4,
+        'affected_citizens': 5,
+        'status': 'crewDispatched',
+        'khmer_agency': 'មន្ទីរសាធារណការ',
+        'english_agency': 'Department of Public Works',
+        'is_anonymous': true,
+        'is_mine': true,
+        'created_by_current_user': true,
+        'joined_by_current_user': false,
+        'created_at': '2026-11-26T10:00:00Z',
+        'timeline': [
+          <String, dynamic>{
+            'stage': 'submitted',
+            'khmer_title': 'បានទទួល',
+            'english_title': 'Submitted',
+            'khmer_subtitle': 'រួចរាល់',
+            'english_subtitle': 'Received',
+            'complete': true,
+            'timestamp': '2026-11-26T10:00:00Z',
+          },
+        ],
+        'citizen_comments': [
+          <String, dynamic>{
+            'id': 'c-1',
+            'text': 'Needs urgent repair',
+            'created_at': '2026-11-26T10:05:00Z',
+            'is_original_reporter': true,
+            'is_current_user': true,
+            'is_anonymous': true,
+            'support_tier': 'remoteDistrict',
+            'support_area_khmer': 'ទួលគោក',
+            'support_area_english': 'Toul Kork',
+            'support_reason_category': 'dailyCommute',
+          },
+        ],
+      });
+
+      expect(report.id, equals('#SC-90001'));
+      expect(report.englishTitle, equals('Large pothole'));
+      expect(report.affectedCitizens, equals(5));
+      expect(report.status, equals(ReportStatus.crewDispatched));
+      expect(report.createdByCurrentUser, isTrue);
+      expect(report.timeline.single.englishTitle, equals('Submitted'));
+      expect(
+        report.citizenComments.single.supportTier,
+        equals(SupportVerificationTier.remoteDistrict),
+      );
+
+      final alert = AlertItem.fromJson(<String, dynamic>{
+        'id': 'a-1',
+        'report_id': '#SC-90001',
+        'khmer_title': 'ព័ត៌មាន',
+        'english_title': 'Update',
+        'khmer_subtitle': 'កំពុងជួសជុល',
+        'english_subtitle': 'Crew dispatched',
+        'created_at': '2026-11-26T11:00:00Z',
+        'is_read': true,
+      });
+      expect(alert.reportId, equals('#SC-90001'));
+      expect(alert.isRead, isTrue);
+    });
+
+    test(
+      'CivicBackendApiService handles guest auth and viewport reports',
+      () async {
+        final mockClient = MockClient((request) async {
+          if (request.url.path == '/api/v1/auth/guest' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode(<String, dynamic>{
+                'access_token': 'tok-123',
+                'token_type': 'bearer',
+                'role': 'citizen',
+                'user_id': 'guest-1',
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/api/v1/reports' &&
+              request.method == 'GET') {
+            expect(request.headers['Authorization'], equals('Bearer tok-123'));
+            return http.Response.bytes(
+              utf8.encode(
+                jsonEncode(<String, dynamic>{
+                  'pins': [
+                    <String, dynamic>{
+                      'tier': 'single',
+                      'report': <String, dynamic>{
+                        'id': '#SC-777',
+                        'category': 'flooding',
+                        'khmer_title': 'ទឹកជំនន់',
+                        'english_title': 'Street flooding',
+                        'description': 'Water knee-deep',
+                        'khmer_location': 'ភ្នំពេញ',
+                        'english_location': 'Phnom Penh',
+                        'lat': 11.55,
+                        'lng': 104.92,
+                        'severity': 4,
+                        'affected_citizens': 3,
+                        'status': 'submitted',
+                        'khmer_agency': 'មន្ទីរ',
+                        'english_agency': 'DPWT',
+                        'created_at': '2026-11-26T10:00:00Z',
+                        'timeline': const <Map<String, dynamic>>[],
+                        'citizen_comments': const <Map<String, dynamic>>[],
+                      },
+                    },
+                  ],
+                }),
+              ),
+              200,
+              headers: const <String, String>{
+                'content-type': 'application/json; charset=utf-8',
+              },
+            );
+          }
+          return http.Response('Not found', 404);
+        });
+
+        final api = CivicBackendApiService(
+          httpClient: mockClient,
+          baseUrl: 'http://localhost:8000/',
+        );
+        final session = await api.ensureGuestSession(deviceId: 'dev-1');
+        expect(session?.accessToken, equals('tok-123'));
+        expect(session?.userId, equals('guest-1'));
+
+        final reports = await api.fetchReportsViewport();
+        expect(reports, isNotNull);
+        expect(reports!.single.id, equals('#SC-777'));
+
+        final unconfigured = CivicBackendApiService(
+          httpClient: mockClient,
+          baseUrl: '',
+        );
+        expect(unconfigured.isConfigured, isFalse);
+        expect(await unconfigured.ensureGuestSession(), isNull);
+      },
+    );
+
+    test(
+      'HttpCommentTranslationService uses backend /ai/translate with fallback',
+      () async {
+        final backendFirstClient = MockClient((request) async {
+          if (request.url.path == '/api/v1/ai/translate') {
+            return http.Response.bytes(
+              utf8.encode(
+                jsonEncode(<String, dynamic>{'translated_text': 'ជួសជុលរួច'}),
+              ),
+              200,
+              headers: const <String, String>{
+                'content-type': 'application/json; charset=utf-8',
+              },
+            );
+          }
+          return http.Response('unexpected', 500);
+        });
+
+        final backendService = HttpCommentTranslationService(
+          httpClient: backendFirstClient,
+          baseUrl: 'http://localhost:8000',
+        );
+        expect(
+          await backendService.translate(text: 'Fixed', targetLang: 'km'),
+          equals('ជួសជុលរួច'),
+        );
+
+        final fallbackClient = MockClient((request) async {
+          if (request.url.path == '/api/v1/ai/translate') {
+            return http.Response('unavailable', 503);
+          }
+          if (request.url.host == 'translate.googleapis.com') {
+            return http.Response.bytes(
+              utf8.encode(
+                jsonEncode([
+                  [
+                    ['Fallback OK', 'សួស្តី'],
+                  ],
+                ]),
+              ),
+              200,
+              headers: const <String, String>{
+                'content-type': 'application/json; charset=utf-8',
+              },
+            );
+          }
+          return http.Response('not found', 404);
+        });
+
+        final fallbackService = HttpCommentTranslationService(
+          httpClient: fallbackClient,
+          baseUrl: 'http://localhost:8000',
+        );
+        expect(
+          await fallbackService.translate(text: 'សួស្តី', targetLang: 'en'),
+          equals('Fallback OK'),
+        );
+      },
+    );
   });
 }
 

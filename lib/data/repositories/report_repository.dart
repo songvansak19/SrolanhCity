@@ -15,6 +15,7 @@ import '../../domain/services/priority_calculator.dart';
 import '../../domain/services/relative_time_formatter.dart';
 import '../../domain/services/spatial_clustering_service.dart';
 import '../../domain/services/support_eligibility_service.dart';
+import '../services/civic_backend_api_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/reverse_geocoding_service.dart';
 
@@ -49,21 +50,26 @@ class ReportRepository extends ChangeNotifier {
     UserProfile? initialProfile,
     ReportDraft? initialDraft,
     this.storage,
+    CivicBackendApiService? apiService,
   }) : _reports = List<CivicReport>.of(initialReports ?? _seedReports()),
        _alerts = List<AlertItem>.of(initialAlerts ?? _seedAlerts()),
        _settings = initialSettings ?? const AppSettings(),
        _profile = initialProfile ?? const UserProfile(),
-       _draft = initialDraft;
+       _draft = initialDraft,
+       apiService = apiService ?? CivicBackendApiService();
 
   final List<CivicReport> _reports;
   final List<AlertItem> _alerts;
   final List<DateTime> _supportVoteTimestamps = <DateTime>[];
   final List<DateTime> _remoteProvinceSupportTimestamps = <DateTime>[];
   final LocalStorageService? storage;
+  final CivicBackendApiService apiService;
   AppSettings _settings;
   UserProfile _profile;
   ReportDraft? _draft;
   GpsCheckpoint? _lastVerifiedGpsCheckpoint;
+  String? _authAccessToken;
+  String? _authUserId;
   int _nextTicketNumber = 20540;
   bool _isOnline = true;
 
@@ -405,12 +411,19 @@ class ReportRepository extends ChangeNotifier {
     _lastVerifiedGpsCheckpoint = GpsCheckpoint.fromJson(
       data['lastVerifiedGpsCheckpoint'],
     );
+    _authAccessToken = data['authAccessToken'] as String?;
+    _authUserId = data['authUserId'] as String?;
+    if (_authAccessToken != null && _authAccessToken!.isNotEmpty) {
+      apiService.setAccessToken(_authAccessToken);
+    }
 
     // Reopen-online auto-sync: if the citizen queued reports offline, closed
     // the app, and reopened with internet active, sync them automatically now.
     if (_isOnline && hasPendingSync) {
       syncPendingReports();
-      return;
+    }
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncAndRefreshFromBackend());
     }
 
     notifyListeners();
@@ -435,6 +448,8 @@ class ReportRepository extends ChangeNotifier {
             .toList(),
         if (_lastVerifiedGpsCheckpoint != null)
           'lastVerifiedGpsCheckpoint': _lastVerifiedGpsCheckpoint!.toJson(),
+        if (_authAccessToken != null) 'authAccessToken': _authAccessToken,
+        if (_authUserId != null) 'authUserId': _authUserId,
       }),
     );
   }
@@ -472,6 +487,9 @@ class ReportRepository extends ChangeNotifier {
   void setOnlineStatus(bool online, {DateTime? now}) {
     final changed = _isOnline != online;
     _isOnline = online;
+    if (online && apiService.isConfigured) {
+      unawaited(_syncAndRefreshFromBackend());
+    }
     if (online && hasPendingSync) {
       syncPendingReports(now: now);
       return;
@@ -883,6 +901,9 @@ class ReportRepository extends ChangeNotifier {
 
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncCreatedReport(created));
+    }
     return ReportSubmissionResult(
       report: created,
       mergedIntoExisting: false,
@@ -909,6 +930,9 @@ class ReportRepository extends ChangeNotifier {
     _alerts.removeWhere((a) => a.reportId == reportId);
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncWithSession(() => apiService.withdrawReport(reportId)));
+    }
     return const ReportRemoved();
   }
 
@@ -955,6 +979,17 @@ class ReportRepository extends ChangeNotifier {
     _reports[index] = updated;
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(
+        _syncWithSession(
+          () => apiService.quickEditReport(
+            reportId: reportId,
+            description: trimmedDesc,
+            severity: nextSeverity,
+          ),
+        ),
+      );
+    }
     return updated;
   }
 
@@ -1000,6 +1035,23 @@ class ReportRepository extends ChangeNotifier {
     _reports[index] = updated;
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(
+        _syncWithSession(
+          () => apiService.addComment(
+            reportId: reportId,
+            payload: buildCommentApiPayload(
+              reportId: reportId,
+              text: note.text,
+              isAnonymous: note.isAnonymous,
+              authorName: note.authorName,
+              supportTier: note.supportTier,
+              supportAreaEnglish: note.supportAreaEnglish,
+            ),
+          ),
+        ),
+      );
+    }
     return updated;
   }
 
@@ -1022,6 +1074,16 @@ class ReportRepository extends ChangeNotifier {
     _reports[index] = updated;
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(
+        _syncWithSession(
+          () => apiService.deleteComment(
+            reportId: reportId,
+            commentId: commentId,
+          ),
+        ),
+      );
+    }
     return updated;
   }
 
@@ -1087,6 +1149,9 @@ class ReportRepository extends ChangeNotifier {
     );
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncWithSession(() => apiService.removeSupport(reportId)));
+    }
     return updated;
   }
 
@@ -1177,6 +1242,24 @@ class ReportRepository extends ChangeNotifier {
     }
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      final supportPayload = buildSupportApiPayload(
+        reportId: reportId,
+        tier: tier ?? SupportVerificationTier.verifiedNearby,
+        distanceMeters: distanceMeters,
+        supportAreaEnglish: supportAreaEnglish,
+        reasonCategory: reasonCategory,
+        reasonNote: reasonNote,
+      );
+      unawaited(
+        _syncWithSession(
+          () => apiService.addSupport(
+            reportId: reportId,
+            payload: supportPayload,
+          ),
+        ),
+      );
+    }
     return updated;
   }
 
@@ -1213,6 +1296,13 @@ class ReportRepository extends ChangeNotifier {
     _reports[index] = updated;
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(
+        _syncWithSession(
+          () => apiService.rateReport(reportId: reportId, rating: clamped),
+        ),
+      );
+    }
     return updated;
   }
 
@@ -1325,6 +1415,9 @@ class ReportRepository extends ChangeNotifier {
     _alerts[index] = _alerts[index].copyWith(isRead: true);
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncWithSession(() => apiService.markAlertRead(alertId)));
+    }
   }
 
   void markAllAlertsRead() {
@@ -1338,6 +1431,9 @@ class ReportRepository extends ChangeNotifier {
     if (changed) {
       _persist();
       notifyListeners();
+      if (_isOnline && apiService.isConfigured) {
+        unawaited(_syncWithSession(apiService.markAllAlertsRead));
+      }
     }
   }
 
@@ -1348,6 +1444,9 @@ class ReportRepository extends ChangeNotifier {
     final removed = _alerts.removeAt(index);
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncWithSession(() => apiService.deleteAlert(alertId)));
+    }
     return (alert: removed, index: index);
   }
 
@@ -1358,6 +1457,9 @@ class ReportRepository extends ChangeNotifier {
     _alerts.insert(targetIndex, alert);
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncWithSession(() => apiService.restoreAlerts([alert.id])));
+    }
   }
 
   /// Clears all read [AlertItem] log entries without modifying any [CivicReport].
@@ -1367,6 +1469,9 @@ class ReportRepository extends ChangeNotifier {
     _alerts.removeWhere((a) => a.isRead);
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncWithSession(() => apiService.clearAlerts(mode: 'read')));
+    }
     return removed;
   }
 
@@ -1377,6 +1482,9 @@ class ReportRepository extends ChangeNotifier {
     _alerts.clear();
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(_syncWithSession(() => apiService.clearAlerts(mode: 'all')));
+    }
     return removed;
   }
 
@@ -1393,6 +1501,102 @@ class ReportRepository extends ChangeNotifier {
     _alerts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     _persist();
     notifyListeners();
+    if (_isOnline && apiService.isConfigured) {
+      unawaited(
+        _syncWithSession(
+          () => apiService.restoreAlerts(items.map((e) => e.id).toList()),
+        ),
+      );
+    }
+  }
+
+  Future<bool> _ensureBackendSession() async {
+    if (!_isOnline || !apiService.isConfigured) return false;
+    if (apiService.accessToken != null && apiService.accessToken!.isNotEmpty) {
+      return true;
+    }
+    final session = await apiService.ensureGuestSession(deviceId: _authUserId);
+    if (session == null) return false;
+    _authAccessToken = session.accessToken;
+    _authUserId = session.userId;
+    _persist();
+    return true;
+  }
+
+  Future<void> _syncWithSession(Future<Object?> Function() action) async {
+    if (!await _ensureBackendSession()) return;
+    await action();
+  }
+
+  Future<void> _syncCreatedReport(CivicReport created) async {
+    if (!await _ensureBackendSession()) return;
+    final serverReport = await apiService.createReport(created);
+    if (serverReport == null) return;
+    final idx = _reports.indexWhere((r) => r.id == created.id);
+    if (idx != -1) {
+      _reports[idx] = serverReport.copyWith(
+        localPhotoPath: serverReport.localPhotoPath ?? created.localPhotoPath,
+        syncStatus: SyncStatus.synced,
+      );
+    }
+    for (var i = 0; i < _alerts.length; i++) {
+      if (_alerts[i].reportId == created.id) {
+        final a = _alerts[i];
+        _alerts[i] = AlertItem(
+          id: a.id,
+          reportId: serverReport.id,
+          khmerTitle: a.khmerTitle.replaceAll(created.id, serverReport.id),
+          englishTitle: a.englishTitle.replaceAll(created.id, serverReport.id),
+          khmerSubtitle: a.khmerSubtitle,
+          englishSubtitle: a.englishSubtitle,
+          createdAt: a.createdAt,
+          isRead: a.isRead,
+        );
+      }
+    }
+    _persist();
+    notifyListeners();
+  }
+
+  Future<void> _syncAndRefreshFromBackend() async {
+    if (!await _ensureBackendSession()) return;
+    final pending = _reports
+        .where((r) => r.syncStatus == SyncStatus.pendingSync)
+        .toList(growable: false);
+    for (final report in pending) {
+      await _syncCreatedReport(report);
+    }
+    await refreshFromBackend();
+  }
+
+  /// Fetches live reports and alerts from the configured FastAPI backend.
+  Future<void> refreshFromBackend() async {
+    if (!await _ensureBackendSession()) return;
+    final remoteReports = await apiService.fetchReportsViewport();
+    final remoteAlerts = await apiService.fetchAlerts();
+    var changed = false;
+
+    if (remoteReports != null && remoteReports.isNotEmpty) {
+      final pending = _reports
+          .where((r) => r.syncStatus == SyncStatus.pendingSync)
+          .toList(growable: false);
+      final pendingIds = pending.map((r) => r.id).toSet();
+      _reports
+        ..clear()
+        ..addAll(pending)
+        ..addAll(remoteReports.where((r) => !pendingIds.contains(r.id)));
+      changed = true;
+    }
+    if (remoteAlerts != null) {
+      _alerts
+        ..clear()
+        ..addAll(remoteAlerts);
+      changed = true;
+    }
+    if (changed) {
+      _persist();
+      notifyListeners();
+    }
   }
 
   void updateSettings(AppSettings next) {

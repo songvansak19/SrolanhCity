@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../domain/models/report_models.dart';
+import 'civic_backend_api_service.dart';
 import 'file_helper.dart';
 
 /// Lifecycle state of backend-powered AI classification on a citizen photo.
@@ -164,7 +165,7 @@ abstract class CivicAiService {
 /// state ([PhotoAiStatus.awaitingBackend]) with zero network calls.
 class BackendCivicAiService implements CivicAiService {
   BackendCivicAiService({this.httpClient, String? baseUrl})
-    : _rawBaseUrl = (baseUrl ?? _envBaseUrl).trim();
+    : _resolvedBaseUrl = resolveBackendBaseUrl(baseUrl ?? _envBaseUrl);
 
   static const String _envBaseUrl = String.fromEnvironment('API_BASE_URL');
   static const String classifyPath = '/api/v1/ai/classify-issue';
@@ -173,12 +174,10 @@ class BackendCivicAiService implements CivicAiService {
   static const Duration requestTimeout = Duration(seconds: 18);
 
   final http.Client? httpClient;
-  final String _rawBaseUrl;
+  final String _resolvedBaseUrl;
   final Map<String, PhotoAiAnalysis> _photoCache = <String, PhotoAiAnalysis>{};
 
-  String get normalizedBaseUrl => _rawBaseUrl.endsWith('/')
-      ? _rawBaseUrl.substring(0, _rawBaseUrl.length - 1)
-      : _rawBaseUrl;
+  String get normalizedBaseUrl => _resolvedBaseUrl;
 
   @override
   bool get isBackendConfigured => normalizedBaseUrl.isNotEmpty;
