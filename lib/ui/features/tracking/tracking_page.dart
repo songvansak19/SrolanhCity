@@ -1944,7 +1944,12 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
     final report = widget.report;
     final tr = widget.tr;
     final comments = report.effectiveComments
-        .where((c) => !c.isOriginalReporter)
+        .where(
+          (c) =>
+              !(c.isOriginalReporter &&
+                  (c.id.contains('orig') ||
+                      c.text.trim() == report.description.trim())),
+        )
         .toList(growable: false);
     final visibleComments = _showAll || comments.length <= 2
         ? comments
