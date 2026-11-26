@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.ws import report_ws_manager
 from app.config import get_settings
 from app.core.auth import TokenClaims, get_current_user
 from app.core.integrity import (
@@ -152,6 +153,7 @@ async def add_support_vote(
 
     db.add(support)
     await db.commit()
+    await report_ws_manager.broadcast_reports_updated()
 
     return SupportActionResponse(
         report_id=report_id,
@@ -198,6 +200,7 @@ async def undo_support_vote(
     report.priority_raw = breakdown.raw_score
     report.priority_level = breakdown.level
     await db.commit()
+    await report_ws_manager.broadcast_reports_updated()
 
     return SupportActionResponse(
         report_id=report_id,

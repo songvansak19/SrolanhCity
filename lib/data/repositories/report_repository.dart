@@ -18,6 +18,7 @@ import '../../domain/services/support_eligibility_service.dart';
 import '../services/civic_backend_api_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/reverse_geocoding_service.dart';
+import '../services/ws_helper.dart';
 
 /// Typed outcome when a citizen attempts to withdraw a submitted report.
 sealed class ReportRemovalResult {
@@ -72,6 +73,9 @@ class ReportRepository extends ChangeNotifier {
   String? _authUserId;
   int _nextTicketNumber = 20540;
   bool _isOnline = true;
+  void Function()? _closeWebSocket;
+  Timer? _wsReconnectTimer;
+  bool _disposed = false;
 
   /// Number of "Affects me" votes cast by the citizen in the trailing 24 hours.
   int supportsUsedInLast24Hours({DateTime? now}) {
@@ -424,6 +428,7 @@ class ReportRepository extends ChangeNotifier {
     }
     if (_isOnline && apiService.isConfigured) {
       unawaited(_syncAndRefreshFromBackend());
+      _connectLiveUpdates();
     }
 
     notifyListeners();
@@ -489,6 +494,9 @@ class ReportRepository extends ChangeNotifier {
     _isOnline = online;
     if (online && apiService.isConfigured) {
       unawaited(_syncAndRefreshFromBackend());
+      _connectLiveUpdates();
+    } else if (!online) {
+      _disconnectLiveUpdates();
     }
     if (online && hasPendingSync) {
       syncPendingReports(now: now);
@@ -1597,6 +1605,56 @@ class ReportRepository extends ChangeNotifier {
       _persist();
       notifyListeners();
     }
+  }
+
+  void _connectLiveUpdates() {
+    if (_disposed || !_isOnline || !apiService.isConfigured) return;
+    if (_closeWebSocket != null) return;
+    final base = apiService.normalizedBaseUrl;
+    final wsBase = base.startsWith('https://')
+        ? base.replaceFirst('https://', 'wss://')
+        : base.replaceFirst('http://', 'ws://');
+    final wsUrl = '$wsBase/api/v1/ws/reports';
+    unawaited(
+      connectReportsWebSocket(
+        wsUrl,
+        onUpdate: () {
+          if (!_disposed && _isOnline) {
+            unawaited(refreshFromBackend());
+          }
+        },
+        onDone: () {
+          _closeWebSocket = null;
+          if (!_disposed && _isOnline && apiService.isConfigured) {
+            _wsReconnectTimer?.cancel();
+            _wsReconnectTimer = Timer(
+              const Duration(seconds: 5),
+              _connectLiveUpdates,
+            );
+          }
+        },
+      ).then((closeFn) {
+        if (_disposed || !_isOnline) {
+          closeFn?.call();
+          return;
+        }
+        _closeWebSocket = closeFn;
+      }),
+    );
+  }
+
+  void _disconnectLiveUpdates() {
+    _wsReconnectTimer?.cancel();
+    _wsReconnectTimer = null;
+    _closeWebSocket?.call();
+    _closeWebSocket = null;
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _disconnectLiveUpdates();
+    super.dispose();
   }
 
   void updateSettings(AppSettings next) {

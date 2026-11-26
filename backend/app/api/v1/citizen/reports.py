@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.v1.ws import report_ws_manager
 from app.core.auth import (
     TokenClaims,
     UserRole,
@@ -453,6 +454,7 @@ async def create_report(
     db.add_all(timeline_entries)
     db.add_all(photo_rows)
     await db.commit()
+    await report_ws_manager.broadcast_reports_updated()
 
     return report_to_response(
         report,
@@ -544,6 +546,7 @@ async def quick_edit_report(
     row.priority_raw = breakdown.raw_score
     row.priority_level = breakdown.level
     await db.commit()
+    await report_ws_manager.broadcast_reports_updated()
     return report_to_response(
         row,
         current_user_id=current_user.sub,
@@ -584,6 +587,7 @@ async def withdraw_report(
 
     await db.delete(row)
     await db.commit()
+    await report_ws_manager.broadcast_reports_updated()
     return {"status": "withdrawn", "report_id": report_id}
 
 
@@ -625,6 +629,7 @@ async def rate_resolved_report(
         )
     row.citizen_rating = payload.rating
     await db.commit()
+    await report_ws_manager.broadcast_reports_updated()
     return report_to_response(
         row,
         current_user_id=current_user.sub,

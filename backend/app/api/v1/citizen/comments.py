@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.ws import report_ws_manager
 from app.core.auth import TokenClaims, UserRole, get_current_user, get_current_user_optional
 from app.db.models.report import Report, ReportComment
 from app.db.session import get_db
@@ -118,6 +119,7 @@ async def add_comment(
     )
     db.add(comment)
     await db.commit()
+    await report_ws_manager.broadcast_reports_updated()
     return _to_comment_out(comment, current_user_id=uid)
 
 
@@ -150,4 +152,5 @@ async def delete_comment(
         )
     await db.delete(comment)
     await db.commit()
+    await report_ws_manager.broadcast_reports_updated()
     return {"status": "deleted", "comment_id": comment_id}
