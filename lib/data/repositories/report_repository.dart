@@ -487,6 +487,52 @@ class ReportRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Signs in as a guest citizen (creating/refreshing a backend guest JWT when
+  /// online & configured) and refreshes reports from the backend.
+  Future<void> signInAsGuest() async {
+    if (_isOnline && apiService.isConfigured) {
+      await _ensureBackendSession();
+      _connectLiveUpdates();
+      await refreshFromBackend();
+    }
+    notifyListeners();
+  }
+
+  /// Signs in with phone + OTP (upgrading to a verified citizen JWT when
+  /// supported by the backend, or falling back cleanly to a guest session +
+  /// local profile update when offline or SMS OTP is disabled).
+  Future<void> signInWithPhone({
+    required String phoneNumber,
+    required String otpCode,
+    required String displayName,
+  }) async {
+    final trimmedPhone = phoneNumber.trim();
+    final trimmedName = displayName.trim();
+    if (_isOnline && apiService.isConfigured) {
+      final verified = await apiService.verifyPhoneOtp(
+        phoneNumber: trimmedPhone,
+        otpCode: otpCode,
+        khmerName: trimmedName,
+        englishName: trimmedName,
+      );
+      if (verified != null) {
+        _authAccessToken = verified.accessToken;
+        _authUserId = verified.userId;
+      } else {
+        await _ensureBackendSession();
+      }
+      _connectLiveUpdates();
+      unawaited(refreshFromBackend());
+    }
+    _profile = _profile.copyWith(
+      phoneNumber: trimmedPhone,
+      khmerName: trimmedName.isNotEmpty ? trimmedName : _profile.khmerName,
+      englishName: trimmedName.isNotEmpty ? trimmedName : _profile.englishName,
+    );
+    _persist();
+    notifyListeners();
+  }
+
   /// Updates live network connectivity state. When connectivity returns (or
   /// finishes initializing online) and queued offline reports exist,
   /// automatically syncs them.

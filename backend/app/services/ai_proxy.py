@@ -251,9 +251,15 @@ class AiProxyService:
             label="audio",
         )
         client = self._require_client()
+        lang_instruction = (
+            "Transcribe spoken Khmer into native Khmer script (ភាសាខ្មែរ, never romanized) "
+            "using natural Cambodian civic vocabulary (e.g., រណ្តៅផ្លូវ, ភ្លើងផ្លូវ, លូស្ទះ, សំរាម)."
+            if payload.language == "km"
+            else "Transcribe the spoken English accurately."
+        )
         prompt = (
-            "Transcribe this Khmer/English civic issue voice memo and return ONLY JSON "
-            "with keys: transcript (string) and "
+            f"{lang_instruction} "
+            "Return ONLY JSON with keys: transcript (string) and "
             "category ('pothole'|'streetlight'|'drain'|'trash'|'other'|null). "
             f"Expected language: {payload.language}."
         )

@@ -89,6 +89,44 @@ class CivicBackendApiService {
     return GuestAuthSession(accessToken: token, userId: userId);
   }
 
+  Future<bool> requestPhoneOtp(String phoneNumber) async {
+    if (!isConfigured) return false;
+    return _sendNoContent(
+      method: 'POST',
+      uri: _uri('/api/v1/auth/phone/request-otp'),
+      body: <String, dynamic>{'phone_number': phoneNumber.trim()},
+    );
+  }
+
+  Future<GuestAuthSession?> verifyPhoneOtp({
+    required String phoneNumber,
+    required String otpCode,
+    required String khmerName,
+    required String englishName,
+  }) async {
+    if (!isConfigured) return null;
+    final decoded = await _sendJson(
+      method: 'POST',
+      uri: _uri('/api/v1/auth/phone/verify'),
+      body: <String, dynamic>{
+        'phone_number': phoneNumber.trim(),
+        'otp_code': otpCode.trim(),
+        'khmer_name': khmerName.trim().isEmpty ? 'ពលរដ្ឋ' : khmerName.trim(),
+        'english_name': englishName.trim().isEmpty
+            ? 'Citizen'
+            : englishName.trim(),
+      },
+    );
+    if (decoded == null) return null;
+    final token = decoded['access_token'] as String?;
+    final userId = decoded['user_id'] as String?;
+    if (token == null || token.isEmpty || userId == null || userId.isEmpty) {
+      return null;
+    }
+    _accessToken = token;
+    return GuestAuthSession(accessToken: token, userId: userId);
+  }
+
   Future<List<CivicReport>?> fetchReportsViewport({
     double minLat = 9.9,
     double minLng = 102.3,
@@ -306,6 +344,36 @@ class CivicBackendApiService {
     );
   }
 
+  Future<http.Response> _dispatchWithAuthRetry({
+    required http.Client client,
+    required String method,
+    required Uri uri,
+    Map<String, dynamic>? body,
+    bool includeAuth = true,
+  }) async {
+    var response = await _dispatch(
+      client: client,
+      method: method,
+      uri: uri,
+      headers: _headers(includeAuth: includeAuth),
+      body: body,
+    ).timeout(requestTimeout);
+    if (response.statusCode == 401 && includeAuth) {
+      _accessToken = null;
+      final refreshed = await ensureGuestSession();
+      if (refreshed != null) {
+        response = await _dispatch(
+          client: client,
+          method: method,
+          uri: uri,
+          headers: _headers(includeAuth: true),
+          body: body,
+        ).timeout(requestTimeout);
+      }
+    }
+    return response;
+  }
+
   Future<Map<String, dynamic>?> _sendJson({
     required String method,
     required Uri uri,
@@ -315,13 +383,13 @@ class CivicBackendApiService {
     final client = httpClient ?? http.Client();
     final shouldClose = httpClient == null;
     try {
-      final response = await _dispatch(
+      final response = await _dispatchWithAuthRetry(
         client: client,
         method: method,
         uri: uri,
-        headers: _headers(includeAuth: includeAuth),
         body: body,
-      ).timeout(requestTimeout);
+        includeAuth: includeAuth,
+      );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return null;
       }
@@ -343,13 +411,12 @@ class CivicBackendApiService {
     final client = httpClient ?? http.Client();
     final shouldClose = httpClient == null;
     try {
-      final response = await _dispatch(
+      final response = await _dispatchWithAuthRetry(
         client: client,
         method: method,
         uri: uri,
-        headers: _headers(),
         body: body,
-      ).timeout(requestTimeout);
+      );
       return response.statusCode >= 200 && response.statusCode < 300;
     } catch (_) {
       return false;

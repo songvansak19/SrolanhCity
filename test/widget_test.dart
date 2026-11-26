@@ -3236,6 +3236,72 @@ void main() {
       },
     );
   });
+
+  group('AuthPage & Guest Sign-In', () {
+    testWidgets(
+      'WelcomePage opens AuthPage and Continue as Guest enters MainShell',
+      (tester) async {
+        final repo = ReportRepository();
+        await tester.pumpWidget(SrolanhCityApp(repository: repo));
+        await tester.pumpAndSettle();
+
+        final signInBtn = find.byKey(const Key('welcome-sign-in-btn'));
+        await tester.ensureVisible(signInBtn);
+        await tester.tap(signInBtn);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('auth-guest-btn')), findsOneWidget);
+        final handle = tester.ensureSemantics();
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        handle.dispose();
+        await tester.ensureVisible(find.byKey(const Key('auth-guest-btn')));
+        await tester.tap(find.byKey(const Key('auth-guest-btn')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MainShell), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'AuthPage phone + OTP flow updates UserProfile and enters MainShell',
+      (tester) async {
+        final repo = ReportRepository();
+        await tester.pumpWidget(SrolanhCityApp(repository: repo));
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(
+          find.byKey(const Key('welcome-sign-in-btn')),
+        );
+        await tester.tap(find.byKey(const Key('welcome-sign-in-btn')));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(
+          find.byKey(const Key('auth-phone-field')),
+          '012 888 999',
+        );
+        await tester.enterText(
+          find.byKey(const Key('auth-name-field')),
+          'Dara Sok',
+        );
+        await tester.tap(find.byKey(const Key('auth-submit-btn')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('auth-otp-field')), findsOneWidget);
+        await tester.enterText(
+          find.byKey(const Key('auth-otp-field')),
+          '123456',
+        );
+        await tester.tap(find.byKey(const Key('auth-submit-btn')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MainShell), findsOneWidget);
+        expect(repo.profile.phoneNumber, equals('012 888 999'));
+        expect(repo.profile.englishName, equals('Dara Sok'));
+      },
+    );
+  });
 }
 
 class _FakeLocationService extends LocationService {

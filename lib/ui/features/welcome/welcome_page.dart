@@ -4,6 +4,7 @@ import '../../core/assistant/assistant_bubble_suppressor.dart';
 import '../../core/l10n.dart';
 import '../../core/report_scope.dart';
 import '../../core/theme.dart';
+import '../auth/auth_page.dart';
 import '../shell/main_shell.dart';
 
 class WelcomePage extends StatelessWidget {
@@ -152,6 +153,45 @@ class WelcomePage extends StatelessWidget {
                                     style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  minWidth: double.infinity,
+                                  minHeight: 48,
+                                ),
+                                child: OutlinedButton(
+                                  key: const Key('welcome-sign-in-btn'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppColors.tealDark,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                      horizontal: 16,
+                                    ),
+                                    side: const BorderSide(
+                                      color: AppColors.teal,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                  onPressed: () => Navigator.push<void>(
+                                    context,
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => const AuthPage(),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    tr.primary(
+                                      'ចូលគណនី ឬបន្តជាភ្ញៀវ',
+                                      'Sign in or continue as guest',
+                                    ),
+                                    style: const TextStyle(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),

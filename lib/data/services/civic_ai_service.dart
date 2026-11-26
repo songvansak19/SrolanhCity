@@ -294,10 +294,7 @@ class BackendCivicAiService implements CivicAiService {
       );
     }
 
-    final lower = audioPath.toLowerCase();
-    final mimeType = lower.endsWith('.wav')
-        ? 'audio/wav'
-        : (lower.endsWith('.mp3') ? 'audio/mp3' : 'audio/aac');
+    final mimeType = _inferAudioMimeType(audioPath);
 
     final payload = buildAudioRequestBody(
       base64Audio: base64Encode(bytes),
@@ -315,6 +312,22 @@ class BackendCivicAiService implements CivicAiService {
     }
 
     return parseAudioResponseJson(response.body!);
+  }
+
+  static String _inferAudioMimeType(String audioPath) {
+    final trimmed = audioPath.trim();
+    if (trimmed.startsWith('data:')) {
+      final header = trimmed.substring(5).split(',').first;
+      final mime = header.split(';').first.trim().toLowerCase();
+      if (mime.isNotEmpty) return mime;
+    }
+    final lower = trimmed.toLowerCase();
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    if (lower.endsWith('.mp3')) return 'audio/mp3';
+    if (lower.endsWith('.webm')) return 'audio/webm';
+    if (lower.endsWith('.ogg')) return 'audio/ogg';
+    if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) return 'audio/mp4';
+    return 'audio/aac';
   }
 
   /// Builds the JSON request body for `POST /api/v1/ai/help-chat`.

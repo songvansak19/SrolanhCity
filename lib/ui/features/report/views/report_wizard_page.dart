@@ -2253,25 +2253,52 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                   photoAi.status == PhotoAiStatus.rateLimited ||
                   photoAi.status == PhotoAiStatus.failed)) ...[
             const SizedBox(height: 8),
-            ActionChip(
-              key: const Key('step2-rescan-ai-chip'),
-              avatar: const Icon(
-                Icons.refresh_rounded,
-                size: 14,
-                color: AppColors.teal,
-              ),
-              label: Text(
-                tr.primary(
-                  'វិភាគរូបភាព និងអក្សរម្តងទៀត',
-                  'Re-scan photo & note',
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (photoAi.status == PhotoAiStatus.notCivicIssue)
+                  ActionChip(
+                    key: const Key('step2-retake-photo-chip'),
+                    avatar: const Icon(
+                      Icons.add_a_photo_outlined,
+                      size: 14,
+                      color: AppColors.saffronInk,
+                    ),
+                    label: Text(
+                      tr.primary('ថត ឬជ្រើសរូបថ្មី', 'Retake / change photo'),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.saffronInk,
+                      ),
+                    ),
+                    onPressed: () {
+                      vm.removeLocalPhotoAt(0);
+                      vm.previousStep();
+                    },
+                  ),
+                ActionChip(
+                  key: const Key('step2-rescan-ai-chip'),
+                  avatar: const Icon(
+                    Icons.refresh_rounded,
+                    size: 14,
+                    color: AppColors.teal,
+                  ),
+                  label: Text(
+                    tr.primary(
+                      'វិភាគរូបភាព និងអក្សរម្តងទៀត',
+                      'Re-scan photo & note',
+                    ),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  onPressed: () =>
+                      unawaited(vm.analyzeLatestPhoto(forceRefresh: true)),
                 ),
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              onPressed: () =>
-                  unawaited(vm.analyzeLatestPhoto(forceRefresh: true)),
+              ],
             ),
           ],
         ],
