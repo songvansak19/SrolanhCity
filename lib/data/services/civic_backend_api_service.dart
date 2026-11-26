@@ -40,7 +40,7 @@ class CivicBackendApiService {
        _accessToken = initialAccessToken;
 
   static const String _envBaseUrl = String.fromEnvironment('API_BASE_URL');
-  static const Duration requestTimeout = Duration(seconds: 12);
+  static const Duration requestTimeout = Duration(seconds: 45);
 
   final http.Client? httpClient;
   final String _baseUrl;

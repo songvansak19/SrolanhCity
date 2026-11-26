@@ -316,7 +316,13 @@ class ReportRepository extends ChangeNotifier {
     final store = storage;
     if (store == null) return;
     final data = await store.readState();
-    if (data == null) return;
+    if (data == null) {
+      if (_isOnline && apiService.isConfigured) {
+        unawaited(_syncAndRefreshFromBackend());
+        _connectLiveUpdates();
+      }
+      return;
+    }
 
     final rawReports = data['reports'];
     if (rawReports is List && rawReports.isNotEmpty) {
