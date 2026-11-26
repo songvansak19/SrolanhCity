@@ -26,6 +26,8 @@ import '../report/views/fake_gps_page.dart';
 import '../report/views/report_wizard_page.dart';
 import '../tracking/tracking_page.dart';
 
+enum _MapReportSort { nearest, priorityHighToLow, priorityLowToHigh, newest }
+
 class MapPage extends StatefulWidget {
   const MapPage({
     super.key,
@@ -68,6 +70,7 @@ class _MapPageState extends State<MapPage> {
   Timer? _viewportDebounce;
   String _query = '';
   IssueCategory? _selectedCategory;
+  _MapReportSort _selectedSort = _MapReportSort.nearest;
   String? _activeReportId;
   bool _showLegend = false;
   bool _isSearchingPlace = false;
@@ -184,6 +187,251 @@ class _MapPageState extends State<MapPage> {
               report.englishAgency.toLowerCase().contains(q);
         })
         .toList(growable: false);
+  }
+
+  List<CivicReport> _sortReports(List<CivicReport> reports) {
+    if (_selectedSort == _MapReportSort.nearest || reports.length <= 1) {
+      return reports;
+    }
+    final sorted = List<CivicReport>.of(reports);
+    sorted.sort((a, b) {
+      switch (_selectedSort) {
+        case _MapReportSort.nearest:
+          return 0;
+        case _MapReportSort.priorityHighToLow:
+          final scoreCmp = b.priority.rawScore.compareTo(a.priority.rawScore);
+          if (scoreCmp != 0) return scoreCmp;
+          final countCmp = b.affectedCitizens.compareTo(a.affectedCitizens);
+          if (countCmp != 0) return countCmp;
+          return b.createdAt.compareTo(a.createdAt);
+        case _MapReportSort.priorityLowToHigh:
+          final scoreCmp = a.priority.rawScore.compareTo(b.priority.rawScore);
+          if (scoreCmp != 0) return scoreCmp;
+          return b.createdAt.compareTo(a.createdAt);
+        case _MapReportSort.newest:
+          return b.createdAt.compareTo(a.createdAt);
+      }
+    });
+    return sorted;
+  }
+
+  String _sortShortLabel(Bilingual tr) {
+    return switch (_selectedSort) {
+      _MapReportSort.nearest => tr.primary(
+        'តម្រៀប · ជិតបំផុត',
+        'Sort · Nearest',
+      ),
+      _MapReportSort.priorityHighToLow => tr.primary(
+        'អាទិភាពខ្ពស់ P5→P1',
+        'Priority P5→P1',
+      ),
+      _MapReportSort.priorityLowToHigh => tr.primary(
+        'អាទិភាពទាប P1→P5',
+        'Priority P1→P5',
+      ),
+      _MapReportSort.newest => tr.primary('ថ្មីបំផុត', 'Newest'),
+    };
+  }
+
+  String _sortSemanticLabel(Bilingual tr) {
+    return switch (_selectedSort) {
+      _MapReportSort.nearest => tr.primary(
+        'តម្រៀបរបាយការណ៍៖ ជិតបំផុត',
+        'Sort reports: Nearest',
+      ),
+      _MapReportSort.priorityHighToLow => tr.primary(
+        'តម្រៀបរបាយការណ៍៖ អាទិភាពខ្ពស់បំផុត P5 ដល់ P1',
+        'Sort reports: Priority high to low, P5 to P1',
+      ),
+      _MapReportSort.priorityLowToHigh => tr.primary(
+        'តម្រៀបរបាយការណ៍៖ អាទិភាពទាបបំផុត P1 ដល់ P5',
+        'Sort reports: Priority low to high, P1 to P5',
+      ),
+      _MapReportSort.newest => tr.primary(
+        'តម្រៀបរបាយការណ៍៖ ថ្មីបំផុត',
+        'Sort reports: Newest',
+      ),
+    };
+  }
+
+  Future<void> _openSortSheet(Bilingual tr) async {
+    HapticFeedback.selectionClick();
+    final picked = await showModalBottomSheet<_MapReportSort>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: AppColors.paper,
+      builder: (sheetContext) {
+        final options =
+            <
+              ({
+                _MapReportSort mode,
+                IconData icon,
+                String khmerTitle,
+                String englishTitle,
+                String khmerSubtitle,
+                String englishSubtitle,
+              })
+            >[
+              (
+                mode: _MapReportSort.nearest,
+                icon: Icons.near_me_outlined,
+                khmerTitle: 'ជិតបំផុត',
+                englishTitle: 'Nearest',
+                khmerSubtitle: 'តម្រៀបតាមចម្ងាយពីកណ្តាលផែនទី',
+                englishSubtitle: 'Closest to the current map center',
+              ),
+              (
+                mode: _MapReportSort.priorityHighToLow,
+                icon: Icons.keyboard_double_arrow_up_rounded,
+                khmerTitle: 'អាទិភាពខ្ពស់បំផុត (P5 → P1)',
+                englishTitle: 'Highest priority (P5 → P1)',
+                khmerSubtitle: 'បញ្ហាបន្ទាន់ និងគ្រោះថ្នាក់ខ្លាំងមុនគេ',
+                englishSubtitle: 'Urgent and high-impact hazards first',
+              ),
+              (
+                mode: _MapReportSort.priorityLowToHigh,
+                icon: Icons.keyboard_double_arrow_down_rounded,
+                khmerTitle: 'អាទិភាពទាបបំផុត (P1 → P5)',
+                englishTitle: 'Lowest priority (P1 → P5)',
+                khmerSubtitle: 'បញ្ហាកម្រិតស្រាលមុនគេ',
+                englishSubtitle: 'Minor issues first',
+              ),
+              (
+                mode: _MapReportSort.newest,
+                icon: Icons.schedule_rounded,
+                khmerTitle: 'ថ្មីបំផុត',
+                englishTitle: 'Newest',
+                khmerSubtitle: 'របាយការណ៍ដែលទើបផ្ញើចូលថ្មីៗមុនគេ',
+                englishSubtitle: 'Most recently submitted reports first',
+              ),
+            ];
+
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+            child: Column(
+              key: const Key('map-sort-sheet'),
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                BilingualText(
+                  bilingual: tr,
+                  khmer: 'តម្រៀបរបាយការណ៍',
+                  english: 'Sort reports',
+                  fontSize: 16,
+                  isHeader: true,
+                ),
+                const SizedBox(height: 12),
+                for (final opt in options) ...[
+                  Builder(
+                    builder: (context) {
+                      final isSelected = opt.mode == _selectedSort;
+                      final title = tr.primary(
+                        opt.khmerTitle,
+                        opt.englishTitle,
+                      );
+                      final subtitle = tr.primary(
+                        opt.khmerSubtitle,
+                        opt.englishSubtitle,
+                      );
+                      return Semantics(
+                        inMutuallyExclusiveGroup: true,
+                        checked: isSelected,
+                        label: '$title, $subtitle',
+                        child: InkWell(
+                          key: Key('map-sort-option-${opt.mode.name}'),
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            Navigator.of(sheetContext).pop(opt.mode);
+                          },
+                          borderRadius: BorderRadius.circular(14),
+                          child: ExcludeSemantics(
+                            child: Container(
+                              width: double.infinity,
+                              constraints: const BoxConstraints(minHeight: 56),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppColors.tealSoft
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? AppColors.teal
+                                      : AppColors.inputBorder,
+                                  width: isSelected ? 1.8 : 1.0,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    opt.icon,
+                                    size: 20,
+                                    color: isSelected
+                                        ? AppColors.tealDark
+                                        : AppColors.muted,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          title,
+                                          style: const TextStyle(
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.ink,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          subtitle,
+                                          style: const TextStyle(
+                                            fontSize: 11.5,
+                                            height: 1.35,
+                                            color: AppColors.muted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    isSelected
+                                        ? Icons.radio_button_checked_rounded
+                                        : Icons.radio_button_off_rounded,
+                                    size: 20,
+                                    color: isSelected
+                                        ? AppColors.tealDark
+                                        : AppColors.muted,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (picked == null || !mounted || picked == _selectedSort) return;
+    setState(() => _selectedSort = picked);
+    if (_carouselController.hasClients) {
+      _carouselController.jumpToPage(0);
+    }
   }
 
   void _flyToPoint(LatLng target, double targetZoom) {
@@ -1295,14 +1543,16 @@ class _MapPageState extends State<MapPage> {
           );
     final viewportReports = isFocusedResolvedMode
         ? const <CivicReport>[]
-        : (_zoom < MapClusterService.provinceClusterMaxZoom ||
-                  _query.trim().isNotEmpty
-              ? filteredReports
-              : MapClusterService.reportsInViewport(
-                  reports: filteredReports,
-                  bounds: _carouselBounds ?? _visibleBounds,
-                  center: _center,
-                ));
+        : _sortReports(
+            _zoom < MapClusterService.provinceClusterMaxZoom ||
+                    _query.trim().isNotEmpty
+                ? filteredReports
+                : MapClusterService.reportsInViewport(
+                    reports: filteredReports,
+                    bounds: _carouselBounds ?? _visibleBounds,
+                    center: _center,
+                  ),
+          );
     final isOverviewZoom = _zoom < MapClusterService.provinceClusterMaxZoom;
     final showBottomCarousel =
         !isFocusedResolvedMode &&
@@ -1686,6 +1936,55 @@ class _MapPageState extends State<MapPage> {
                               HapticFeedback.selectionClick();
                               _openProvinceJumpSheet(repo, tr);
                             },
+                          ),
+                          const SizedBox(width: 6),
+                          Semantics(
+                            hint: tr.primary(
+                              'បើកជម្រើសតម្រៀប',
+                              'Opens sort options',
+                            ),
+                            label: _sortSemanticLabel(tr),
+                            child: ActionChip(
+                              key: const Key('map-priority-sort-btn'),
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.padded,
+                              backgroundColor:
+                                  _selectedSort == _MapReportSort.nearest
+                                  ? Colors.white
+                                  : AppColors.tealSoft,
+                              side: BorderSide(
+                                color: _selectedSort == _MapReportSort.nearest
+                                    ? AppColors.inputBorder
+                                    : AppColors.teal,
+                              ),
+                              avatar: const Icon(
+                                Icons.sort_rounded,
+                                size: 16,
+                                color: AppColors.tealDark,
+                              ),
+                              label: ExcludeSemantics(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      _sortShortLabel(tr),
+                                      style: const TextStyle(
+                                        color: AppColors.tealDark,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 2),
+                                    const Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      size: 16,
+                                      color: AppColors.tealDark,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              onPressed: () => _openSortSheet(tr),
+                            ),
                           ),
                           const SizedBox(width: 6),
                           FilterChip(

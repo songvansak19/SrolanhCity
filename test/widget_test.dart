@@ -2,36 +2,36 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:my_app/data/repositories/report_repository.dart';
-import 'package:my_app/data/services/audio_recorder_service.dart';
-import 'package:my_app/data/services/civic_ai_service.dart';
-import 'package:my_app/data/services/comment_translation_service.dart';
-import 'package:my_app/data/services/exif_stripper.dart';
-import 'package:my_app/data/services/ip_geolocation_service.dart';
-import 'package:my_app/data/services/location_service.dart';
-import 'package:my_app/data/services/photo_media_types.dart';
-import 'package:my_app/data/services/reverse_geocoding_service.dart';
-import 'package:my_app/data/services/voice_input_service.dart';
-import 'package:my_app/domain/models/report_models.dart';
-import 'package:my_app/domain/services/report_location_eligibility_service.dart';
-import 'package:my_app/main.dart';
-import 'package:my_app/ui/core/report_scope.dart';
-import 'package:my_app/ui/core/theme.dart';
-import 'package:my_app/ui/core/widgets/before_after_slider.dart';
-import 'package:my_app/ui/core/widgets/user_avatar.dart';
-import 'package:my_app/ui/core/widgets/voice_waveform.dart';
-import 'package:my_app/ui/features/alerts/alert_detail_page.dart';
-import 'package:my_app/ui/features/alerts/alerts_page.dart';
-import 'package:my_app/ui/features/help/help_center_page.dart';
-import 'package:my_app/ui/features/map/map_page.dart';
-import 'package:my_app/ui/features/news/area_news_page.dart';
-import 'package:my_app/ui/features/profile/edit_profile_page.dart';
-import 'package:my_app/ui/features/profile/my_reports_page.dart';
-import 'package:my_app/ui/features/profile/profile_page.dart';
-import 'package:my_app/ui/features/report/views/fake_gps_page.dart';
-import 'package:my_app/ui/features/report/views/report_wizard_page.dart';
-import 'package:my_app/ui/features/shell/main_shell.dart';
-import 'package:my_app/ui/features/tracking/tracking_page.dart';
+import 'package:srolanhcity/data/repositories/report_repository.dart';
+import 'package:srolanhcity/data/services/audio_recorder_service.dart';
+import 'package:srolanhcity/data/services/civic_ai_service.dart';
+import 'package:srolanhcity/data/services/comment_translation_service.dart';
+import 'package:srolanhcity/data/services/exif_stripper.dart';
+import 'package:srolanhcity/data/services/ip_geolocation_service.dart';
+import 'package:srolanhcity/data/services/location_service.dart';
+import 'package:srolanhcity/data/services/photo_media_types.dart';
+import 'package:srolanhcity/data/services/reverse_geocoding_service.dart';
+import 'package:srolanhcity/data/services/voice_input_service.dart';
+import 'package:srolanhcity/domain/models/report_models.dart';
+import 'package:srolanhcity/domain/services/report_location_eligibility_service.dart';
+import 'package:srolanhcity/main.dart';
+import 'package:srolanhcity/ui/core/report_scope.dart';
+import 'package:srolanhcity/ui/core/theme.dart';
+import 'package:srolanhcity/ui/core/widgets/before_after_slider.dart';
+import 'package:srolanhcity/ui/core/widgets/user_avatar.dart';
+import 'package:srolanhcity/ui/core/widgets/voice_waveform.dart';
+import 'package:srolanhcity/ui/features/alerts/alert_detail_page.dart';
+import 'package:srolanhcity/ui/features/alerts/alerts_page.dart';
+import 'package:srolanhcity/ui/features/help/help_center_page.dart';
+import 'package:srolanhcity/ui/features/map/map_page.dart';
+import 'package:srolanhcity/ui/features/news/area_news_page.dart';
+import 'package:srolanhcity/ui/features/profile/edit_profile_page.dart';
+import 'package:srolanhcity/ui/features/profile/my_reports_page.dart';
+import 'package:srolanhcity/ui/features/profile/profile_page.dart';
+import 'package:srolanhcity/ui/features/report/views/fake_gps_page.dart';
+import 'package:srolanhcity/ui/features/report/views/report_wizard_page.dart';
+import 'package:srolanhcity/ui/features/shell/main_shell.dart';
+import 'package:srolanhcity/ui/features/tracking/tracking_page.dart';
 
 const String _testPhotoDataUri =
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
@@ -694,6 +694,46 @@ void main() {
   );
 
   testWidgets(
+    'MapPage Priority Sort chip opens sort sheet, reorders carousel P5->P1, and passes WCAG 2.1 AA',
+    (tester) async {
+      final handle = tester.ensureSemantics();
+      final repo = ReportRepository(
+        initialSettings: const AppSettings(englishFirst: true),
+      );
+
+      await tester.pumpWidget(_wrapWithScope(repo, const MapPage()));
+      await tester.pump();
+
+      final sortBtn = find.byKey(const Key('map-priority-sort-btn'));
+      expect(sortBtn, findsOneWidget);
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+      await tester.tap(sortBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('map-sort-sheet')), findsOneWidget);
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+      await tester.tap(
+        find.byKey(const Key('map-sort-option-priorityHighToLow')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('map-sort-sheet')), findsNothing);
+      expect(find.text('Priority P5→P1'), findsOneWidget);
+
+      // Highest priority open report in Phnom Penh (#SC-20519, P5) is now first in carousel
+      expect(find.text('#SC-20519'), findsOneWidget);
+      handle.dispose();
+    },
+  );
+
+  testWidgets(
     'MapPage bottom sheet blocks GPS-off and requires transparent Remote District reason sheet when supporting from another Khan',
     (tester) async {
       final seedRepo = ReportRepository();
@@ -912,6 +952,10 @@ void main() {
       await tester.pumpWidget(
         _wrapWithScope(repo, TrackingPage(reportId: withNote.report.id)),
       );
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('report-description-card')),
+        250,
+      );
       expect(find.byKey(const Key('report-description-card')), findsOneWidget);
       expect(
         find.text('Huge sinkhole right outside school gate'),
@@ -920,6 +964,10 @@ void main() {
 
       await tester.pumpWidget(
         _wrapWithScope(repo, TrackingPage(reportId: withoutNote.report.id)),
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('report-description-card')),
+        250,
       );
       expect(find.byKey(const Key('report-description-card')), findsOneWidget);
       expect(find.text('No comment'), findsOneWidget);
@@ -1065,32 +1113,22 @@ void main() {
         _wrapWithScope(repo, const TrackingPage(reportId: '#SC-20481')),
       );
 
-      // Shows 3 seeded comments collapsed to 2 + toggle + 8 silent supporters footer
+      // Shows 2 follow-up citizen comments + 8 silent supporters footer (original description is in Hero Summary)
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('citizen-comments-list')),
+        250,
+      );
       expect(find.byKey(const Key('citizen-comments-list')), findsOneWidget);
-      expect(find.textContaining('(3)'), findsOneWidget);
-      expect(find.textContaining('Original reporter'), findsOneWidget);
+      expect(find.textContaining('(2)'), findsOneWidget);
       expect(find.textContaining('Citizen #2'), findsOneWidget);
-      expect(find.byKey(const Key('toggle-all-comments-btn')), findsOneWidget);
+      expect(find.textContaining('Anonymous citizen #3'), findsOneWidget);
       expect(find.byKey(const Key('silent-supporters-footer')), findsOneWidget);
       expect(
         find.textContaining('8 other citizen(s) confirmed without commenting'),
         findsOneWidget,
       );
 
-      // Expand to see 3rd anonymous citizen comment
-      await tester.ensureVisible(
-        find.byKey(const Key('toggle-all-comments-btn')),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('toggle-all-comments-btn')));
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.textContaining('Anonymous citizen #3'),
-        150,
-      );
-      expect(find.textContaining('Anonymous citizen #3'), findsOneWidget);
-
-      // Tap "+ Add note" -> opens _AddCommentSheet -> post a new note -> displays immediately
+      // Tap "Write a comment..." -> opens _AddCommentSheet -> post a new note -> displays immediately
       await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('add-comment-btn')));
@@ -1105,11 +1143,13 @@ void main() {
       await tester.tap(find.byKey(const Key('submit-comment-btn')));
       await tester.pumpAndSettle();
 
+      // Adding a note auto-expands to show all 3 follow-up comments & toggle button
+      expect(find.textContaining('(3)'), findsOneWidget);
+      expect(find.byKey(const Key('toggle-all-comments-btn')), findsOneWidget);
       expect(
         find.text('Fresh cone placed next to pothole today'),
         findsOneWidget,
       );
-      expect(find.textContaining('(4)'), findsOneWidget);
 
       // Clear snackbar & scroll into center before deleting the user-added note
       ScaffoldMessenger.of(tester.element(find.byType(TrackingPage)))
@@ -1125,12 +1165,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Verify delete button sits flush near right edge & vertically aligned with author label
+      // Verify delete button sits inline inside the comment card bounds
       final cardRect = tester.getRect(
-        find.byKey(const Key('report-description-card')),
+        find.byKey(const Key('citizen-comments-list')),
       );
       final deleteRect = tester.getRect(deleteBtn);
-      expect(cardRect.right - deleteRect.right, lessThanOrEqualTo(32.0));
+      expect(deleteRect.left, greaterThanOrEqualTo(cardRect.left));
+      expect(deleteRect.right, lessThanOrEqualTo(cardRect.right));
 
       await tester.tap(deleteBtn);
       await tester.pumpAndSettle();
@@ -1139,7 +1180,7 @@ void main() {
         find.text('Fresh cone placed next to pothole today'),
         findsNothing,
       );
-      expect(find.textContaining('(3)'), findsOneWidget);
+      expect(find.textContaining('(2)'), findsOneWidget);
     },
   );
 
@@ -1235,7 +1276,7 @@ void main() {
       final toggleCommentsBtn = find.byKey(
         const Key('toggle-all-comments-btn'),
       );
-      await tester.ensureVisible(toggleCommentsBtn);
+      await tester.scrollUntilVisible(toggleCommentsBtn, 250);
       await tester.pumpAndSettle();
       await tester.tap(toggleCommentsBtn);
       await tester.pumpAndSettle();
@@ -1392,7 +1433,7 @@ void main() {
       expect(find.byKey(const Key('step3-exif-verified-pill')), findsOneWidget);
       expect(find.byKey(const Key('step3-out-of-zone-blocker')), findsNothing);
 
-      // Case 2: EXIF in Siem Reap while pinned in Phnom Penh (even with local PP GPS)
+      // Case 2: EXIF in Siem Reap while pinned in Phnom Penh when live GPS is disabled
       // -> hard-blocked by 150 m Zone + floating & card Return to 150 m zone
       await tester.pumpWidget(
         _wrapWithScope(
@@ -1406,11 +1447,7 @@ void main() {
               capturedAt: DateTime.now().subtract(const Duration(minutes: 10)),
             ),
             locationService: const _FakeLocationService(
-              LocationSuccess(
-                point: LatLng(11.5320, 104.9045),
-                accuracyMeters: 10,
-                isOutsideCambodia: false,
-              ),
+              LocationServiceDisabled(),
             ),
             voiceInputService: _UnavailableTestVoiceService(),
             civicAiService: _UnconfiguredTestAiService(),
@@ -1542,9 +1579,12 @@ void main() {
       await tester.pumpAndSettle();
 
       final translateBtn = find.byKey(const Key('translate-comment-c-20519-2'));
+      await tester.scrollUntilVisible(translateBtn, 250);
+      await tester.pumpAndSettle();
       expect(translateBtn, findsOneWidget);
 
       await tester.ensureVisible(translateBtn);
+      await tester.pumpAndSettle();
       await tester.tap(translateBtn);
       await tester.pumpAndSettle();
 
@@ -1565,15 +1605,15 @@ void main() {
       // Go offline -> translating another comment shows clean offline notice
       repo.setOnlineStatus(false);
       await tester.pumpAndSettle();
-      final origTranslateBtn = find.byKey(
-        const Key('translate-comment-c-20519-1'),
+      final thirdTranslateBtn = find.byKey(
+        const Key('translate-comment-c-20519-3'),
       );
-      await tester.ensureVisible(origTranslateBtn);
+      await tester.ensureVisible(thirdTranslateBtn);
       await tester.pumpAndSettle();
-      await tester.tap(origTranslateBtn);
+      await tester.tap(thirdTranslateBtn);
       await tester.pumpAndSettle();
       expect(
-        find.byKey(const Key('translate-error-c-20519-1')),
+        find.byKey(const Key('translate-error-c-20519-3')),
         findsOneWidget,
       );
     },
@@ -2138,12 +2178,11 @@ void main() {
     );
 
     testWidgets(
-      'Allows Siem Reap GPS to submit in Phnom Penh ONLY with matching Fresh Photo EXIF (strictly blocks GPS-off even when Home District is set)',
+      'Allows delayed upload in Phnom Penh with matching Fresh Photo EXIF when live GPS is disabled (strictly blocks GPS-off without EXIF even when Home District is set)',
       (tester) async {
-        const siemReapGps = LatLng(13.3633, 103.8564);
         const phnomPenhSpot = LatLng(11.5318, 104.9044);
 
-        // 1. Fresh Photo EXIF at Phnom Penh pin verifies the 150 m zone
+        // 1. Fresh Photo EXIF at Phnom Penh pin verifies the 150 m zone when live GPS is unavailable
         final exifRepo = ReportRepository(
           initialSettings: const AppSettings(englishFirst: true),
         );
@@ -2160,11 +2199,7 @@ void main() {
                 capturedAt: DateTime.now().subtract(const Duration(hours: 2)),
               ),
               locationService: const _FakeLocationService(
-                LocationSuccess(
-                  point: siemReapGps,
-                  accuracyMeters: 12,
-                  isOutsideCambodia: false,
-                ),
+                LocationServiceDisabled(),
               ),
               voiceInputService: _UnavailableTestVoiceService(),
               civicAiService: _UnconfiguredTestAiService(),
@@ -2310,6 +2345,10 @@ void main() {
           find.byKey(const Key('step3-option-create-new')),
           findsOneWidget,
         );
+        // Step 3 candidate cards omit per-pin distance labels
+        expect(find.textContaining('#SC-20519 · ×'), findsOneWidget);
+        expect(find.textContaining('#SC-29950 · ×'), findsOneWidget);
+        expect(find.textContaining('m away'), findsNothing);
 
         // Pass WCAG 2.1 AA on the new Step 3 picker
         await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
@@ -2407,11 +2446,7 @@ void main() {
                 capturedAt: DateTime.now(),
               ),
               locationService: const _FakeLocationService(
-                LocationSuccess(
-                  point: farPin,
-                  accuracyMeters: 9,
-                  isOutsideCambodia: false,
-                ),
+                LocationServiceDisabled(),
               ),
               voiceInputService: _UnavailableTestVoiceService(),
               civicAiService: _UnconfiguredTestAiService(),
@@ -2600,12 +2635,19 @@ void main() {
             ),
           ),
         );
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('report-description-card')),
+          250,
+        );
         expect(
           find.textContaining('Guest · You · Original reporter'),
           findsOneWidget,
         );
 
-        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('add-comment-btn')),
+          250,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('add-comment-btn')));
         await tester.pumpAndSettle();
@@ -2637,7 +2679,10 @@ void main() {
         );
 
         // 3. Anonymous toggle on own report shows Anonymous · Original reporter & preserves delete button
-        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('add-comment-btn')),
+          250,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('add-comment-btn')));
         await tester.pumpAndSettle();
@@ -2692,7 +2737,10 @@ void main() {
             .findById('#SC-20524')!
             .effectiveComments
             .length;
-        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('add-comment-btn')),
+          250,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('add-comment-btn')));
         await tester.pumpAndSettle();
@@ -2726,7 +2774,10 @@ void main() {
             ),
           ),
         );
-        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('add-comment-btn')),
+          250,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('add-comment-btn')));
         await tester.pumpAndSettle();
@@ -2760,7 +2811,10 @@ void main() {
             ),
           ),
         );
-        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('add-comment-btn')),
+          250,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('add-comment-btn')));
         await tester.pumpAndSettle();
@@ -2804,7 +2858,10 @@ void main() {
             ),
           ),
         );
-        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('add-comment-btn')),
+          250,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('add-comment-btn')));
         await tester.pumpAndSettle();
@@ -2873,7 +2930,10 @@ void main() {
             ),
           ),
         );
-        await tester.ensureVisible(find.byKey(const Key('add-comment-btn')));
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('add-comment-btn')),
+          250,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('add-comment-btn')));
         await tester.pumpAndSettle();

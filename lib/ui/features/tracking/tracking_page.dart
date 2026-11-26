@@ -23,6 +23,7 @@ import '../../core/widgets/photo_lightbox_page.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/priority_donut_chart.dart';
 import '../../core/widgets/report_photo.dart';
+import '../../core/widgets/user_avatar.dart';
 import '../map/map_page.dart';
 import '../report/views/fake_gps_page.dart';
 
@@ -228,6 +229,77 @@ class _TrackingPageState extends State<TrackingPage> {
 
   /// Screen 3.2 / Slide 09: Resolved Side-by-Side OR Draggable Compare Slider
   /// + Photo Lightbox + 5-Emoji Satisfaction Rating + Share Good News.
+  Widget _buildReportDescriptionSection(CivicReport report, Bilingual tr) {
+    final hasText = report.description.trim().isNotEmpty;
+    final profile = ReportScope.of(context).profile;
+    final isOwn =
+        report.createdByCurrentUser ||
+        (report.isMine && !report.joinedByCurrentUser);
+    final origComment = report.effectiveComments.firstOrNull;
+    final reporterLabel = () {
+      if (origComment != null &&
+          !UserProfile.isDefaultOrEmptyName(origComment.authorName)) {
+        return '${origComment.authorName!.trim()} · ${tr.primary('អ្នករាយការណ៍ដើម', 'Original reporter')}';
+      }
+      if (isOwn) {
+        if (report.isAnonymous) {
+          return tr.primary(
+            'អនាមិក · អ្នករាយការណ៍ដើម',
+            'Anonymous · Original reporter',
+          );
+        }
+        final live = profile.realDisplayName(englishFirst: tr.englishFirst);
+        final base = live ?? tr.primary('ភ្ញៀវ · អ្នក', 'Guest · You');
+        return '$base · ${tr.primary('អ្នករាយការណ៍ដើម', 'Original reporter')}';
+      }
+      return tr.primary('អ្នករាយការណ៍ដើម', 'Original reporter');
+    }();
+    return Container(
+      key: const Key('report-description-card'),
+      width: double.infinity,
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(height: 1, thickness: 1, color: AppColors.border),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Icon(
+                Icons.description_outlined,
+                size: 14,
+                color: AppColors.tealDark,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${tr.primary('ការពិពណ៌នា', 'Description')} · $reporterLabel',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.tealDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hasText
+                ? report.description.trim()
+                : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
+            style: TextStyle(
+              fontSize: 13.5,
+              height: 1.45,
+              color: hasText ? AppColors.ink : AppColors.muted,
+              fontStyle: hasText ? FontStyle.normal : FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildResolvedView(
     BuildContext context,
     CivicReport report,
@@ -396,58 +468,53 @@ class _TrackingPageState extends State<TrackingPage> {
                             color: AppColors.success.withValues(alpha: 0.28),
                           ),
                         ),
-                        child: Row(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const CircleAvatar(
-                              radius: 18,
-                              backgroundColor: AppColors.success,
-                              child: Icon(
-                                Icons.check_rounded,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  BilingualText(
-                                    bilingual: tr,
-                                    khmer: report.fixedDurationKhmer,
-                                    english: report.fixedDurationEnglish,
-                                    fontSize: 15,
-                                    color: AppColors.ink,
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: AppColors.success,
+                                  child: Icon(
+                                    Icons.check_rounded,
+                                    color: Colors.white,
+                                    size: 20,
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    tr.primary(
-                                      'ថតដោយ ក្រុម ${report.crewCode ?? 'B-07'} · ${report.khmerAgency}',
-                                      'Photo by crew ${report.crewCode ?? 'B-07'} · ${report.englishAgency}',
-                                    ),
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: AppColors.muted,
-                                    ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      BilingualText(
+                                        bilingual: tr,
+                                        khmer: report.fixedDurationKhmer,
+                                        english: report.fixedDurationEnglish,
+                                        fontSize: 15,
+                                        color: AppColors.ink,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        tr.primary(
+                                          'ថតដោយ ក្រុម ${report.crewCode ?? 'B-07'} · ${report.khmerAgency}',
+                                          'Photo by crew ${report.crewCode ?? 'B-07'} · ${report.englishAgency}',
+                                        ),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.muted,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
+                            _buildReportDescriptionSection(report, tr),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      _CitizenCommentsCard(
-                        report: report,
-                        tr: tr,
-                        allowAddNote: false,
-                        isOwnReport:
-                            report.createdByCurrentUser ||
-                            (report.isMine && !report.joinedByCurrentUser),
-                        locationService: widget.locationService,
-                        geocodingService: widget.geocodingService,
-                        translationService: widget.translationService,
                       ),
                       const SizedBox(height: 18),
 
@@ -513,6 +580,18 @@ class _TrackingPageState extends State<TrackingPage> {
                           isLast: i == report.timeline.length - 1,
                           isActiveStage: false,
                         ),
+                      const SizedBox(height: 14),
+                      _CitizenCommentsCard(
+                        report: report,
+                        tr: tr,
+                        allowAddNote: false,
+                        isOwnReport:
+                            report.createdByCurrentUser ||
+                            (report.isMine && !report.joinedByCurrentUser),
+                        locationService: widget.locationService,
+                        geocodingService: widget.geocodingService,
+                        translationService: widget.translationService,
+                      ),
                     ],
                   ),
                 ),
@@ -637,182 +716,192 @@ class _TrackingPageState extends State<TrackingPage> {
                           border: Border.all(color: AppColors.border),
                           boxShadow: AppColors.cardShadow,
                         ),
-                        child: Row(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Semantics(
-                              button: report.hasPhoto,
-                              excludeSemantics: report.hasPhoto,
-                              label: report.hasPhoto
-                                  ? tr.primary(
-                                      'មើលរូបភាពពេញអេក្រង់',
-                                      'View full photo',
-                                    )
-                                  : tr.primary(
-                                      'គ្មានរូបភាពភ្ជាប់',
-                                      'No photo attached',
-                                    ),
-                              child: InkWell(
-                                onTap: report.hasPhoto
-                                    ? () => PhotoLightboxPage.open(
-                                        context,
+                            Row(
+                              children: [
+                                Semantics(
+                                  button: report.hasPhoto,
+                                  excludeSemantics: report.hasPhoto,
+                                  label: report.hasPhoto
+                                      ? tr.primary(
+                                          'មើលរូបភាពពេញអេក្រង់',
+                                          'View full photo',
+                                        )
+                                      : tr.primary(
+                                          'គ្មានរូបភាពភ្ជាប់',
+                                          'No photo attached',
+                                        ),
+                                  child: InkWell(
+                                    onTap: report.hasPhoto
+                                        ? () => PhotoLightboxPage.open(
+                                            context,
+                                            category: report.category,
+                                            bilingual: tr,
+                                            localPhotoPath:
+                                                report.localPhotoPath,
+                                            assetPath: report.photoAssetPath,
+                                            title: tr.primary(
+                                              report.khmerTitle,
+                                              report.englishTitle,
+                                            ),
+                                            subtitle: report.id,
+                                            heroTag:
+                                                'report-photo-${report.id}',
+                                          )
+                                        : null,
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Hero(
+                                      tag: 'report-photo-${report.id}',
+                                      child: ReportPhoto(
                                         category: report.category,
-                                        bilingual: tr,
                                         localPhotoPath: report.localPhotoPath,
                                         assetPath: report.photoAssetPath,
-                                        title: tr.primary(
-                                          report.khmerTitle,
-                                          report.englishTitle,
-                                        ),
-                                        subtitle: report.id,
-                                        heroTag: 'report-photo-${report.id}',
-                                      )
-                                    : null,
-                                borderRadius: BorderRadius.circular(16),
-                                child: Hero(
-                                  tag: 'report-photo-${report.id}',
-                                  child: ReportPhoto(
-                                    category: report.category,
-                                    localPhotoPath: report.localPhotoPath,
-                                    assetPath: report.photoAssetPath,
-                                    width: 72,
-                                    height: 72,
-                                    borderRadius: 16,
-                                    bilingual: tr,
+                                        width: 72,
+                                        height: 72,
+                                        borderRadius: 16,
+                                        bilingual: tr,
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  BilingualText(
-                                    bilingual: tr,
-                                    khmer: report.khmerTitle,
-                                    english:
-                                        '${report.englishTitle} · ${report.englishLocation.split('·').first.trim()}',
-                                    fontSize: 15,
-                                    maxLines: 1,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 6,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
                                     crossAxisAlignment:
-                                        WrapCrossAlignment.center,
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      PriorityBadge(
-                                        breakdown: priority,
+                                      BilingualText(
                                         bilingual: tr,
-                                        showLabelBeside: true,
+                                        khmer: report.khmerTitle,
+                                        english:
+                                            '${report.englishTitle} · ${report.englishLocation.split('·').first.trim()}',
+                                        fontSize: 15,
+                                        maxLines: 1,
                                       ),
-                                      SyncStatusBadge(
-                                        status: report.syncStatus,
-                                        bilingual: tr,
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.groups_outlined,
-                                        size: 14,
-                                        color: AppColors.teal,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Flexible(
-                                        child: Text(
-                                          tr.primary(
-                                            '${report.affectedCitizens} នាក់រងផលប៉ះពាល់',
-                                            '${report.affectedCitizens} affected citizens',
+                                      const SizedBox(height: 8),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 6,
+                                        crossAxisAlignment:
+                                            WrapCrossAlignment.center,
+                                        children: [
+                                          PriorityBadge(
+                                            breakdown: priority,
+                                            bilingual: tr,
+                                            showLabelBeside: true,
                                           ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.teal,
+                                          SyncStatusBadge(
+                                            status: report.syncStatus,
+                                            bilingual: tr,
                                           ),
-                                        ),
+                                        ],
                                       ),
-                                      const SizedBox(width: 6),
-                                      LiveRelativeTimeText(
-                                        timestamp: report.createdAt,
-                                        englishFirst: tr.englishFirst,
-                                        prefix: '· ',
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: AppColors.muted,
-                                        ),
-                                      ),
-                                      if (report.isAnonymous) ...[
-                                        const SizedBox(width: 6),
-                                        Icon(
-                                          Icons.visibility_off_outlined,
-                                          size: 13,
-                                          color: AppColors.muted,
-                                          semanticLabel: tr.primary(
-                                            'របាយការណ៍អនាមិក',
-                                            'Anonymous report',
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                  if (report.locationVerificationTier ==
-                                          ReportLocationVerificationTier
-                                              .photoExifVerified ||
-                                      report.locationVerificationTier ==
-                                          ReportLocationVerificationTier
-                                              .liveCameraVerified) ...[
-                                    const SizedBox(height: 6),
-                                    Container(
-                                      key: const Key(
-                                        'tracking-photo-verified-badge',
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 3,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.successSoft,
-                                        borderRadius: BorderRadius.circular(
-                                          999,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
+                                      const SizedBox(height: 6),
+                                      Row(
                                         children: [
                                           const Icon(
-                                            Icons.verified_rounded,
-                                            size: 12,
-                                            color: AppColors.success,
+                                            Icons.groups_outlined,
+                                            size: 14,
+                                            color: AppColors.teal,
                                           ),
                                           const SizedBox(width: 4),
                                           Flexible(
                                             child: Text(
                                               tr.primary(
-                                                'ផ្ទៀងផ្ទាត់ GPS រូបថត',
-                                                'Photo GPS verified',
+                                                '${report.affectedCitizens} នាក់រងផលប៉ះពាល់',
+                                                '${report.affectedCitizens} affected citizens',
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: const TextStyle(
-                                                fontSize: 10.5,
+                                                fontSize: 11.5,
                                                 fontWeight: FontWeight.w700,
-                                                color: AppColors.tealDark,
+                                                color: AppColors.teal,
                                               ),
                                             ),
                                           ),
+                                          const SizedBox(width: 6),
+                                          LiveRelativeTimeText(
+                                            timestamp: report.createdAt,
+                                            englishFirst: tr.englishFirst,
+                                            prefix: '· ',
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: AppColors.muted,
+                                            ),
+                                          ),
+                                          if (report.isAnonymous) ...[
+                                            const SizedBox(width: 6),
+                                            Icon(
+                                              Icons.visibility_off_outlined,
+                                              size: 13,
+                                              color: AppColors.muted,
+                                              semanticLabel: tr.primary(
+                                                'របាយការណ៍អនាមិក',
+                                                'Anonymous report',
+                                              ),
+                                            ),
+                                          ],
                                         ],
                                       ),
-                                    ),
-                                  ],
-                                ],
-                              ),
+                                      if (report.locationVerificationTier ==
+                                              ReportLocationVerificationTier
+                                                  .photoExifVerified ||
+                                          report.locationVerificationTier ==
+                                              ReportLocationVerificationTier
+                                                  .liveCameraVerified) ...[
+                                        const SizedBox(height: 6),
+                                        Container(
+                                          key: const Key(
+                                            'tracking-photo-verified-badge',
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.successSoft,
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.verified_rounded,
+                                                size: 12,
+                                                color: AppColors.success,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Flexible(
+                                                child: Text(
+                                                  tr.primary(
+                                                    'ផ្ទៀងផ្ទាត់ GPS រូបថត',
+                                                    'Photo GPS verified',
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontSize: 10.5,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: AppColors.tealDark,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
+                            _buildReportDescriptionSection(report, tr),
                           ],
                         ),
                       ),
@@ -906,18 +995,6 @@ class _TrackingPageState extends State<TrackingPage> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 12),
-                      _CitizenCommentsCard(
-                        report: report,
-                        tr: tr,
-                        allowAddNote: true,
-                        isOwnReport:
-                            report.createdByCurrentUser ||
-                            (report.isMine && !report.joinedByCurrentUser),
-                        locationService: widget.locationService,
-                        geocodingService: widget.geocodingService,
-                        translationService: widget.translationService,
-                      ),
                       if (allPhotos.length > 1) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -966,6 +1043,35 @@ class _TrackingPageState extends State<TrackingPage> {
                                 ),
                               ),
                             ),
+                          ),
+                        ),
+                      ],
+                      if (report.voiceTranscript != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.tealSoft,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.graphic_eq_rounded,
+                                color: AppColors.teal,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '"${report.voiceTranscript}"',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.tealDark,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -1114,7 +1220,18 @@ class _TrackingPageState extends State<TrackingPage> {
                           },
                         ),
                       ],
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
+
+                      for (var i = 0; i < report.timeline.length; i++)
+                        _TimelineTile(
+                          entry: report.timeline[i],
+                          tr: tr,
+                          isLast: i == report.timeline.length - 1,
+                          isActiveStage:
+                              report.timeline[i].stage == report.status &&
+                              report.status == ReportStatus.crewDispatched,
+                        ),
+                      const SizedBox(height: 14),
 
                       Row(
                         children: [
@@ -1178,52 +1295,24 @@ class _TrackingPageState extends State<TrackingPage> {
                       ),
                       const SizedBox(height: 14),
 
+                      _CitizenCommentsCard(
+                        report: report,
+                        tr: tr,
+                        allowAddNote: true,
+                        isOwnReport:
+                            report.createdByCurrentUser ||
+                            (report.isMine && !report.joinedByCurrentUser),
+                        locationService: widget.locationService,
+                        geocodingService: widget.geocodingService,
+                        translationService: widget.translationService,
+                      ),
+                      const SizedBox(height: 14),
+
                       _PriorityBreakdownCard(
                         report: report,
                         priority: priority,
                         tr: tr,
                       ),
-                      const SizedBox(height: 18),
-
-                      for (var i = 0; i < report.timeline.length; i++)
-                        _TimelineTile(
-                          entry: report.timeline[i],
-                          tr: tr,
-                          isLast: i == report.timeline.length - 1,
-                          isActiveStage:
-                              report.timeline[i].stage == report.status &&
-                              report.status == ReportStatus.crewDispatched,
-                        ),
-
-                      if (report.voiceTranscript != null) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppColors.tealSoft,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.graphic_eq_rounded,
-                                color: AppColors.teal,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  '"${report.voiceTranscript}"',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: AppColors.tealDark,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -1854,7 +1943,9 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
     final repo = ReportScope.of(context);
     final report = widget.report;
     final tr = widget.tr;
-    final comments = report.effectiveComments;
+    final comments = report.effectiveComments
+        .where((c) => !c.isOriginalReporter)
+        .toList(growable: false);
     final visibleComments = _showAll || comments.length <= 2
         ? comments
         : comments.take(2).toList();
@@ -1862,7 +1953,7 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
     final silentCount = report.silentSupporterCount;
 
     return Container(
-      key: const Key('report-description-card'),
+      key: const Key('citizen-comments-list'),
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1872,142 +1963,130 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
         boxShadow: AppColors.cardShadow,
       ),
       child: Column(
-        key: const Key('citizen-comments-list'),
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.forum_outlined, size: 16, color: AppColors.teal),
-              const SizedBox(width: 6),
+              const Icon(Icons.forum_outlined, size: 17, color: AppColors.teal),
+              const SizedBox(width: 7),
               Expanded(
-                child: Text(
-                  tr.paired(
-                    'ការពិពណ៌នា និងមតិប្រជាពលរដ្ឋ (${comments.length})',
-                    'Citizen reports & comments (${comments.length})',
-                  ),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    tr.paired(
+                      'មតិប្រជាពលរដ្ឋ (${comments.length})',
+                      'Citizen comments (${comments.length})',
+                    ),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.ink,
+                    ),
                   ),
                 ),
               ),
-              if (widget.allowAddNote)
-                TextButton.icon(
-                  key: const Key('add-comment-btn'),
-                  onPressed: _isVerifyingCommentLocation
-                      ? null
-                      : _openAddCommentSheet,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    minimumSize: const Size(48, 44),
-                  ),
-                  icon: _isVerifyingCommentLocation
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(
-                          Icons.add_comment_outlined,
-                          size: 15,
-                          color: AppColors.teal,
-                        ),
-                  label: Text(
-                    _isVerifyingCommentLocation
-                        ? tr.primary('កំពុងផ្ទៀងផ្ទាត់...', 'Verifying...')
-                        : tr.primary('បន្ថែមមតិ', 'Add note'),
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.teal,
-                    ),
-                  ),
-                ),
             ],
           ),
-          const SizedBox(height: 8),
-          AnimatedSize(
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            alignment: Alignment.topCenter,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < visibleComments.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 8),
-                  _CitizenCommentTile(
-                    comment: visibleComments[i],
-                    authorLabel: _authorLabel(
-                      visibleComments[i],
-                      i,
-                      tr,
-                      repo.profile,
+          const SizedBox(height: 10),
+          if (comments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                tr.primary(
+                  'មិនទាន់មានមតិនៅឡើយទេ — ក្លាយជាអ្នកដំបូងដែលបន្ថែមមតិ',
+                  'No comments yet — be the first to add a note',
+                ),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: AppColors.muted,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            )
+          else
+            AnimatedSize(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < visibleComments.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 10),
+                    _CitizenCommentTile(
+                      comment: visibleComments[i],
+                      authorLabel: _authorLabel(
+                        visibleComments[i],
+                        i + 1,
+                        tr,
+                        repo.profile,
+                      ),
+                      tr: tr,
+                      translatedText:
+                          _showingTranslationIds.contains(visibleComments[i].id)
+                          ? _translations[visibleComments[i].id]
+                          : null,
+                      isTranslating: _translatingIds.contains(
+                        visibleComments[i].id,
+                      ),
+                      translationError:
+                          _translationErrors[visibleComments[i].id],
+                      onToggleTranslate: visibleComments[i].hasText
+                          ? () =>
+                                _toggleTranslateComment(visibleComments[i], tr)
+                          : null,
+                      onDelete:
+                          (visibleComments[i].isCurrentUser &&
+                              !visibleComments[i].isOriginalReporter &&
+                              !visibleComments[i].id.startsWith('c-join-') &&
+                              !visibleComments[i].id.startsWith('c-support-'))
+                          ? () => _deleteComment(visibleComments[i])
+                          : null,
                     ),
-                    tr: tr,
-                    translatedText:
-                        _showingTranslationIds.contains(visibleComments[i].id)
-                        ? _translations[visibleComments[i].id]
-                        : null,
-                    isTranslating: _translatingIds.contains(
-                      visibleComments[i].id,
-                    ),
-                    translationError: _translationErrors[visibleComments[i].id],
-                    onToggleTranslate: visibleComments[i].hasText
-                        ? () => _toggleTranslateComment(visibleComments[i], tr)
-                        : null,
-                    onDelete:
-                        (visibleComments[i].isCurrentUser &&
-                            !visibleComments[i].isOriginalReporter &&
-                            !visibleComments[i].id.startsWith('c-join-') &&
-                            !visibleComments[i].id.startsWith('c-support-'))
-                        ? () => _deleteComment(visibleComments[i])
-                        : null,
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
           if (comments.length > 2) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Align(
               alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                key: const Key('toggle-all-comments-btn'),
-                onPressed: () {
-                  HapticFeedback.selectionClick();
-                  setState(() => _showAll = !_showAll);
-                },
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 6,
+              child: Semantics(
+                expanded: _showAll,
+                child: TextButton.icon(
+                  key: const Key('toggle-all-comments-btn'),
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _showAll = !_showAll);
+                  },
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    minimumSize: const Size(48, 48),
                   ),
-                  minimumSize: const Size(48, 44),
-                ),
-                icon: Icon(
-                  _showAll
-                      ? Icons.keyboard_arrow_up_rounded
-                      : Icons.keyboard_arrow_down_rounded,
-                  size: 17,
-                  color: AppColors.teal,
-                ),
-                label: Text(
-                  _showAll
-                      ? tr.primary('បង្រួមមតិ', 'Show fewer comments')
-                      : tr.primary(
-                          'មើលមតិទាំងអស់ (+$hiddenCount ទៀត)',
-                          'Show all ${comments.length} comments (+$hiddenCount more)',
-                        ),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.teal,
+                  icon: Icon(
+                    _showAll
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: AppColors.tealDark,
+                  ),
+                  label: Text(
+                    _showAll
+                        ? tr.primary('បង្រួមមតិ', 'Show fewer comments')
+                        : tr.primary(
+                            'មើលមតិទាំងអស់ (+$hiddenCount ទៀត)',
+                            'View $hiddenCount more comment${hiddenCount == 1 ? '' : 's'}',
+                          ),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.tealDark,
+                    ),
                   ),
                 ),
               ),
@@ -2039,7 +2118,7 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
                         '$silentCount other citizen(s) confirmed without commenting',
                       ),
                       style: const TextStyle(
-                        fontSize: 11,
+                        fontSize: 11.5,
                         color: AppColors.muted,
                         fontWeight: FontWeight.w500,
                       ),
@@ -2047,6 +2126,89 @@ class _CitizenCommentsCardState extends State<_CitizenCommentsCard> {
                   ),
                 ],
               ),
+            ),
+          ],
+          if (widget.allowAddNote) ...[
+            const SizedBox(height: 10),
+            const Divider(height: 1, thickness: 1, color: AppColors.border),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                ExcludeSemantics(
+                  child: UserAvatar(profile: repo.profile, radius: 17),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    enabled: !_isVerifyingCommentLocation,
+                    excludeSemantics: true,
+                    label: _isVerifyingCommentLocation
+                        ? tr.primary(
+                            'កំពុងផ្ទៀងផ្ទាត់ទីតាំង...',
+                            'Verifying location...',
+                          )
+                        : tr.primary('សរសេរមតិ...', 'Write a comment...'),
+                    child: InkWell(
+                      key: const Key('add-comment-btn'),
+                      onTap: _isVerifyingCommentLocation
+                          ? null
+                          : _openAddCommentSheet,
+                      borderRadius: BorderRadius.circular(999),
+                      child: Container(
+                        constraints: const BoxConstraints(minHeight: 48),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.mutedSurface,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: AppColors.inputBorder),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _isVerifyingCommentLocation
+                                    ? tr.primary(
+                                        'កំពុងផ្ទៀងផ្ទាត់ទីតាំង...',
+                                        'Verifying...',
+                                      )
+                                    : tr.primary(
+                                        'សរសេរមតិ...',
+                                        'Write a comment...',
+                                      ),
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            if (_isVerifyingCommentLocation)
+                              const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.tealDark,
+                                ),
+                              )
+                            else
+                              const Icon(
+                                Icons.send_rounded,
+                                size: 17,
+                                color: AppColors.tealDark,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
@@ -2078,405 +2240,468 @@ class _CitizenCommentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final badgeBg = comment.isOriginalReporter
+    final isOwnHighlight = comment.isCurrentUser || comment.isOriginalReporter;
+    final bubbleColor = comment.isCurrentUser
+        ? AppColors.tealSoft
+        : AppColors.mutedSurface;
+    final avatarBg = comment.isOriginalReporter
         ? AppColors.tealSoft
         : comment.isCurrentUser
         ? AppColors.saffronSoft
-        : AppColors.mutedSurface;
-    final badgeFg = comment.isOriginalReporter
+        : AppColors.secondarySurface;
+    final avatarFg = comment.isOriginalReporter
         ? AppColors.tealDark
         : comment.isCurrentUser
         ? AppColors.saffronInk
         : AppColors.ink;
+    final trimmedAuthor = authorLabel.trim();
+    final initial = trimmedAuthor.isNotEmpty
+        ? String.fromCharCode(trimmedAuthor.runes.first).toUpperCase()
+        : '?';
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(11),
-      decoration: BoxDecoration(
-        color: AppColors.paper,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: comment.isCurrentUser && !comment.isOriginalReporter
-              ? AppColors.teal.withValues(alpha: 0.35)
-              : AppColors.border,
+    final showBody =
+        comment.supportReasonCategory == null ||
+        (comment.text.trim() != comment.supportReasonCategory!.englishLabel &&
+            comment.text.trim() != comment.supportReasonCategory!.khmerLabel);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ExcludeSemantics(
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: avatarBg,
+              shape: BoxShape.circle,
+              border: isOwnHighlight
+                  ? Border.all(
+                      color: comment.isOriginalReporter
+                          ? AppColors.teal
+                          : AppColors.saffronInk.withValues(alpha: 0.35),
+                      width: 1.5,
+                    )
+                  : null,
+            ),
+            alignment: Alignment.center,
+            child: comment.isAnonymous
+                ? Icon(Icons.person_outline_rounded, size: 18, color: avatarFg)
+                : Text(
+                    initial,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: avatarFg,
+                    ),
+                  ),
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Row(
+              // Facebook-style rounded speech bubble
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+                decoration: BoxDecoration(
+                  color: bubbleColor,
+                  borderRadius: BorderRadius.circular(18),
+                  border: comment.isCurrentUser && !comment.isOriginalReporter
+                      ? Border.all(
+                          color: AppColors.teal.withValues(alpha: 0.35),
+                        )
+                      : null,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Flexible(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: badgeBg,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          authorLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                            color: badgeFg,
+                    MergeSemantics(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                authorLabel,
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.ink,
+                                ),
+                              ),
+                              if (comment.severity != null)
+                                Semantics(
+                                  label: tr.primary(
+                                    'កម្រិតធ្ងន់ធ្ងរ ${comment.severity} ក្នុង 5',
+                                    'Severity ${comment.severity} of 5',
+                                  ),
+                                  excludeSemantics: true,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 1.5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: AppColors.inputBorder,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'S${comment.severity}/5',
+                                      style: AppFonts.displayStyle(
+                                        fontSize: 9.5,
+                                        color: AppColors.muted,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                        ),
+                          if (comment.supportTier != null &&
+                              !comment.isOriginalReporter) ...[
+                            const SizedBox(height: 5),
+                            Builder(
+                              builder: (context) {
+                                final tier = comment.supportTier!;
+                                final isOnSite =
+                                    tier ==
+                                    SupportVerificationTier.verifiedNearby;
+                                final tagText =
+                                    comment.supportReasonCategory != null
+                                    ? tier.formatTransparentTag(
+                                        englishFirst: tr.englishFirst,
+                                        areaKhmer: comment.supportAreaKhmer,
+                                        areaEnglish: comment.supportAreaEnglish,
+                                      )
+                                    : tier.formatCommentLocationTag(
+                                        englishFirst: tr.englishFirst,
+                                        areaKhmer: comment.supportAreaKhmer,
+                                        areaEnglish: comment.supportAreaEnglish,
+                                      );
+                                final pillBg = isOnSite
+                                    ? AppColors.successSoft
+                                    : AppColors.saffronSoft;
+                                final pillBorder = isOnSite
+                                    ? AppColors.success.withValues(alpha: 0.45)
+                                    : AppColors.saffron.withValues(alpha: 0.55);
+                                final pillFg = isOnSite
+                                    ? AppColors.tealDark
+                                    : AppColors.saffronInk;
+                                return Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: [
+                                    Container(
+                                      key: Key(
+                                        'comment-location-tag-${comment.id}',
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2.5,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: pillBg,
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                        border: Border.all(color: pillBorder),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            isOnSite
+                                                ? Icons.verified_rounded
+                                                : Icons
+                                                      .location_searching_rounded,
+                                            size: 11,
+                                            color: pillFg,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Flexible(
+                                            child: Text(
+                                              tagText,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w700,
+                                                color: pillFg,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (comment.supportReasonCategory != null)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 7,
+                                          vertical: 2.5,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          border: Border.all(
+                                            color: AppColors.inputBorder,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          tr.primary(
+                                            comment
+                                                .supportReasonCategory!
+                                                .khmerLabel,
+                                            comment
+                                                .supportReasonCategory!
+                                                .englishLabel,
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.ink,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ],
+                          if (showBody) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              comment.hasText
+                                  ? comment.text.trim()
+                                  : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
+                              style: TextStyle(
+                                fontSize: 13,
+                                height: 1.42,
+                                color: comment.hasText
+                                    ? AppColors.ink
+                                    : AppColors.muted,
+                                fontStyle: comment.hasText
+                                    ? FontStyle.normal
+                                    : FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    if (comment.severity != null) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Text(
-                          'S${comment.severity}/5',
-                          style: AppFonts.displayStyle(
-                            fontSize: 9.5,
-                            color: AppColors.muted,
-                            fontWeight: FontWeight.w700,
+                    if (translatedText != null) ...[
+                      const SizedBox(height: 6),
+                      Semantics(
+                        container: true,
+                        liveRegion: true,
+                        child: Container(
+                          key: Key('translated-comment-${comment.id}'),
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.paper,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.teal.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                CommentTranslationService.detectTargetLanguage(
+                                          comment.text,
+                                          appEnglishFirst: tr.englishFirst,
+                                        ) ==
+                                        'km'
+                                    ? tr.primary(
+                                        'បកប្រែជាភាសាខ្មែរ',
+                                        'Translated to Khmer',
+                                      )
+                                    : tr.primary(
+                                        'បកប្រែជាភាសាអង់គ្លេស',
+                                        'Translated to English',
+                                      ),
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.tealDark,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                translatedText!,
+                                style: const TextStyle(
+                                  fontSize: 12.8,
+                                  height: 1.42,
+                                  color: AppColors.ink,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
                     ],
-                    const SizedBox(width: 6),
+                    if (translationError != null) ...[
+                      const SizedBox(height: 4),
+                      Semantics(
+                        container: true,
+                        liveRegion: true,
+                        child: Text(
+                          translationError!,
+                          key: Key('translate-error-${comment.id}'),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.muted,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              // Facebook-style compact metadata & action row beneath bubble
+              Padding(
+                padding: const EdgeInsets.only(left: 10, top: 2),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 0,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
                     LiveRelativeTimeText(
                       timestamp: comment.createdAt,
                       englishFirst: tr.englishFirst,
                       style: const TextStyle(
-                        fontSize: 10.5,
+                        fontSize: 11.5,
                         color: AppColors.muted,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ],
-                ),
-              ),
-              if (onDelete != null) ...[
-                const SizedBox(width: 4),
-                Semantics(
-                  button: true,
-                  excludeSemantics: true,
-                  label: tr.primary('លុបមតិ', 'Delete note'),
-                  child: Tooltip(
-                    message: tr.primary('លុបមតិ', 'Delete note'),
-                    child: InkWell(
-                      key: Key('delete-comment-${comment.id}'),
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: onDelete,
-                      child: SizedBox(
-                        width: 48,
-                        height: 48,
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.all(5),
-                            decoration: BoxDecoration(
-                              color: AppColors.dangerSoft,
+                    if (onToggleTranslate != null && showBody)
+                      Builder(
+                        builder: (context) {
+                          final targetLang =
+                              CommentTranslationService.detectTargetLanguage(
+                                comment.text,
+                                appEnglishFirst: tr.englishFirst,
+                              );
+                          final isShowing = translatedText != null;
+                          final translateLabel = isTranslating
+                              ? tr.primary('កំពុងបកប្រែ...', 'Translating...')
+                              : isShowing
+                              ? tr.primary('លាក់ការបកប្រែ', 'See original')
+                              : targetLang == 'km'
+                              ? tr.primary('បកប្រែជាខ្មែរ', 'Translate')
+                              : tr.primary('បកប្រែជាអង់គ្លេស', 'Translate');
+                          return Semantics(
+                            button: true,
+                            enabled: !isTranslating,
+                            expanded: isShowing,
+                            excludeSemantics: true,
+                            label: translateLabel,
+                            child: InkWell(
+                              key: Key('translate-comment-${comment.id}'),
+                              onTap: isTranslating ? null : onToggleTranslate,
                               borderRadius: BorderRadius.circular(8),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  minWidth: 48,
+                                  minHeight: 48,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (isTranslating)
+                                        const SizedBox(
+                                          width: 12,
+                                          height: 12,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 1.8,
+                                            color: AppColors.tealDark,
+                                          ),
+                                        )
+                                      else
+                                        const Icon(
+                                          Icons.translate_rounded,
+                                          size: 13,
+                                          color: AppColors.tealDark,
+                                        ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        translateLabel,
+                                        style: const TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.tealDark,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
-                            child: const Icon(
-                              Icons.delete_outline_rounded,
-                              size: 15,
-                              color: AppColors.danger,
+                          );
+                        },
+                      ),
+                    if (onDelete != null)
+                      Semantics(
+                        button: true,
+                        excludeSemantics: true,
+                        label: tr.primary('លុបមតិ', 'Delete note'),
+                        child: InkWell(
+                          key: Key('delete-comment-${comment.id}'),
+                          onTap: onDelete,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              minWidth: 48,
+                              minHeight: 48,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    tr.primary('លុប', 'Delete'),
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.danger,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ],
           ),
-          if (comment.supportTier != null && !comment.isOriginalReporter) ...[
-            const SizedBox(height: 6),
-            Builder(
-              builder: (context) {
-                final tier = comment.supportTier!;
-                final isOnSite = tier == SupportVerificationTier.verifiedNearby;
-                final tagText = comment.supportReasonCategory != null
-                    ? tier.formatTransparentTag(
-                        englishFirst: tr.englishFirst,
-                        areaKhmer: comment.supportAreaKhmer,
-                        areaEnglish: comment.supportAreaEnglish,
-                      )
-                    : tier.formatCommentLocationTag(
-                        englishFirst: tr.englishFirst,
-                        areaKhmer: comment.supportAreaKhmer,
-                        areaEnglish: comment.supportAreaEnglish,
-                      );
-                final pillBg = isOnSite
-                    ? AppColors.successSoft
-                    : AppColors.saffronSoft;
-                final pillBorder = isOnSite
-                    ? AppColors.success.withValues(alpha: 0.45)
-                    : AppColors.saffron.withValues(alpha: 0.55);
-                final pillFg = isOnSite
-                    ? AppColors.tealDark
-                    : AppColors.saffronInk;
-                return Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    Container(
-                      key: Key('comment-location-tag-${comment.id}'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: pillBg,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: pillBorder),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isOnSite
-                                ? Icons.verified_rounded
-                                : Icons.location_searching_rounded,
-                            size: 11,
-                            color: pillFg,
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              tagText,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: pillFg,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (comment.supportReasonCategory != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Text(
-                          tr.primary(
-                            comment.supportReasonCategory!.khmerLabel,
-                            comment.supportReasonCategory!.englishLabel,
-                          ),
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.ink,
-                          ),
-                        ),
-                      ),
-                  ],
-                );
-              },
-            ),
-          ],
-          if (comment.supportReasonCategory == null ||
-              (comment.text.trim() !=
-                      comment.supportReasonCategory!.englishLabel &&
-                  comment.text.trim() !=
-                      comment.supportReasonCategory!.khmerLabel)) ...[
-            const SizedBox(height: 6),
-            Text(
-              comment.hasText
-                  ? comment.text.trim()
-                  : tr.primary('គ្មានមតិបន្ថែម', 'No comment'),
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.42,
-                color: comment.hasText ? AppColors.ink : AppColors.muted,
-                fontStyle: comment.hasText
-                    ? FontStyle.normal
-                    : FontStyle.italic,
-              ),
-            ),
-          ],
-          if (onToggleTranslate != null &&
-              (comment.supportReasonCategory == null ||
-                  (comment.text.trim() !=
-                          comment.supportReasonCategory!.englishLabel &&
-                      comment.text.trim() !=
-                          comment.supportReasonCategory!.khmerLabel))) ...[
-            const SizedBox(height: 6),
-            Builder(
-              builder: (context) {
-                final targetLang =
-                    CommentTranslationService.detectTargetLanguage(
-                      comment.text,
-                      appEnglishFirst: tr.englishFirst,
-                    );
-                final isShowing = translatedText != null;
-                final reduceMotion = MediaQuery.disableAnimationsOf(context);
-                final translateLabel = isTranslating
-                    ? tr.primary('កំពុងបកប្រែ...', 'Translating...')
-                    : isShowing
-                    ? tr.primary('លាក់ការបកប្រែ', 'Hide translation')
-                    : targetLang == 'km'
-                    ? tr.primary('បកប្រែជាភាសាខ្មែរ', 'Translate to Khmer')
-                    : tr.primary('បកប្រែជាអង់គ្លេស', 'Translate to English');
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AnimatedSize(
-                      duration: reduceMotion
-                          ? Duration.zero
-                          : const Duration(milliseconds: 200),
-                      curve: Curves.easeOutCubic,
-                      alignment: Alignment.topLeft,
-                      child: isShowing
-                          ? Semantics(
-                              container: true,
-                              liveRegion: true,
-                              child: Container(
-                                key: Key('translated-comment-${comment.id}'),
-                                width: double.infinity,
-                                margin: const EdgeInsets.only(bottom: 6),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppColors.tealSoft.withValues(
-                                    alpha: 0.55,
-                                  ),
-                                  borderRadius: BorderRadius.circular(11),
-                                  border: Border.all(
-                                    color: AppColors.teal.withValues(
-                                      alpha: 0.25,
-                                    ),
-                                  ),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      targetLang == 'km'
-                                          ? tr.primary(
-                                              'បកប្រែជាភាសាខ្មែរ',
-                                              'Translated to Khmer',
-                                            )
-                                          : tr.primary(
-                                              'បកប្រែជាភាសាអង់គ្លេស',
-                                              'Translated to English',
-                                            ),
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.tealDark,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      translatedText!,
-                                      style: const TextStyle(
-                                        fontSize: 12.8,
-                                        height: 1.42,
-                                        color: AppColors.ink,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                    if (translationError != null)
-                      Semantics(
-                        container: true,
-                        liveRegion: true,
-                        child: Padding(
-                          key: Key('translate-error-${comment.id}'),
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text(
-                            translationError!,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppColors.muted,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ),
-                      ),
-                    Semantics(
-                      button: true,
-                      expanded: isShowing,
-                      child: InkWell(
-                        key: Key('translate-comment-${comment.id}'),
-                        onTap: isTranslating ? null : onToggleTranslate,
-                        borderRadius: BorderRadius.circular(8),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(minHeight: 44),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (isTranslating)
-                                  const SizedBox(
-                                    width: 12,
-                                    height: 12,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 1.8,
-                                      color: AppColors.teal,
-                                    ),
-                                  )
-                                else
-                                  const Icon(
-                                    Icons.translate_rounded,
-                                    size: 13.5,
-                                    color: AppColors.teal,
-                                  ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  translateLabel,
-                                  style: const TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.teal,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ],
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

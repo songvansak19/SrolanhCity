@@ -3225,15 +3225,8 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                 button: true,
                                 expanded: isExpanded,
                                 excludeSemantics: true,
-                                label: isExpanded
-                                    ? tr.primary(
-                                        'បង្រួមផ្ទាំងដើម្បីមើលផែនទីពេញ',
-                                        'Collapse panel to view more map',
-                                      )
-                                    : tr.primary(
-                                        'បង្ហាញព័ត៌មានទីតាំង និងជម្រើសបញ្ជូន',
-                                        'Expand location panel',
-                                      ),
+                                label:
+                                    '${hasSimilar ? tr.primary('រកឃើញរបាយការណ៍ស្រដៀងក្នុង 150m (${similarMatches.length})', 'Similar reports within 150 m (${similarMatches.length})') : tr.primary(routing.khmerAgency, routing.englishAgency)} · ${isExpanded ? tr.primary('បង្រួមផ្ទាំងដើម្បីមើលផែនទីពេញ', 'Collapse panel to view more map') : tr.primary('បង្ហាញព័ត៌មានទីតាំង និងជម្រើសបញ្ជូន', 'Expand location panel')}',
                                 child: InkWell(
                                   key: const Key('step3-sheet-toggle'),
                                   borderRadius: const BorderRadius.vertical(
@@ -3258,7 +3251,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                           width: 36,
                                           height: 4,
                                           decoration: BoxDecoration(
-                                            color: AppColors.border,
+                                            color: AppColors.inputBorder,
                                             borderRadius: BorderRadius.circular(
                                               999,
                                             ),
@@ -3469,7 +3462,11 @@ class _ReportWizardPageState extends State<ReportWizardPage>
             'ពិនិត្យ និងជ្រើសរបាយការណ៍ដែលត្រូវគ្នា ដើម្បីបង្កើនអាទិភាព ឬបង្កើតរបាយការណ៍ថ្មីដាច់ដោយឡែក។',
             'Inspect and join a matching incident to boost priority, or file a new separate report below.',
           ),
-          style: const TextStyle(fontSize: 11, color: AppColors.muted),
+          style: const TextStyle(
+            fontSize: 12,
+            height: 1.4,
+            color: AppColors.muted,
+          ),
         ),
         const SizedBox(height: 8),
 
@@ -3481,137 +3478,160 @@ class _ReportWizardPageState extends State<ReportWizardPage>
               final isSelected =
                   !isCreatingNew && selectedMatch?.masterReport.id == report.id;
               final isMine = report.isContributedByCurrentUser;
-              final distText = SupportEligibilityService.formatDistance(
-                match.distanceMeters,
-                englishFirst: tr.englishFirst,
+              final titleText = tr.primary(
+                report.khmerTitle,
+                report.englishTitle,
+              );
+              final semanticSummary = tr.primary(
+                'ជ្រើសរបាយការណ៍ $titleText ${report.id}${isMine ? ' របស់អ្នក' : ''} · ${report.affectedCitizens} នាក់ · P${report.priority.level}',
+                'Select report $titleText ${report.id}${isMine ? ', Yours' : ''} · ${report.affectedCitizens} affected · P${report.priority.level}',
               );
 
-              return Semantics(
-                button: true,
-                selected: isSelected,
-                label: tr.primary(
-                  'ជ្រើសរបាយការណ៍ ${report.id} ចម្ងាយ $distText',
-                  'Select report ${report.id}, $distText away',
-                ),
-                child: InkWell(
-                  key: Key('similar-match-${report.id}'),
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    vm.selectMasterReport(report.id);
-                  },
+              return Container(
+                constraints: const BoxConstraints(minHeight: 56),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.tealSoft : AppColors.paper,
                   borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
-                    decoration: BoxDecoration(
-                      color: isSelected ? AppColors.tealSoft : AppColors.paper,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: isSelected ? AppColors.teal : AppColors.border,
-                        width: isSelected ? 1.8 : 1.0,
+                  border: Border.all(
+                    color: isSelected ? AppColors.teal : AppColors.inputBorder,
+                    width: isSelected ? 1.8 : 1.0,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Semantics(
+                        button: true,
+                        inMutuallyExclusiveGroup: true,
+                        selected: isSelected,
+                        excludeSemantics: true,
+                        label: semanticSummary,
+                        child: InkWell(
+                          key: Key('similar-match-${report.id}'),
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            vm.selectMasterReport(report.id);
+                          },
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(14),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isSelected
+                                      ? Icons.radio_button_checked_rounded
+                                      : Icons.radio_button_off_rounded,
+                                  size: 19,
+                                  color: isSelected
+                                      ? AppColors.teal
+                                      : AppColors.muted,
+                                ),
+                                const SizedBox(width: 8),
+                                ReportPhoto(
+                                  category: report.category,
+                                  localPhotoPath: report.localPhotoPath,
+                                  assetPath: report.photoAssetPath,
+                                  width: 40,
+                                  height: 40,
+                                  borderRadius: 9,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              titleText,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 12.5,
+                                                color: AppColors.ink,
+                                              ),
+                                            ),
+                                          ),
+                                          if (isMine) ...[
+                                            const SizedBox(width: 5),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 1.5,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: isSelected
+                                                    ? AppColors.paper
+                                                    : AppColors.tealSoft,
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                border: isSelected
+                                                    ? Border.all(
+                                                        color: AppColors.teal
+                                                            .withValues(
+                                                              alpha: 0.45,
+                                                            ),
+                                                      )
+                                                    : null,
+                                              ),
+                                              child: Text(
+                                                tr.primary('របស់អ្នក', 'Yours'),
+                                                style: const TextStyle(
+                                                  fontSize: 9.5,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: AppColors.tealDark,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      const SizedBox(height: 1),
+                                      Text(
+                                        '${report.id} · ×${report.affectedCitizens}',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppColors.muted,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                PriorityBadge(
+                                  breakdown: report.priority,
+                                  bilingual: tr,
+                                  compact: true,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isSelected
-                              ? Icons.radio_button_checked_rounded
-                              : Icons.radio_button_off_rounded,
-                          size: 19,
-                          color: isSelected ? AppColors.teal : AppColors.muted,
-                        ),
-                        const SizedBox(width: 8),
-                        ReportPhoto(
-                          category: report.category,
-                          localPhotoPath: report.localPhotoPath,
-                          assetPath: report.photoAssetPath,
-                          width: 40,
-                          height: 40,
-                          borderRadius: 9,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      tr.primary(
-                                        report.khmerTitle,
-                                        report.englishTitle,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12.5,
-                                        color: AppColors.ink,
-                                      ),
-                                    ),
-                                  ),
-                                  if (isMine) ...[
-                                    const SizedBox(width: 5),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 1.5,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.tealSoft,
-                                        borderRadius: BorderRadius.circular(
-                                          999,
-                                        ),
-                                      ),
-                                      child: Text(
-                                        tr.primary('របស់អ្នក', 'Yours'),
-                                        style: const TextStyle(
-                                          fontSize: 9.5,
-                                          fontWeight: FontWeight.w800,
-                                          color: AppColors.tealDark,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              const SizedBox(height: 1),
-                              Text(
-                                '${report.id} · $distText · ×${report.affectedCitizens}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.muted,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        PriorityBadge(
-                          breakdown: report.priority,
-                          bilingual: tr,
-                          compact: true,
-                        ),
-                        IconButton(
-                          key: Key('preview-match-${report.id}'),
-                          tooltip: tr.primary(
-                            'ពិនិត្យមើលព័ត៌មានលម្អិត ${report.id}',
-                            'Inspect ${report.id}',
-                          ),
-                          icon: const Icon(
-                            Icons.visibility_outlined,
-                            size: 19,
-                            color: AppColors.tealDark,
-                          ),
-                          onPressed: () =>
-                              _openSimilarReportPreview(vm, match, tr),
-                        ),
-                      ],
+                    IconButton(
+                      key: Key('preview-match-${report.id}'),
+                      tooltip: tr.primary(
+                        'ពិនិត្យមើលព័ត៌មានលម្អិត ${report.id}',
+                        'Inspect ${report.id}',
+                      ),
+                      icon: const Icon(
+                        Icons.visibility_outlined,
+                        size: 19,
+                        color: AppColors.tealDark,
+                      ),
+                      onPressed: () => _openSimilarReportPreview(vm, match, tr),
                     ),
-                  ),
+                  ],
                 ),
               );
             },
@@ -3621,12 +3641,15 @@ class _ReportWizardPageState extends State<ReportWizardPage>
 
         // Option row: Create a new separate report (unless hard self-blocked <= 50 m)
         if (!hardSelfBlocked) ...[
+          const Divider(height: 12, thickness: 1, color: AppColors.border),
           Semantics(
             button: true,
+            inMutuallyExclusiveGroup: true,
             selected: isCreatingNew,
+            excludeSemantics: true,
             label: tr.primary(
-              'បង្កើតរបាយការណ៍ថ្មីដាច់ដោយឡែកនៅទីនេះ',
-              'Submit as a new separate report here',
+              'បង្កើតរបាយការណ៍ថ្មីដាច់ដោយឡែកនៅទីនេះ · ប្រើជម្រើសនេះប្រសិនបើជាទីតាំង ឬបញ្ហាផ្សេងពីបញ្ជីខាងលើ',
+              'Submit as a new separate report here · Choose this if it is a distinct spot or issue from the list above',
             ),
             child: InkWell(
               key: const Key('step3-option-create-new'),
@@ -3637,7 +3660,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
               borderRadius: BorderRadius.circular(14),
               child: Container(
                 width: double.infinity,
-                constraints: const BoxConstraints(minHeight: 48),
+                constraints: const BoxConstraints(minHeight: 56),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
                   vertical: 8,
@@ -3646,20 +3669,39 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                   color: isCreatingNew ? AppColors.tealSoft : AppColors.paper,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: isCreatingNew ? AppColors.teal : AppColors.border,
+                    color: isCreatingNew
+                        ? AppColors.teal
+                        : AppColors.inputBorder,
                     width: isCreatingNew ? 1.8 : 1.0,
                   ),
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      isCreatingNew
-                          ? Icons.radio_button_checked_rounded
-                          : Icons.add_circle_outline_rounded,
-                      size: 19,
-                      color: isCreatingNew ? AppColors.teal : AppColors.muted,
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: isCreatingNew
+                            ? AppColors.paper
+                            : AppColors.mutedSurface,
+                        shape: BoxShape.circle,
+                        border: isCreatingNew
+                            ? Border.all(
+                                color: AppColors.teal.withValues(alpha: 0.45),
+                              )
+                            : null,
+                      ),
+                      child: Icon(
+                        isCreatingNew
+                            ? Icons.radio_button_checked_rounded
+                            : Icons.add_rounded,
+                        size: 18,
+                        color: isCreatingNew
+                            ? AppColors.teal
+                            : AppColors.tealDark,
+                      ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3671,7 +3713,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                             ),
                             style: const TextStyle(
                               fontWeight: FontWeight.w700,
-                              fontSize: 12,
+                              fontSize: 12.5,
                               color: AppColors.ink,
                             ),
                           ),
@@ -3681,7 +3723,8 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                               'Choose this if it is a distinct spot or issue from the list above',
                             ),
                             style: const TextStyle(
-                              fontSize: 10.5,
+                              fontSize: 11.5,
+                              height: 1.35,
                               color: AppColors.muted,
                             ),
                           ),
@@ -3802,7 +3845,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                         child: TextButton(
                           key: const Key('different-problem-btn'),
                           style: TextButton.styleFrom(
-                            minimumSize: const Size.fromHeight(44),
+                            minimumSize: const Size.fromHeight(48),
                           ),
                           onPressed: vm.canSubmitAtCurrentPin
                               ? () => _openDifferentProblemSheet(

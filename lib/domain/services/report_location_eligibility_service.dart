@@ -124,10 +124,10 @@ final class ReportLocationDeniedLocationRequired
 /// Pure evaluator enforcing the strict universal 150 m GPS / EXIF zone:
 /// 1. Mock / spoofed GPS -> ALWAYS blocked (never bypassed).
 /// 2. Resolve authoritative Cambodia anchor in strict priority order:
-///    a. Fresh Photo EXIF GPS (`<= 30 days`) -> `photoExifVerified`
-///    b. Live in-app camera capture GPS -> `liveCameraVerified`
-///    c. Live Cambodia device GPS (or verified session checkpoint `<= 15 min`)
+///    a. Live Cambodia device GPS (or verified session checkpoint `<= 15 min`)
 ///       -> `verifiedOnSite`
+///    b. Live in-app camera capture GPS -> `liveCameraVerified`
+///    c. Fresh Photo EXIF GPS (`<= 30 days`) -> `photoExifVerified`
 /// 3. If no valid Cambodia anchor exists -> strictly blocked
 ///    (`ReportLocationDeniedLocationRequired`, zero Home District or commuter
 ///    bypasses).
@@ -158,7 +158,31 @@ abstract final class ReportLocationEligibilityService {
       );
     }
 
-    // 2a–b. Derive photo anchor from explicit anchor or in-Cambodia EXIF.
+    LatLng? zoneAnchorPoint;
+    ZoneAnchorSource? zoneAnchorSource;
+    ReportLocationVerificationTier? tier;
+
+    // 2a. Prioritize live Cambodia device GPS (or fresh <= 15 min checkpoint).
+    LatLng? livePoint;
+    if (liveGpsResult is LocationSuccess && !liveGpsResult.isOutsideCambodia) {
+      livePoint = liveGpsResult.point;
+    } else if (liveGpsResult == null && lastVerifiedCheckpoint != null) {
+      final age = referenceNow.difference(lastVerifiedCheckpoint.timestamp);
+      if (!age.isNegative &&
+          age <= freshCheckpointWindow &&
+          LocationService.isInsideCambodia(lastVerifiedCheckpoint.point)) {
+        livePoint = lastVerifiedCheckpoint.point;
+      }
+    }
+
+    if (livePoint != null) {
+      zoneAnchorPoint = livePoint;
+      zoneAnchorSource = ZoneAnchorSource.liveDeviceGps;
+      tier = ReportLocationVerificationTier.verifiedOnSite;
+    }
+
+    // 2b–c. Fall back to live camera capture or fresh EXIF when live GPS is
+    // unavailable.
     final resolvedPhotoAnchor =
         photoAnchor ??
         (photoExif?.coordinates != null &&
@@ -170,12 +194,9 @@ abstract final class ReportLocationEligibilityService {
               )
             : null);
 
-    LatLng? zoneAnchorPoint;
-    ZoneAnchorSource? zoneAnchorSource;
-    ReportLocationVerificationTier? tier;
     var staleExif = false;
-
-    if (resolvedPhotoAnchor != null &&
+    if (zoneAnchorPoint == null &&
+        resolvedPhotoAnchor != null &&
         LocationService.isInsideCambodia(resolvedPhotoAnchor.point)) {
       if (resolvedPhotoAnchor.source == PhotoAnchorSource.liveCameraCapture) {
         zoneAnchorPoint = resolvedPhotoAnchor.point;
@@ -188,28 +209,6 @@ abstract final class ReportLocationEligibilityService {
       } else {
         // Stale EXIF (> 30 days) requires live Cambodia GPS on-site.
         staleExif = true;
-      }
-    }
-
-    // 2c. Fall back to verified live Cambodia GPS (or fresh <= 15 min checkpoint).
-    if (zoneAnchorPoint == null) {
-      LatLng? livePoint;
-      if (liveGpsResult is LocationSuccess &&
-          !liveGpsResult.isOutsideCambodia) {
-        livePoint = liveGpsResult.point;
-      } else if (liveGpsResult == null && lastVerifiedCheckpoint != null) {
-        final age = referenceNow.difference(lastVerifiedCheckpoint.timestamp);
-        if (!age.isNegative &&
-            age <= freshCheckpointWindow &&
-            LocationService.isInsideCambodia(lastVerifiedCheckpoint.point)) {
-          livePoint = lastVerifiedCheckpoint.point;
-        }
-      }
-
-      if (livePoint != null) {
-        zoneAnchorPoint = livePoint;
-        zoneAnchorSource = ZoneAnchorSource.liveDeviceGps;
-        tier = ReportLocationVerificationTier.verifiedOnSite;
       }
     }
 

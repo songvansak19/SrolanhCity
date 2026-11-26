@@ -4,29 +4,29 @@ import 'dart:typed_data';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:my_app/data/repositories/report_repository.dart';
-import 'package:my_app/data/services/audio_recorder_service.dart';
-import 'package:my_app/data/services/civic_ai_service.dart';
-import 'package:my_app/data/services/comment_translation_service.dart';
-import 'package:my_app/data/services/exif_stripper.dart';
-import 'package:my_app/data/services/ip_geolocation_service.dart';
-import 'package:my_app/data/services/local_storage_service.dart';
-import 'package:my_app/data/services/location_service.dart';
-import 'package:my_app/data/services/reverse_geocoding_service.dart';
-import 'package:my_app/data/services/voice_input_service.dart';
-import 'package:my_app/domain/models/cambodia_locations.dart';
-import 'package:my_app/domain/models/report_models.dart';
-import 'package:my_app/domain/services/ai_classifier_service.dart';
-import 'package:my_app/domain/services/anti_spoof_service.dart';
-import 'package:my_app/domain/services/gis_routing_service.dart';
-import 'package:my_app/domain/services/help_assistant_service.dart';
-import 'package:my_app/domain/services/map_cluster_service.dart';
-import 'package:my_app/domain/services/priority_calculator.dart';
-import 'package:my_app/domain/services/relative_time_formatter.dart';
-import 'package:my_app/domain/services/report_location_eligibility_service.dart';
-import 'package:my_app/domain/services/spatial_clustering_service.dart';
-import 'package:my_app/domain/services/support_eligibility_service.dart';
-import 'package:my_app/ui/features/report/view_models/report_wizard_view_model.dart';
+import 'package:srolanhcity/data/repositories/report_repository.dart';
+import 'package:srolanhcity/data/services/audio_recorder_service.dart';
+import 'package:srolanhcity/data/services/civic_ai_service.dart';
+import 'package:srolanhcity/data/services/comment_translation_service.dart';
+import 'package:srolanhcity/data/services/exif_stripper.dart';
+import 'package:srolanhcity/data/services/ip_geolocation_service.dart';
+import 'package:srolanhcity/data/services/local_storage_service.dart';
+import 'package:srolanhcity/data/services/location_service.dart';
+import 'package:srolanhcity/data/services/reverse_geocoding_service.dart';
+import 'package:srolanhcity/data/services/voice_input_service.dart';
+import 'package:srolanhcity/domain/models/cambodia_locations.dart';
+import 'package:srolanhcity/domain/models/report_models.dart';
+import 'package:srolanhcity/domain/services/ai_classifier_service.dart';
+import 'package:srolanhcity/domain/services/anti_spoof_service.dart';
+import 'package:srolanhcity/domain/services/gis_routing_service.dart';
+import 'package:srolanhcity/domain/services/help_assistant_service.dart';
+import 'package:srolanhcity/domain/services/map_cluster_service.dart';
+import 'package:srolanhcity/domain/services/priority_calculator.dart';
+import 'package:srolanhcity/domain/services/relative_time_formatter.dart';
+import 'package:srolanhcity/domain/services/report_location_eligibility_service.dart';
+import 'package:srolanhcity/domain/services/spatial_clustering_service.dart';
+import 'package:srolanhcity/domain/services/support_eligibility_service.dart';
+import 'package:srolanhcity/ui/features/report/view_models/report_wizard_view_model.dart';
 
 void main() {
   group('PriorityCalculator', () {
@@ -2129,9 +2129,26 @@ void main() {
       );
     });
 
-    test('allows delayed upload with fresh EXIF <= 150 m (<= 30 days) and rejects stale EXIF without live GPS on-site', () {
+    test('prioritizes Live Device GPS over Photo EXIF, allows delayed upload with fresh EXIF when live GPS is unavailable, and rejects stale EXIF', () {
       final now = DateTime(2026, 11, 24, 18, 0);
-      final allowed = ReportLocationEligibilityService.evaluate(
+      // 1. Live GPS unavailable (disabled) + fresh EXIF <= 30 days -> allowed via EXIF fallback
+      final allowedFallback = ReportLocationEligibilityService.evaluate(
+        pinnedLocation: phnomPenhPin,
+        liveGpsResult: const LocationServiceDisabled(),
+        photoExif: PhotoExifMetadata(
+          coordinates: const LatLng(11.5566, 104.9283),
+          capturedAt: now.subtract(const Duration(hours: 6)),
+        ),
+        now: now,
+      );
+      expect(allowedFallback, isA<ReportLocationEligible>());
+      expect(
+        (allowedFallback as ReportLocationEligible).tier,
+        equals(ReportLocationVerificationTier.photoExifVerified),
+      );
+
+      // 2. Live GPS available in Siem Reap takes priority over Phnom Penh EXIF -> OutOfZone
+      final livePriority = ReportLocationEligibilityService.evaluate(
         pinnedLocation: phnomPenhPin,
         liveGpsResult: const LocationSuccess(
           point: siemReapGps,
@@ -2144,10 +2161,10 @@ void main() {
         ),
         now: now,
       );
-      expect(allowed, isA<ReportLocationEligible>());
+      expect(livePriority, isA<ReportLocationDeniedOutOfZone>());
       expect(
-        (allowed as ReportLocationEligible).tier,
-        equals(ReportLocationVerificationTier.photoExifVerified),
+        (livePriority as ReportLocationDeniedOutOfZone).anchorSource,
+        equals(ZoneAnchorSource.liveDeviceGps),
       );
 
       // Stale EXIF (45 days old) + GPS off -> blocked with staleExifNeedsGps
@@ -2220,7 +2237,7 @@ void main() {
       expect(mocked, isA<ReportLocationDeniedMockGps>());
     });
 
-    test('Photo-Anchored Hard Fence (<= 150 m) blocks pins dragged > 150 m from EXIF or live camera', () {
+    test('Photo-Anchored Hard Fence (<= 150 m) blocks pins dragged > 150 m from EXIF or live camera fallback when live GPS is unavailable', () {
       final now = DateTime(2026, 11, 24, 19, 0);
       const photoSpot = LatLng(11.5564, 104.9282);
       const within150mPin = LatLng(11.5574, 104.9282); // ~111 m
@@ -2228,11 +2245,7 @@ void main() {
 
       final okExif = ReportLocationEligibilityService.evaluate(
         pinnedLocation: within150mPin,
-        liveGpsResult: const LocationSuccess(
-          point: siemReapGps,
-          accuracyMeters: 12,
-          isOutsideCambodia: false,
-        ),
+        liveGpsResult: const LocationServiceDisabled(),
         photoExif: PhotoExifMetadata(
           coordinates: photoSpot,
           capturedAt: now.subtract(const Duration(hours: 1)),
@@ -2247,11 +2260,7 @@ void main() {
 
       final blockedExif = ReportLocationEligibilityService.evaluate(
         pinnedLocation: dragged400mPin,
-        liveGpsResult: const LocationSuccess(
-          point: dragged400mPin,
-          accuracyMeters: 8,
-          isOutsideCambodia: false,
-        ),
+        liveGpsResult: const LocationServiceDisabled(),
         photoExif: PhotoExifMetadata(
           coordinates: photoSpot,
           capturedAt: now.subtract(const Duration(minutes: 5)),
@@ -2281,11 +2290,7 @@ void main() {
 
       final blockedCam = ReportLocationEligibilityService.evaluate(
         pinnedLocation: dragged400mPin,
-        liveGpsResult: const LocationSuccess(
-          point: dragged400mPin,
-          accuracyMeters: 8,
-          isOutsideCambodia: false,
-        ),
+        liveGpsResult: const LocationServiceDisabled(),
         photoAnchor: liveCamAnchor,
         now: now,
       );
@@ -2552,8 +2557,8 @@ void main() {
       vm.dispose();
     });
 
-    test('Dragging pin > 50 m from two own reports inside 150 m updates BOTH distances live and unlocks Submit as a new separate report here', () {
-      const spotA = LatLng(11.5620, 104.9228); // User report A (camera anchor)
+    test('Anchors 150 m detection to Live GPS while measuring <= 50 m self-duplicate guard from dragged pin inside the 150 m zone', () {
+      const spotA = LatLng(11.5620, 104.9228); // User report A
       const spotB = LatLng(11.5618, 104.9221); // User report B (~80 m west)
       const spotNew = LatLng(
         11.5611,
@@ -2590,11 +2595,11 @@ void main() {
         civicAiService: _UnconfiguredFakeCivicAiService(),
         ipGeolocationService: const _FakeIpGeoService(null),
       );
-      vm.setPhotoLocationAnchor(
-        PhotoLocationAnchor(
+      vm.recordLiveGpsResult(
+        const LocationSuccess(
           point: spotA,
-          source: PhotoAnchorSource.liveCameraCapture,
-          capturedAt: DateTime.now(),
+          accuracyMeters: 8,
+          isOutsideCambodia: false,
         ),
       );
 
@@ -2603,24 +2608,21 @@ void main() {
       expect(vm.hardSelfBlockedMatch?.masterReport.id, equals('#SC-20519'));
 
       // 2. Drag pin to distinct 3rd spot inside 150 m (> 50 m from BOTH A & B)
+      //    while Live GPS stays at spotA: 150 m candidate list stays anchored
+      //    to Live GPS, and self-duplicate block clears so new report unlocks.
       vm.setPinLocation(spotNew, verified: true, fromLiveGps: false);
       expect(vm.isOutside150mZone, isFalse);
-      final matchesAtNew = vm.nearbySimilarReports;
-      expect(matchesAtNew.length, equals(2));
-      for (final match in matchesAtNew) {
-        // Neither distance is frozen to the photo anchor (0 m)
-        expect(match.distanceMeters, greaterThan(50.0));
-      }
+      expect(vm.nearbySimilarReports.length, equals(2));
       expect(vm.isHardSelfBlockedAtPin, isFalse);
       expect(vm.isCreatingNewDespiteMatches, isTrue);
       expect(vm.selectedMasterMatch, isNull);
 
-      // Submitting creates a brand-new 3rd separate report cleanly
+      // Submitting creates a brand-new 3rd separate report cleanly at spotNew
       final created = vm.submit(forceCreateNew: true);
       expect(created.mergedIntoExisting, isFalse);
       expect(repo.reports.length, equals(3));
 
-      // 3. Drag pin within <= 50 m of B -> accurately switches self-block to B
+      // 3. Drag pin within <= 50 m of B -> switches self-block to B
       vm.setPinLocation(nearB, verified: true, fromLiveGps: false);
       expect(vm.isHardSelfBlockedAtPin, isTrue);
       expect(vm.hardSelfBlockedMatch?.masterReport.id, equals('#SC-20540'));

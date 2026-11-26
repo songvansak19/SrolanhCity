@@ -391,11 +391,12 @@ class ReportWizardViewModel extends ChangeNotifier {
     geocodedPlace: _geocodedPlace,
   );
 
-  /// ALL open same-category Master Incidents within 150 m of the current pin
-  /// or verified photo anchor, sorted nearest-first.
+  /// ALL open same-category Master Incidents within 150 m of the active zone
+  /// anchor (Live GPS first, then verified photo anchor, falling back to pin),
+  /// sorted nearest-first.
   List<DuplicateMatch> get nearbySimilarReports =>
       repository.findSimilarReportsNearby(
-        point: _pinLocation,
+        point: activeZoneAnchor?.point ?? _pinLocation,
         category: _category,
         photoAnchorPoint: activeFreshPhotoAnchor?.point,
       );
@@ -411,7 +412,10 @@ class ReportWizardViewModel extends ChangeNotifier {
   DuplicateMatch? get hardSelfBlockedMatch {
     for (final m in nearbySimilarReports) {
       if (m.masterReport.isContributedByCurrentUser &&
-          m.distanceMeters <=
+          SpatialClusteringService.distanceMeters(
+                _pinLocation,
+                m.masterReport.coordinates,
+              ) <=
               SpatialClusteringService.hardSelfBlockRadiusMeters) {
         return m;
       }
@@ -1441,6 +1445,7 @@ class ReportWizardViewModel extends ChangeNotifier {
       voiceTranscript: _voiceTranscript,
       geocodedPlace: _geocodedPlace,
       photoAnchorCoordinates: activeFreshPhotoAnchor?.point,
+      detectionAnchorCoordinates: activeZoneAnchor?.point,
       locationVerificationTier: verificationTier,
       targetMasterReportId: targetMasterId,
       forceCreateNew: createNew,

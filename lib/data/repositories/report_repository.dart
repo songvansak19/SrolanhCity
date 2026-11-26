@@ -643,6 +643,7 @@ class ReportRepository extends ChangeNotifier {
     String? voiceTranscript,
     GeocodedPlace? geocodedPlace,
     LatLng? photoAnchorCoordinates,
+    LatLng? detectionAnchorCoordinates,
     ReportLocationVerificationTier? locationVerificationTier,
     String? targetMasterReportId,
     bool forceCreateNew = false,
@@ -651,7 +652,7 @@ class ReportRepository extends ChangeNotifier {
     final submittedAt = now ?? DateTime.now();
     _draft = null;
     final candidates = findSimilarReportsNearby(
-      point: coordinates,
+      point: detectionAnchorCoordinates ?? coordinates,
       category: category,
       photoAnchorPoint: photoAnchorCoordinates,
     );
@@ -659,7 +660,10 @@ class ReportRepository extends ChangeNotifier {
     DuplicateMatch? hardSelfMatch;
     for (final candidate in candidates) {
       if (candidate.masterReport.isContributedByCurrentUser &&
-          candidate.distanceMeters <=
+          SpatialClusteringService.distanceMeters(
+                coordinates,
+                candidate.masterReport.coordinates,
+              ) <=
               SpatialClusteringService.hardSelfBlockRadiusMeters) {
         hardSelfMatch = candidate;
         break;
