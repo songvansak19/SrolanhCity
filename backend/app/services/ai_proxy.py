@@ -159,6 +159,19 @@ class AiProxyService:
             )
         return value
 
+    async def _generate_json(self, client: genai.Client, contents: Any) -> dict[str, Any]:
+        try:
+            response = await client.aio.models.generate_content(
+                model=self.settings.gemini_model,
+                contents=contents,
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
+        except Exception as exc:
+            raise AiUpstreamResponseError(
+                f"Upstream AI error ({self.settings.gemini_model}): {exc}"
+            ) from exc
+        return self._parse_json_dict(response.text)
+
     async def classify_issue(
         self,
         payload: ClassifyIssueRequest,
@@ -182,15 +195,13 @@ class AiProxyService:
             f"Preferred language: {payload.language}. "
             f"User hint: {payload.description_hint or 'none'}."
         )
-        response = await client.aio.models.generate_content(
-            model=self.settings.gemini_model,
-            contents=[
+        data = await self._generate_json(
+            client,
+            [
                 types.Part.from_bytes(data=image_bytes, mime_type=payload.mime_type),
                 prompt,
             ],
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
         )
-        data = self._parse_json_dict(response.text)
         try:
             is_civic_issue = self._require_strict_bool(
                 data.get("is_civic_issue", False), field_name="is_civic_issue"
@@ -246,15 +257,13 @@ class AiProxyService:
             "category ('pothole'|'streetlight'|'drain'|'trash'|'other'|null). "
             f"Expected language: {payload.language}."
         )
-        response = await client.aio.models.generate_content(
-            model=self.settings.gemini_model,
-            contents=[
+        data = await self._generate_json(
+            client,
+            [
                 types.Part.from_bytes(data=audio_bytes, mime_type=payload.mime_type),
                 prompt,
             ],
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
         )
-        data = self._parse_json_dict(response.text)
         try:
             raw_cat = self._require_optional_str(data.get("category"), field_name="category")
             valid_cats = {c.value for c in IssueCategoryEnum}
@@ -286,12 +295,7 @@ class AiProxyService:
             f"suggested_action (nullable string).\nLanguage: {payload.language}\n"
             f"Citizen context: {json.dumps(ctx)}\nHistory:\n{history_text}\nUser: {payload.message}"
         )
-        response = await client.aio.models.generate_content(
-            model=self.settings.gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        data = self._parse_json_dict(response.text)
+        data = await self._generate_json(client, prompt)
         try:
             raw_reply = self._require_optional_str(data.get("reply"), field_name="reply")
             reply = (raw_reply or "").strip() or "Please contact MPWT 1190 or EDC 1298."
@@ -319,12 +323,7 @@ class AiProxyService:
             "translated_text (string) and source_lang ('km'|'en'|null).\n\n"
             f"Text: {payload.text}"
         )
-        response = await client.aio.models.generate_content(
-            model=self.settings.gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        data = self._parse_json_dict(response.text)
+        data = await self._generate_json(client, prompt)
         try:
             raw_translated = self._require_optional_str(
                 data.get("translated_text"), field_name="translated_text"

@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.citizen.auth import ensure_user_exists
 from app.api.v1.ws import report_ws_manager
 from app.config import get_settings
 from app.core.auth import TokenClaims, get_current_user
@@ -126,6 +127,7 @@ async def add_support_vote(
     if not allowed:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=error_msg)
 
+    await ensure_user_exists(db, current_user.sub)
     support = ReportSupport(
         report_id=report_id,
         user_id=current_user.sub,

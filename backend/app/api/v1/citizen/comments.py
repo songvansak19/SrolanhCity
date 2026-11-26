@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.citizen.auth import ensure_user_exists
 from app.api.v1.ws import report_ws_manager
 from app.core.auth import TokenClaims, UserRole, get_current_user, get_current_user_optional
 from app.db.models.report import Report, ReportComment
@@ -92,6 +93,7 @@ async def add_comment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found.")
 
     uid = current_user.sub if current_user else None
+    await ensure_user_exists(db, uid)
     is_original_reporter = uid is not None and report.reporter_user_id == uid
     author_name = (
         None

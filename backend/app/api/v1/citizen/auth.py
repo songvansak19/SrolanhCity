@@ -71,6 +71,16 @@ class TokenResponse(BaseModel):
     user_id: str
 
 
+async def ensure_user_exists(db: AsyncSession, user_id: str | None) -> None:
+    """Create a guest `User` row if a cached JWT references a user_id not yet in DB."""
+    if not user_id or getattr(db, "is_stub", False):
+        return
+    existing = await db.scalar(sa.select(User.id).where(User.id == user_id))
+    if existing is None:
+        db.add(User(id=user_id, role=UserRole.GUEST.value))
+        await db.flush()
+
+
 @router.post("/guest", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def create_guest_session(
     payload: GuestAuthRequest,

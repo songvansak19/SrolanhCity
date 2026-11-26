@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.v1.citizen.auth import ensure_user_exists
 from app.api.v1.ws import report_ws_manager
 from app.core.auth import (
     TokenClaims,
@@ -304,6 +305,7 @@ async def create_report(
             ) from exc
 
     uid = current_user.sub if current_user else None
+    await ensure_user_exists(db, uid)
     nearby_duplicate_ids: list[str] = []
     if not payload.force_create_new:
         bbox = SpatialService.build_viewport_bbox_bounds(
