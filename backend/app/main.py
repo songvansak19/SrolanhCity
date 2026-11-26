@@ -20,7 +20,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        if cfg.database_url.startswith("sqlite") and not cfg.offline_stub_db:
+        if not cfg.offline_stub_db:
             engine = get_engine(cfg.database_url)
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)

@@ -20,7 +20,7 @@ A **Khmer-first, bilingual (Khmer / English) civic infrastructure reporting app*
   - **Country / Province view (`zoom < 10.2`)**: Province cluster bubbles (e.g., `ភ្នំពេញ · 13`, `សៀមរាប · 2`, `បាត់ដំបង · 1`) colored by highest open priority (`P1–P5`).
   - **District / City view (`10.2 – 13.4`)**: Adaptive spatial-grid cluster circles.
   - **Street view (`zoom ≥ 13.4`)**: Individual `P1–P5` and `✓` resolved pins.
-- **Viewport-Scoped Carousel & Province Quick-Jump**: Bottom incident cards dynamically reflect only the active map viewport, paired with a searchable 25-province switcher and 1-tap **All Cambodia** overview.
+- **Viewport-Scoped Carousel, Priority Sort & Province Quick-Jump**: Bottom incident cards dynamically reflect only the active map viewport with **Newest / Priority score / Most affected** sorting, paired with a searchable 25-province switcher and 1-tap **All Cambodia** overview.
 
 ### 3. 150 m Multi-Incident Detection, Multi-Citizen Comments & Priority Thresholds (`P1–P5`)
 - **150 m Multi-Candidate Clustering & 50 m Self-Duplicate Guard**: Detects all open same-category reports within **150 m**, allowing citizens to preview and join a specific **Master Incident** or submit a separate new ticket (`> 50 m` from their own open report). Re-reporting an issue already owned within `50 m` directs you to **View your existing report** or switch category.
@@ -55,13 +55,20 @@ lib/
 │   └── services/      # PriorityCalculator, GisRoutingService, SpatialClusteringService,
 │                      # MapClusterService, SupportEligibilityService, AiClassifierService
 ├── data/
-│   ├── repositories/  # ReportRepository (state, persistence, deduplication, daily vote cap)
-│   └── services/      # LocationService, ReverseGeocodingService, BackendCivicAiService,
-│                      # ExifStripper, AudioRecorderService, VoiceInputService,
-│                      # LocalStorageService (IO + Web conditional imports)
+│   ├── repositories/  # ReportRepository (state, offline-first queue, backend & WebSocket sync)
+│   └── services/      # CivicBackendApiService, BackendCivicAiService, LocationService,
+│                      # ReverseGeocodingService, CommentTranslationService, ExifStripper,
+│                      # LocalStorageService & ws_helper (IO + Web conditional imports)
 └── ui/
     ├── core/          # Theme (Mekong Teal + Angkor Saffron), Bilingual L10n, Widgets
     └── features/      # Welcome, Home, Map, Report Wizard, Tracking, Area News, Alerts, Profile
+
+backend/
+└── app/
+    ├── api/v1/        # Auth, Reports, Comments, Support, Alerts, AI Proxy, WebSocket (/ws/reports)
+    ├── core/          # JWT auth, EXIF stripping, anti-spoof integrity, PriorityCalculator
+    ├── db/            # Async SQLAlchemy + GeoAlchemy2 models (PostgreSQL/PostGIS & SQLite)
+    └── services/      # GIS routing, spatial clustering, AI proxy, analytics & notifications
 ```
 
 ### APIs & External Services
@@ -78,31 +85,30 @@ lib/
 
 These services are called directly by the client and do not require API keys in the app. Geocoding sends coordinates or place-search text to Nominatim; translation sends the comment text to its provider; IP geolocation necessarily exposes the request's IP address to ipwho.is.
 
-#### Optional SrolanhCity backend
+#### SrolanhCity FastAPI Backend (Connected via `API_BASE_URL`)
 
-The following AI endpoints are implemented in the client but make no network calls until `API_BASE_URL` is configured. The backend is responsible for AI provider credentials:
+When `API_BASE_URL` is configured (for example `https://srolanhcity-api.onrender.com` or `http://localhost:8000`), `CivicBackendApiService`, `BackendCivicAiService`, `HttpCommentTranslationService`, and `ReportRepository` connect end-to-end with offline-first fallback and real-time WebSocket updates:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| `POST` | `/api/v1/auth/guest` | Issue guest JWT session and persistent citizen user ID. |
+| `GET` | `/api/v1/reports` | Load clustered or single reports for the map viewport (`min_lat`, `min_lng`, `max_lat`, `max_lng`, `zoom`). |
+| `POST` / `PATCH` / `DELETE` | `/api/v1/reports` | Create, quick-edit, or withdraw civic reports with EXIF-stripped photos. |
+| `POST` | `/api/v1/reports/{id}/rating` | Submit citizen satisfaction rating (1–5) on resolved repairs. |
+| `POST` / `DELETE` | `/api/v1/reports/{id}/comments` | Post or remove multi-citizen tracking comments. |
+| `POST` / `DELETE` | `/api/v1/reports/{id}/support` | Add or undo GPS-verified `"Affects me"` community support. |
+| `GET` / `POST` / `DELETE` | `/api/v1/alerts` | Fetch, mark read, clear, and restore notification alerts. |
+| `WS` | `/api/v1/ws/reports` | Push real-time `reports_updated` events across connected mobile & web clients. |
 | `POST` | `/api/v1/ai/classify-issue` | Analyze a report photo and suggest its issue category and severity. |
 | `POST` | `/api/v1/ai/transcribe-voice` | Transcribe a temporary voice recording. |
+| `POST` | `/api/v1/ai/translate` | Translate citizen comments (`km ↔ en`) before Google/MyMemory fallback. |
 | `POST` | `/api/v1/ai/help-chat` | Answer Help Center questions using the backend assistant. |
 
-Configure the backend base URL when running the app:
+Configure the backend base URL when running or building the app (omit `API_BASE_URL` to run in 100% offline/demo mode):
 
 ```bash
-flutter run --dart-define=API_BASE_URL=https://api.yourdomain.com
+flutter run --dart-define=API_BASE_URL=https://srolanhcity-api.onrender.com
 ```
-
-#### Backend-ready report API contracts (not yet connected)
-
-The app currently stores reports locally. It prepares data for these future server operations, but does not send these requests yet:
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/v1/reports` | Load reports for a map viewport (`min_lat`, `min_lng`, `max_lat`, `max_lng`, `zoom`, and optional filters). |
-| `POST` | `/api/v1/reports/{id}/comments` | Submit a report comment. |
-| `POST` | `/api/v1/reports/{id}/support` | Submit support for a report. |
 
 ---
 
@@ -125,18 +131,34 @@ flutter run -d chrome
 
 ### Run Verification & Tests
 ```bash
+# Flutter
 dart format lib test
 dart analyze --fatal-infos
 flutter test
+
+# FastAPI Backend
+cd backend && .venv/bin/ruff check app tests && .venv/bin/pytest -v
 ```
-The test suite includes **107 unit, widget, and WCAG 2.1 AA accessibility tests** covering Priority Score tiers, multi-citizen Master Incident comments & inline Khmer/English translation, self-duplicate & `"Submit as a new separate report here"` flows, Guest profile & resilient data-URI avatar uploads, transcript-only Khmer/English voice input, 5-layer anti-spoof, Step 1 mandatory photo & auto-saved GPS anchor drafts, Step 3 strict universal 150 m zone, multi-incident picker & out-of-range return navigation, ODC/25-province GIS routing, stable zoom clustering & overview carousel visibility, strict GPS `"Affects me"` & hierarchical Village/District/Province transparent remote-reason support, offline reopen auto-sync, floating AI Assistant bubble & Help Center ticket lookup, PWA manifest & cache-first map tile service worker, and automated Flutter accessibility guidelines.
+The test suite includes **124 Flutter unit, widget, and WCAG 2.1 AA accessibility tests** and **19 backend FastAPI tests** covering Priority Score tiers, Map priority sorting, multi-citizen Master Incident comments & inline Khmer/English translation, self-duplicate & `"Submit as a new separate report here"` flows, Guest profile & resilient data-URI photo uploads, UTC timestamp normalization, backend `CivicBackendApiService` & WebSocket sync, transcript-only Khmer/English voice input, 5-layer anti-spoof, Step 1 mandatory photo & auto-saved GPS anchor drafts, Step 3 strict universal 150 m zone, multi-incident picker & out-of-range return navigation, ODC/25-province GIS routing, stable zoom clustering & overview carousel visibility, strict GPS `"Affects me"` & hierarchical Village/District/Province transparent remote-reason support, offline reopen auto-sync, floating AI Assistant bubble & Help Center ticket lookup, PWA manifest & cache-first map tile service worker, and automated Flutter accessibility guidelines.
 
 ---
 
 ## Building & Deploying
 
 ### GitHub Pages (Automated)
-Pushing to `main` automatically runs [deploy-pages.yml](.github/workflows/deploy-pages.yml), building Flutter Web with `--base-href "/SrolanhCity/"` and deploying to [https://songvansak19.github.io/SrolanhCity/](https://songvansak19.github.io/SrolanhCity/).
+Pushing to `main` automatically runs [deploy-pages.yml](.github/workflows/deploy-pages.yml), building Flutter Web with `--base-href "/SrolanhCity/"` (and `--dart-define=API_BASE_URL=...` when the `API_BASE_URL` repository variable is set) and deploying to [https://songvansak19.github.io/SrolanhCity/](https://songvansak19.github.io/SrolanhCity/).
+
+### FastAPI Backend & Cloud Deployment (Render + Supabase)
+- **Backend (`backend/`)**: FastAPI + SQLAlchemy (async) supporting **PostgreSQL + PostGIS** (e.g., Supabase) in production and **SQLite** (`sqlite+aiosqlite:///./srolanhcity_dev.db`) for zero-Docker local development, with guest/phone JWT auth, EXIF stripping, GIS routing, priority scoring, AI proxy endpoints (`/api/v1/ai/*`), and **real-time WebSocket live push** (`/api/v1/ws/reports`).
+- **Render Blueprint**: [render.yaml](render.yaml) deploys `backend/` via Docker in the Singapore region with `/api/v1/health` checks.
+- **Local Backend + Flutter**:
+  ```bash
+  # Terminal 1: Start local FastAPI backend (SQLite)
+  cd backend && DATABASE_URL=sqlite+aiosqlite:///./srolanhcity_dev.db .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+  # Terminal 2: Run Flutter connected to local backend (or omit API_BASE_URL for offline/demo mode)
+  flutter run --dart-define=API_BASE_URL=http://localhost:8000
+  ```
 
 ### Manual Web Build
 ```bash
@@ -144,19 +166,19 @@ Pushing to `main` automatically runs [deploy-pages.yml](.github/workflows/deploy
 flutter build web --release --no-web-resources-cdn
 
 # For GitHub Pages subpath (bundles CanvasKit locally for full offline PWA launch)
-flutter build web --release --base-href "/SrolanhCity/" --no-web-resources-cdn
+flutter build web --release --base-href "/SrolanhCity/" --no-web-resources-cdn --dart-define=API_BASE_URL=https://srolanhcity-api.onrender.com
 ```
 
 ### Android APK Build
 ```bash
-flutter build apk --release
+flutter build apk --release --dart-define=API_BASE_URL=https://srolanhcity-api.onrender.com
 ```
 
 ---
 
 ## Roadmap & Venture Vision
 
-- **MVP (Current Build)**: Bilingual Flutter mobile & web app, fast cache-first 25-province OpenStreetMap interactive map, pure-Dart EXIF stripping, 150 m multi-incident detection & clustering, `P1–P5` priority scoring, strict universal 150 m reporting zone, strict GPS `"Affects me"` with hierarchical Village/District/Province transparent remote support, 5-layer anti-spoof, floating AI Assistant bubble, and 107 automated tests.
+- **MVP (Current Build)**: Bilingual Flutter mobile & web app, fast cache-first 25-province OpenStreetMap interactive map with priority sort, pure-Dart EXIF stripping, 150 m multi-incident detection & clustering, `P1–P5` priority scoring, strict universal 150 m reporting zone, strict GPS `"Affects me"` with hierarchical Village/District/Province transparent remote support, 5-layer anti-spoof, floating AI Assistant bubble, FastAPI + Supabase/SQLite backend with real-time WebSocket live push, and 124+ automated Flutter & backend tests.
 - **Phase 1 — Live AI Backend & Pilot**: Connect live `/api/v1/ai/` classification and Khmer speech-to-text endpoints, deploy the 2–3 staff verification dashboard, and pilot in a target Phnom Penh district with local Village Chiefs (`Me Phum`) and drivers.
 - **Phase 2 — Elderly Accessibility & Local Fixer Monetization**: Launch a **Telegram Bot** intake channel for zero-install reporting, alongside a **Fixed-Price Local Fixer** directory connecting residents with verified neighborhood plumbers, electricians, and handymen for private household repairs—creating a sustainable revenue stream while keeping public civic reporting 100% free.
 - **Phase 3 — City-Wide & Ministry Scale**: Expand across all 14 Khans of Phnom Penh and major provinces with direct municipal dispatch integration and anonymized Open Data infrastructure heatmaps.
