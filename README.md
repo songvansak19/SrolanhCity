@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/srolanhcity-banner.png" alt="SrolanhCity App Banner" width="100%" />
+</p>
+
 # SrolanhCity · ស្រឡាញ់ទីក្រុង
 
 A **Khmer-first, bilingual (Khmer / English) civic infrastructure reporting app** for all **25 Capital & Provinces of Cambodia** — helping citizens report potholes, broken streetlights, clogged drains, illegal waste dumping, and other street hazards in seconds, track repairs transparently, and prioritize urgent road hazards automatically.
