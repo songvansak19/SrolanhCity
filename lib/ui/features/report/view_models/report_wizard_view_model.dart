@@ -116,6 +116,12 @@ class ReportWizardViewModel extends ChangeNotifier {
         }
       }
     }
+    if (_localPhotoPaths.isNotEmpty) {
+      if (repository.isOnline && _civicAiService.isBackendConfigured) {
+        _photoAi = PhotoAiAnalysis.analyzing;
+      }
+      unawaited(analyzeLatestPhoto());
+    }
   }
 
   static const int maxPhotos = 3;
@@ -543,8 +549,21 @@ class ReportWizardViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool get isPhotoAiBlockedForNextStep {
+    if (_photoAi.status == PhotoAiStatus.notCivicIssue) return true;
+    if (_photoAi.status == PhotoAiStatus.analyzing) return true;
+    if (repository.isOnline &&
+        _civicAiService.isBackendConfigured &&
+        hasRequiredPhoto &&
+        _photoAi.status == PhotoAiStatus.noPhoto) {
+      return true;
+    }
+    return false;
+  }
+
   void nextStep() {
     if (!hasRequiredPhoto) return;
+    if (_step == 1 && isPhotoAiBlockedForNextStep) return;
     if (_step < 2) {
       _step++;
       notifyListeners();

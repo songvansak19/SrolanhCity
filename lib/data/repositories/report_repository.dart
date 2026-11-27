@@ -15,6 +15,7 @@ import '../../domain/services/priority_calculator.dart';
 import '../../domain/services/relative_time_formatter.dart';
 import '../../domain/services/spatial_clustering_service.dart';
 import '../../domain/services/support_eligibility_service.dart';
+import '../services/civic_ai_service.dart';
 import '../services/civic_backend_api_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/reverse_geocoding_service.dart';
@@ -52,12 +53,14 @@ class ReportRepository extends ChangeNotifier {
     ReportDraft? initialDraft,
     this.storage,
     CivicBackendApiService? apiService,
+    CivicAiService? civicAiService,
   }) : _reports = List<CivicReport>.of(initialReports ?? _seedReports()),
        _alerts = List<AlertItem>.of(initialAlerts ?? _seedAlerts()),
        _settings = initialSettings ?? const AppSettings(),
        _profile = initialProfile ?? const UserProfile(),
        _draft = initialDraft,
-       apiService = apiService ?? CivicBackendApiService();
+       apiService = apiService ?? CivicBackendApiService(),
+       civicAiService = civicAiService ?? BackendCivicAiService();
 
   final List<CivicReport> _reports;
   final List<AlertItem> _alerts;
@@ -66,6 +69,7 @@ class ReportRepository extends ChangeNotifier {
   final Map<String, String> _localToServerIdMap = <String, String>{};
   final LocalStorageService? storage;
   final CivicBackendApiService apiService;
+  final CivicAiService civicAiService;
   AppSettings _settings;
   UserProfile _profile;
   ReportDraft? _draft;
@@ -77,6 +81,7 @@ class ReportRepository extends ChangeNotifier {
   void Function()? _closeWebSocket;
   Timer? _wsReconnectTimer;
   bool _disposed = false;
+  bool _isSyncingPending = false;
 
   /// Number of "Affects me" votes cast by the citizen in the trailing 24 hours.
   int supportsUsedInLast24Hours({DateTime? now}) {
@@ -112,7 +117,12 @@ class ReportRepository extends ChangeNotifier {
   int get pendingSyncCount =>
       _reports.where((r) => r.syncStatus == SyncStatus.pendingSync).length;
 
+  int get rejectedByAiCount =>
+      _reports.where((r) => r.syncStatus == SyncStatus.rejectedByAi).length;
+
   bool get hasPendingSync => pendingSyncCount > 0;
+
+  Future<void> syncPendingWithBackend() => _syncAndRefreshFromBackend();
 
   /// Active Province, District (`ខណ្ឌ / ក្រុង / ស្រុក`), & optional Commune
   /// (`សង្កាត់ / ឃុំ`) for Area News. Defaults to the citizen's Home Area from
@@ -429,13 +439,12 @@ class ReportRepository extends ChangeNotifier {
     }
 
     // Reopen-online auto-sync: if the citizen queued reports offline, closed
-    // the app, and reopened with internet active, sync them automatically now.
-    if (_isOnline && hasPendingSync) {
-      syncPendingReports();
-    }
+    // the app, and reopened with internet active, verify & sync them now.
     if (_isOnline && apiService.isConfigured) {
       unawaited(_syncAndRefreshFromBackend());
       _connectLiveUpdates();
+    } else if (_isOnline && hasPendingSync) {
+      syncPendingReports();
     }
 
     notifyListeners();
@@ -550,8 +559,7 @@ class ReportRepository extends ChangeNotifier {
       _connectLiveUpdates();
     } else if (!online) {
       _disconnectLiveUpdates();
-    }
-    if (online && hasPendingSync) {
+    } else if (online && hasPendingSync) {
       syncPendingReports(now: now);
       return;
     }
@@ -992,11 +1000,14 @@ class ReportRepository extends ChangeNotifier {
       return const RemovalWindowExpired();
     }
 
+    final isLocalOnly =
+        report.syncStatus == SyncStatus.pendingSync ||
+        report.syncStatus == SyncStatus.rejectedByAi;
     _reports.removeAt(index);
     _alerts.removeWhere((a) => a.reportId == resolvedId);
     _persist();
     notifyListeners();
-    if (_isOnline && apiService.isConfigured) {
+    if (!isLocalOnly && _isOnline && apiService.isConfigured) {
       unawaited(_syncWithSession(() => apiService.withdrawReport(resolvedId)));
     }
     return const ReportRemoved();
@@ -1601,10 +1612,10 @@ class ReportRepository extends ChangeNotifier {
     await action();
   }
 
-  Future<void> _syncCreatedReport(CivicReport created) async {
-    if (!await _ensureBackendSession()) return;
+  Future<CivicReport?> _syncCreatedReport(CivicReport created) async {
+    if (!await _ensureBackendSession()) return null;
     final serverReport = await apiService.createReport(created);
-    if (serverReport == null) return;
+    if (serverReport == null) return null;
     if (serverReport.id != created.id) {
       _localToServerIdMap[created.id] = serverReport.id;
     }
@@ -1632,17 +1643,95 @@ class ReportRepository extends ChangeNotifier {
     }
     _persist();
     notifyListeners();
+    return serverReport;
   }
 
   Future<void> _syncAndRefreshFromBackend() async {
-    if (!await _ensureBackendSession()) return;
-    final pending = _reports
-        .where((r) => r.syncStatus == SyncStatus.pendingSync)
-        .toList(growable: false);
-    for (final report in pending) {
-      await _syncCreatedReport(report);
+    if (_isSyncingPending) return;
+    _isSyncingPending = true;
+    try {
+      if (!await _ensureBackendSession()) return;
+      final pending = _reports
+          .where((r) => r.syncStatus == SyncStatus.pendingSync)
+          .toList(growable: false);
+      var syncedCount = 0;
+      String? latestSyncedId;
+
+      for (final report in pending) {
+        if (civicAiService.isBackendConfigured &&
+            report.localPhotoPath != null &&
+            report.localPhotoPath!.isNotEmpty) {
+          final aiResult = await civicAiService.analyzeIssuePhoto(
+            imagePath: report.localPhotoPath!,
+            englishFirst: _settings.englishFirst,
+            descriptionHint: report.description.trim().isNotEmpty
+                ? report.description
+                : null,
+          );
+          if (aiResult.status == PhotoAiStatus.notCivicIssue) {
+            final idx = _reports.indexWhere((r) => r.id == report.id);
+            if (idx != -1) {
+              _reports[idx] = _reports[idx].copyWith(
+                syncStatus: SyncStatus.rejectedByAi,
+                aiRejectionReasonKhmer: aiResult.khmerReason,
+                aiRejectionReasonEnglish: aiResult.englishReason,
+              );
+            }
+            final now = DateTime.now();
+            _alerts.insert(
+              0,
+              AlertItem(
+                id: 'alert-ai-reject-${now.microsecondsSinceEpoch}',
+                reportId: report.id,
+                khmerTitle: 'រូបភាពរបាយការណ៍ ${report.id} មិនមែនជាបញ្ហាសាធារណៈ',
+                englishTitle: 'Offline report ${report.id} photo not accepted',
+                khmerSubtitle: aiResult.khmerReason ?? 'រូបភាពនេះមិនបង្ហាញពីបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈទេ។ សូមលុប ហើយរាយការណ៍ម្តងទៀត។',
+                englishSubtitle: aiResult.englishReason ?? 'Photo was not recognized as a public civic issue. Please delete and report again.',
+                createdAt: now,
+                isRead: false,
+              ),
+            );
+            _persist();
+            notifyListeners();
+            continue;
+          }
+          if (aiResult.status != PhotoAiStatus.analyzed) {
+            // Keep pendingSync on transient AI errors so it retries later.
+            continue;
+          }
+        }
+
+        final uploaded = await _syncCreatedReport(report);
+        if (uploaded != null) {
+          syncedCount++;
+          latestSyncedId ??= uploaded.id;
+        }
+      }
+
+      if (syncedCount > 0) {
+        final syncedAt = DateTime.now();
+        _alerts.insert(
+          0,
+          AlertItem(
+            id: 'alert-sync-${syncedAt.microsecondsSinceEpoch}',
+            reportId: latestSyncedId ?? _reports.first.id,
+            khmerTitle: 'បានផ្ញើរបាយការណ៍ក្រៅបណ្តាញ ($syncedCount) រួចរាល់',
+            englishTitle: 'Synced $syncedCount queued report(s)',
+            khmerSubtitle: 'របាយការណ៍ដែលរក្សាទុកពេលគ្មានអ៊ីនធឺណិតត្រូវបានបញ្ជូនទៅអាជ្ញាធរហើយ',
+            englishSubtitle:
+                'Offline-queued report(s) uploaded and routed automatically.',
+            createdAt: syncedAt,
+            isRead: false,
+          ),
+        );
+        _persist();
+        notifyListeners();
+      }
+
+      await refreshFromBackend();
+    } finally {
+      _isSyncingPending = false;
     }
-    await refreshFromBackend();
   }
 
   /// Fetches live reports and alerts from the configured FastAPI backend.
@@ -1653,14 +1742,18 @@ class ReportRepository extends ChangeNotifier {
     var changed = false;
 
     if (remoteReports != null) {
-      final pending = _reports
-          .where((r) => r.syncStatus == SyncStatus.pendingSync)
+      final localOnly = _reports
+          .where(
+            (r) =>
+                r.syncStatus == SyncStatus.pendingSync ||
+                r.syncStatus == SyncStatus.rejectedByAi,
+          )
           .toList(growable: false);
-      final pendingIds = pending.map((r) => r.id).toSet();
+      final localOnlyIds = localOnly.map((r) => r.id).toSet();
       _reports
         ..clear()
-        ..addAll(pending)
-        ..addAll(remoteReports.where((r) => !pendingIds.contains(r.id)));
+        ..addAll(localOnly)
+        ..addAll(remoteReports.where((r) => !localOnlyIds.contains(r.id)));
       changed = true;
     }
     if (remoteAlerts != null) {

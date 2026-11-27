@@ -865,7 +865,7 @@ class _TrackingSummaryCard extends StatelessWidget {
                             ),
                           ),
                         ],
-                        if (report.syncStatus == SyncStatus.pendingSync) ...[
+                        if (report.syncStatus != SyncStatus.synced) ...[
                           const SizedBox(width: 5),
                           SyncStatusBadge(
                             status: report.syncStatus,

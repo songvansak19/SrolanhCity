@@ -492,8 +492,7 @@ class _MyReportCard extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              if (report.syncStatus ==
-                                  SyncStatus.pendingSync) ...[
+                              if (report.syncStatus != SyncStatus.synced) ...[
                                 const SizedBox(width: 6),
                                 SyncStatusBadge(
                                   status: report.syncStatus,

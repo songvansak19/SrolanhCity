@@ -23,6 +23,7 @@ import '../../core/widgets/bilingual_text.dart';
 import '../../core/widgets/live_time_text.dart';
 import '../../core/widgets/offline_sync_banner.dart';
 import '../../core/widgets/photo_lightbox_page.dart';
+import '../report/views/report_wizard_page.dart';
 import '../../core/widgets/priority_badge.dart';
 import '../../core/widgets/priority_donut_chart.dart';
 import '../../core/widgets/report_photo.dart';
@@ -208,6 +209,116 @@ class _TrackingPageState extends State<TrackingPage> {
     };
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(errorMessage)));
+  }
+
+  Widget _buildRejectedByAiCard(
+    CivicReport report,
+    ReportRepository repo,
+    Bilingual tr,
+  ) {
+    final reason = tr.primary(
+      report.aiRejectionReasonKhmer ?? report.aiRejectionReasonEnglish ?? 'រូបភាពនេះមិនបង្ហាញពីបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈទេ។ សូមលុប ហើយរាយការណ៍ម្តងទៀត។',
+      report.aiRejectionReasonEnglish ?? report.aiRejectionReasonKhmer ?? 'Photo was not recognized as a public civic issue. Please delete this report and submit again with a clear street-issue photo.',
+    );
+
+    return Container(
+      key: const Key('tracking-rejected-by-ai-card'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.dangerSoft,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.warning_amber_rounded,
+                size: 20,
+                color: AppColors.danger,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  tr.primary(
+                    'មិនបានបញ្ជូនទៅអាជ្ញាធរ · រូបភាពមិនត្រូវបានទទួលស្គាល់',
+                    'Not uploaded · Photo rejected by AI',
+                  ),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.danger,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            reason,
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: AppColors.ink,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  key: const Key('rejected-delete-and-rereport-btn'),
+                  onPressed: () {
+                    HapticFeedback.mediumImpact();
+                    repo.withdrawUserReport(report.id);
+                    if (!mounted) return;
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ReportWizardPage(),
+                      ),
+                    );
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.danger,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(48, 46),
+                  ),
+                  icon: const Icon(Icons.camera_alt_outlined, size: 17),
+                  label: Text(
+                    tr.primary(
+                      'លុប ហើយរាយការណ៍ម្តងទៀត',
+                      'Delete & Report Again',
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                key: const Key('rejected-delete-btn'),
+                onPressed: () {
+                  HapticFeedback.mediumImpact();
+                  repo.withdrawUserReport(report.id);
+                  if (mounted) Navigator.pop(context);
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.danger,
+                  side: BorderSide(
+                    color: AppColors.danger.withValues(alpha: 0.5),
+                  ),
+                  minimumSize: const Size(48, 46),
+                ),
+                child: Text(tr.primary('លុប', 'Delete')),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _openQuickEditSheet(CivicReport report, Bilingual tr) async {
@@ -1029,6 +1140,10 @@ class _TrackingPageState extends State<TrackingPage> {
                             ],
                           ),
                         ),
+                        if (report.syncStatus == SyncStatus.rejectedByAi) ...[
+                          const SizedBox(height: 12),
+                          _buildRejectedByAiCard(report, repo, tr),
+                        ],
                         if (!report.createdByCurrentUser &&
                             report.canUndoSupport) ...[
                           const SizedBox(height: 12),

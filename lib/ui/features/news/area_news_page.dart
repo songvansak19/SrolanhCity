@@ -650,7 +650,7 @@ class _AreaNewsReportCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 5),
                       ],
-                      if (report.syncStatus == SyncStatus.pendingSync) ...[
+                      if (report.syncStatus != SyncStatus.synced) ...[
                         SyncStatusBadge(
                           status: report.syncStatus,
                           bilingual: tr,

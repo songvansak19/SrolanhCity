@@ -3415,6 +3415,236 @@ void main() {
       expect(updated!.citizenComments.last.text, equals('Follow up note'));
       repo.dispose();
     });
+
+    test('Offline report with legit photo uploads on reconnect and is never wiped by refreshFromBackend', () async {
+      var createdCount = 0;
+      final syncedFromServer = <Map<String, dynamic>>[];
+      final mockClient = MockClient((req) async {
+        if (req.url.path == '/api/v1/auth/guest') {
+          return http.Response(
+            jsonEncode({'access_token': 'tok-1', 'user_id': 'u-1'}),
+            200,
+          );
+        }
+        if (req.url.path == '/api/v1/reports' && req.method == 'POST') {
+          createdCount++;
+          final body = jsonDecode(req.body) as Map<String, dynamic>;
+          final srv = {
+            'id': '#SC-LEGIT1',
+            'category': body['category'],
+            'khmer_title': 'រណ្តៅផ្លូវ',
+            'english_title': 'Deep Pothole',
+            'description': body['description'],
+            'khmer_location': 'ភ្នំពេញ',
+            'english_location': 'Phnom Penh',
+            'lat': body['lat'],
+            'lng': body['lng'],
+            'province_code': 'PP',
+            'khmer_province': 'ភ្នំពេញ',
+            'english_province': 'Phnom Penh',
+            'road_class': 'artery',
+            'severity': body['severity'],
+            'affected_citizens': 1,
+            'status': 'submitted',
+            'khmer_agency': 'MPWT',
+            'english_agency': 'MPWT',
+            'created_at': DateTime.now().toUtc().toIso8601String(),
+            'timeline': const <Map<String, dynamic>>[],
+            'citizen_comments': const <Map<String, dynamic>>[],
+          };
+          syncedFromServer.add(srv);
+          return http.Response.bytes(
+            utf8.encode(jsonEncode(srv)),
+            201,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (req.url.path == '/api/v1/reports' && req.method == 'GET') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'tier': 'pin',
+                'zoom': 15.0,
+                'total_matching': syncedFromServer.length,
+                'provinces': const [],
+                'areas': const [],
+                'pins': syncedFromServer
+                    .map((r) => {'tier': 'pin', 'report': r})
+                    .toList(),
+              }),
+            ),
+            200,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (req.url.path == '/api/v1/alerts') {
+          return http.Response('[]', 200);
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final api = CivicBackendApiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      final ai = _FakeConfiguredCivicAiService(
+        photoResult: const PhotoAiAnalysis(
+          status: PhotoAiStatus.analyzed,
+          detectedCategory: IssueCategory.pothole,
+          confidencePercent: 92,
+        ),
+        audioResult: const AudioTranscriptionResult(success: false),
+      );
+      final repo = ReportRepository(
+        initialReports: const [],
+        apiService: api,
+        civicAiService: ai,
+      );
+      repo.setOnlineStatus(false);
+      final submitted = repo.submitReport(
+        category: IssueCategory.pothole,
+        description: 'Offline pothole photo',
+        severity: 3,
+        coordinates: const LatLng(11.5564, 104.9282),
+        isAnonymous: false,
+        localPhotoPath: 'data:image/jpeg;base64,/9j/4AAQ',
+      );
+      expect(submitted.report.syncStatus, equals(SyncStatus.pendingSync));
+
+      repo.setOnlineStatus(true);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      expect(createdCount, equals(1));
+      expect(repo.reports.length, equals(1));
+      expect(repo.reports.first.id, equals('#SC-LEGIT1'));
+      expect(repo.reports.first.syncStatus, equals(SyncStatus.synced));
+      repo.dispose();
+    });
+
+    test('Offline report with unrelated photo is NOT uploaded on reconnect, marked rejectedByAi, and can be deleted past 15 min', () async {
+      var createdCount = 0;
+      final mockClient = MockClient((req) async {
+        if (req.url.path == '/api/v1/auth/guest') {
+          return http.Response(
+            jsonEncode({'access_token': 'tok-1', 'user_id': 'u-1'}),
+            200,
+          );
+        }
+        if (req.url.path == '/api/v1/reports' && req.method == 'POST') {
+          createdCount++;
+          return http.Response('{}', 201);
+        }
+        if (req.url.path == '/api/v1/reports' && req.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'tier': 'pin',
+              'zoom': 15.0,
+              'total_matching': 0,
+              'provinces': const [],
+              'areas': const [],
+              'pins': const [],
+            }),
+            200,
+          );
+        }
+        if (req.url.path == '/api/v1/alerts') {
+          return http.Response('[]', 200);
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final api = CivicBackendApiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      final ai = _FakeConfiguredCivicAiService(
+        photoResult: const PhotoAiAnalysis(
+          status: PhotoAiStatus.notCivicIssue,
+          khmerReason: 'រូបភាពនេះជារបស់ផ្ទាល់ខ្លួន',
+          englishReason: 'Private backyard photo, not a public civic issue.',
+        ),
+        audioResult: const AudioTranscriptionResult(success: false),
+      );
+      final repo = ReportRepository(
+        initialReports: const [],
+        apiService: api,
+        civicAiService: ai,
+      );
+      repo.setOnlineStatus(false);
+      final submitted = repo.submitReport(
+        category: IssueCategory.trash,
+        description: 'Offline backyard photo',
+        severity: 2,
+        coordinates: const LatLng(11.5564, 104.9282),
+        isAnonymous: false,
+        localPhotoPath: 'data:image/jpeg;base64,/9j/4AAQ',
+      );
+
+      repo.setOnlineStatus(true);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      expect(createdCount, equals(0));
+      final rejected = repo.findById(submitted.report.id);
+      expect(rejected, isNotNull);
+      expect(rejected!.syncStatus, equals(SyncStatus.rejectedByAi));
+      expect(
+        rejected.aiRejectionReasonEnglish,
+        contains('Private backyard photo'),
+      );
+      expect(repo.rejectedByAiCount, equals(1));
+      expect(repo.alerts.any((a) => a.reportId == submitted.report.id), isTrue);
+
+      // Even 2 hours later, the citizen can delete the AI-rejected local report.
+      final removal = repo.withdrawUserReport(
+        submitted.report.id,
+        now: submitted.report.createdAt.add(const Duration(hours: 2)),
+      );
+      expect(removal, isA<ReportRemoved>());
+      expect(repo.findById(submitted.report.id), isNull);
+      repo.dispose();
+    });
+
+    test('Step 2 draft resume automatically re-runs AI photo check and blocks advancing if unrelated', () async {
+      final repo = ReportRepository(initialReports: const []);
+      repo.setOnlineStatus(true);
+      final ai = _FakeConfiguredCivicAiService(
+        photoResult: const PhotoAiAnalysis(
+          status: PhotoAiStatus.notCivicIssue,
+          englishReason: 'Not a public civic infrastructure issue.',
+        ),
+        audioResult: const AudioTranscriptionResult(success: false),
+      );
+      final draft = ReportDraft(
+        category: IssueCategory.trash,
+        severity: 3,
+        description: 'Saved draft',
+        isAnonymous: false,
+        localPhotoPaths: const ['data:image/jpeg;base64,/9j/4AAQ'],
+      );
+
+      final vm = ReportWizardViewModel(
+        repository: repo,
+        initialDraft: draft,
+        civicAiService: ai,
+      );
+      // Immediately blocked while analyzing on resume.
+      expect(vm.step, equals(1));
+      expect(vm.isPhotoAiBlockedForNextStep, isTrue);
+      vm.nextStep();
+      expect(vm.step, equals(1));
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(vm.photoAi.status, equals(PhotoAiStatus.notCivicIssue));
+      expect(vm.isPhotoAiBlockedForNextStep, isTrue);
+      vm.nextStep();
+      expect(vm.step, equals(1));
+      vm.dispose();
+      repo.dispose();
+    });
   });
 }
 

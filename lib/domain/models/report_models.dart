@@ -47,7 +47,8 @@ enum ReportSortOption {
 /// Local-to-cloud synchronization state for offline resilience.
 enum SyncStatus {
   synced,
-  pendingSync;
+  pendingSync,
+  rejectedByAi;
 
   static SyncStatus fromName(String? name) {
     for (final value in SyncStatus.values) {
@@ -894,6 +895,8 @@ class CivicReport {
     this.userSupportReason,
     this.locationVerificationTier,
     this.syncStatus = SyncStatus.synced,
+    this.aiRejectionReasonKhmer,
+    this.aiRejectionReasonEnglish,
     this.crewCode,
     this.voiceTranscript,
     this.citizenRating,
@@ -936,6 +939,8 @@ class CivicReport {
   final String? userSupportReason;
   final ReportLocationVerificationTier? locationVerificationTier;
   final SyncStatus syncStatus;
+  final String? aiRejectionReasonKhmer;
+  final String? aiRejectionReasonEnglish;
   final String? crewCode;
   final String? voiceTranscript;
   final int? citizenRating;
@@ -1010,8 +1015,13 @@ class CivicReport {
   }
 
   /// Whether the citizen can currently remove or quick-edit this report.
-  bool canWithdraw({DateTime? now, Duration window = withdrawalWindow}) =>
-      remainingWithdrawalTime(now: now, window: window) > Duration.zero;
+  bool canWithdraw({DateTime? now, Duration window = withdrawalWindow}) {
+    if (syncStatus == SyncStatus.rejectedByAi ||
+        syncStatus == SyncStatus.pendingSync) {
+      return createdByCurrentUser && status == ReportStatus.submitted;
+    }
+    return remainingWithdrawalTime(now: now, window: window) > Duration.zero;
+  }
 
   bool get hasDescription => description.trim().isNotEmpty;
 
@@ -1060,6 +1070,8 @@ class CivicReport {
     bool clearUserSupportMeta = false,
     ReportLocationVerificationTier? locationVerificationTier,
     SyncStatus? syncStatus,
+    String? aiRejectionReasonKhmer,
+    String? aiRejectionReasonEnglish,
     String? crewCode,
     String? voiceTranscript,
     int? citizenRating,
@@ -1118,6 +1130,10 @@ class CivicReport {
       locationVerificationTier:
           locationVerificationTier ?? this.locationVerificationTier,
       syncStatus: syncStatus ?? this.syncStatus,
+      aiRejectionReasonKhmer:
+          aiRejectionReasonKhmer ?? this.aiRejectionReasonKhmer,
+      aiRejectionReasonEnglish:
+          aiRejectionReasonEnglish ?? this.aiRejectionReasonEnglish,
       crewCode: crewCode ?? this.crewCode,
       voiceTranscript: voiceTranscript ?? this.voiceTranscript,
       citizenRating: citizenRating ?? this.citizenRating,
@@ -1169,6 +1185,10 @@ class CivicReport {
     if (locationVerificationTier != null)
       'locationVerificationTier': locationVerificationTier!.name,
     'syncStatus': syncStatus.name,
+    if (aiRejectionReasonKhmer != null)
+      'aiRejectionReasonKhmer': aiRejectionReasonKhmer,
+    if (aiRejectionReasonEnglish != null)
+      'aiRejectionReasonEnglish': aiRejectionReasonEnglish,
     'crewCode': crewCode,
     'voiceTranscript': voiceTranscript,
     'citizenRating': citizenRating,
@@ -1317,6 +1337,8 @@ class CivicReport {
       syncStatus: SyncStatus.fromName(
         (json['syncStatus'] as String?) ?? (json['sync_status'] as String?),
       ),
+      aiRejectionReasonKhmer: json['aiRejectionReasonKhmer'] as String?,
+      aiRejectionReasonEnglish: json['aiRejectionReasonEnglish'] as String?,
       crewCode: (json['crewCode'] as String?) ?? (json['crew_code'] as String?),
       voiceTranscript:
           (json['voiceTranscript'] as String?) ??

@@ -3301,6 +3301,72 @@ void main() {
         expect(repo.profile.englishName, equals('Dara Sok'));
       },
     );
+
+    testWidgets(
+      'OfflineSyncBanner shows AI-rejection banner, opens TrackingPage on Review, and deletes rejected report',
+      (tester) async {
+        final rejected = CivicReport(
+          id: '#SC-REJ1',
+          category: IssueCategory.trash,
+          khmerTitle: 'សំរាមខុសច្បាប់',
+          englishTitle: 'Illegal Waste',
+          description: 'Backyard photo',
+          khmerLocation: 'ភ្នំពេញ',
+          englishLocation: 'Phnom Penh',
+          coordinates: const LatLng(11.5564, 104.9282),
+          roadClass: RoadClass.alley,
+          severity: 2,
+          affectedCitizens: 1,
+          status: ReportStatus.submitted,
+          khmerAgency: 'PPCH',
+          englishAgency: 'PPCH',
+          createdAt: DateTime.now().subtract(const Duration(hours: 1)),
+          timeline: const [],
+          createdByCurrentUser: true,
+          isMine: true,
+          syncStatus: SyncStatus.rejectedByAi,
+          aiRejectionReasonEnglish:
+              'Private backyard photo, not a public issue.',
+        );
+        final repo = ReportRepository(
+          initialReports: [rejected],
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+
+        await tester.pumpWidget(
+          ReportScope(
+            repository: repo,
+            child: const MaterialApp(home: MainShell()),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('banner-review-rejected-btn')),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const Key('banner-review-rejected-btn')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('tracking-rejected-by-ai-card')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('rejected-delete-and-rereport-btn')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.byKey(const Key('rejected-delete-btn')));
+        await tester.pumpAndSettle();
+
+        expect(repo.findById('#SC-REJ1'), isNull);
+        expect(
+          find.byKey(const Key('banner-review-rejected-btn')),
+          findsNothing,
+        );
+      },
+    );
   });
 }
 

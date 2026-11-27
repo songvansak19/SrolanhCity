@@ -2000,13 +2000,35 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                       builder: (context) {
                         final isNonCivicBlocked =
                             vm.photoAi.status == PhotoAiStatus.notCivicIssue;
+                        final isAnalyzingPhoto =
+                            vm.photoAi.status == PhotoAiStatus.analyzing;
+                        final isTransientAiFailure =
+                            vm.isBackendAiAvailable &&
+                            vm.repository.isOnline &&
+                            (vm.photoAi.status == PhotoAiStatus.failed ||
+                                vm.photoAi.status == PhotoAiStatus.rateLimited);
                         final canProceedToStep3 =
-                            vm.hasRequiredPhoto && !isNonCivicBlocked;
+                            vm.hasRequiredPhoto &&
+                            !vm.isPhotoAiBlockedForNextStep;
                         return Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            if (isNonCivicBlocked) ...[
+                            if (isAnalyzingPhoto) ...[
+                              Text(
+                                tr.primary(
+                                  'កំពុងពិនិត្យរូបភាពដោយ AI...',
+                                  'Verifying photo with AI...',
+                                ),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ] else if (isNonCivicBlocked) ...[
                               Text(
                                 tr.primary(
                                   'សូមថត ឬជ្រើសរូបបញ្ហាផ្លូវពិតប្រាកដមុនបន្តទៅជំហានទី ៣',
@@ -2020,6 +2042,42 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                 ),
                               ),
                               const SizedBox(height: 8),
+                            ] else if (isTransientAiFailure) ...[
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      tr.primary(
+                                        'មិនទាន់អាចពិនិត្យរូបភាពដោយ AI បានទេ',
+                                        'Could not verify photo with AI',
+                                      ),
+                                      style: const TextStyle(
+                                        color: AppColors.muted,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    key: const Key('step2-footer-retry-ai-btn'),
+                                    onPressed: () => unawaited(
+                                      vm.analyzeLatestPhoto(forceRefresh: true),
+                                    ),
+                                    style: TextButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                    child: Text(
+                                      tr.primary('ពិនិត្យម្តងទៀត', 'Retry'),
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
                             ],
                             SizedBox(
                               width: double.infinity,
@@ -2032,8 +2090,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                         await vm.stopVoiceRecordingIfActive();
                                         if (!mounted ||
                                             !vm.hasRequiredPhoto ||
-                                            vm.photoAi.status ==
-                                                PhotoAiStatus.notCivicIssue) {
+                                            vm.isPhotoAiBlockedForNextStep) {
                                           return;
                                         }
                                         vm.nextStep();

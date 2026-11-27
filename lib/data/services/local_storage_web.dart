@@ -66,7 +66,8 @@ Future<void> writeLocalState(String fileName, Map<String, dynamic> data) async {
         slim['reports'] = rawReports.map((entry) {
           if (entry is! Map<String, dynamic>) return entry;
           final copy = Map<String, dynamic>.from(entry);
-          if (copy['syncStatus'] == 'pendingSync') {
+          if (copy['syncStatus'] == 'pendingSync' ||
+              copy['syncStatus'] == 'rejectedByAi') {
             return copy;
           }
           final local = copy['localPhotoPath'] as String?;
