@@ -3802,6 +3802,70 @@ void main() {
       expect(updated.aiRejectionReasonEnglish, equals('Rejected by server AI'));
       repo.dispose();
     });
+
+    test('Multi-draft storage persists multiple offline drafts with pins, detects nearby same-category drafts <= 50m, and removes only submitted draft', () async {
+      final store = _InMemoryLocalStorage(<String, dynamic>{});
+      final repo = ReportRepository(initialReports: const [], storage: store);
+      repo.setOnlineStatus(false);
+
+      final draft1 = ReportDraft(
+        id: 'draft-1',
+        category: IssueCategory.pothole,
+        severity: 3,
+        description: 'First offline pothole',
+        isAnonymous: false,
+        localPhotoPaths: const ['data:image/jpeg;base64,D1'],
+        pinLat: 11.5564,
+        pinLng: 104.9282,
+        savedAt: DateTime(2026, 11, 27, 20, 0),
+      );
+      final draft2 = ReportDraft(
+        id: 'draft-2',
+        category: IssueCategory.trash,
+        severity: 2,
+        description: 'Second offline trash pile',
+        isAnonymous: true,
+        localPhotoPaths: const ['data:image/jpeg;base64,D2'],
+        pinLat: 11.5664,
+        pinLng: 104.9382,
+        savedAt: DateTime(2026, 11, 27, 20, 5),
+      );
+      repo.saveDraft(draft1);
+      repo.saveDraft(draft2);
+      expect(repo.draftCount, equals(2));
+
+      // Reload from storage to verify full multi-draft hydration.
+      final reopened = ReportRepository(
+        initialReports: const [],
+        storage: store,
+      );
+      await reopened.hydrate();
+      expect(reopened.draftCount, equals(2));
+
+      // Third wizard near draft1 (within 50m, same category) sees draft1 & draft2 pins and nearby warning.
+      final vm = ReportWizardViewModel(
+        repository: reopened,
+        initialCoordinates: const LatLng(11.55645, 104.92825),
+      );
+      expect(vm.otherSavedDraftsWithPin.length, equals(2));
+      expect(vm.nearbySimilarSavedDraft, isNotNull);
+      expect(vm.nearbySimilarSavedDraft!.draft.id, equals('draft-1'));
+      vm.dispose();
+
+      // Resuming and submitting draft-1 must keep draft-2 intact.
+      final vmDraft1 = ReportWizardViewModel(
+        repository: reopened,
+        initialDraft: draft1,
+      );
+      reopened.setOnlineStatus(true);
+      vmDraft1.submit();
+      expect(reopened.draftCount, equals(1));
+      expect(reopened.drafts.first.id, equals('draft-2'));
+
+      vmDraft1.dispose();
+      reopened.dispose();
+      repo.dispose();
+    });
   });
 }
 

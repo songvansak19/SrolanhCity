@@ -79,6 +79,8 @@ class ReportWizardViewModel extends ChangeNotifier {
        _hasExplicitInitialCoordinates = initialCoordinates != null,
        _voiceTranscript = initialDraft?.voiceTranscript,
        _voicePreferEnglish = repository.settings.englishFirst,
+       _draftId =
+           initialDraft?.id ?? 'draft-${DateTime.now().microsecondsSinceEpoch}',
        _pinLocation =
            initialCoordinates ??
            (repository.profile.hasHomeArea
@@ -165,6 +167,9 @@ class ReportWizardViewModel extends ChangeNotifier {
       <String, PhotoAiAnalysis>{};
   int _photoAnalysisGeneration = 0;
   late bool _wasOnline;
+  final String _draftId;
+
+  String get draftId => _draftId;
 
   LatLng _pinLocation;
   GeocodedPlace? _geocodedPlace;
@@ -544,6 +549,7 @@ class ReportWizardViewModel extends ChangeNotifier {
   ReportDraft toDraft() {
     final anchor = activePhotoAnchor;
     return ReportDraft(
+      id: _draftId,
       category: _category,
       severity: _severity,
       description: _description,
@@ -556,7 +562,26 @@ class ReportWizardViewModel extends ChangeNotifier {
       photoAnchorCapturedAt: anchor?.capturedAt,
       pinLat: _pinLocation.latitude,
       pinLng: _pinLocation.longitude,
+      savedAt: DateTime.now(),
     );
+  }
+
+  List<ReportDraft> get otherSavedDraftsWithPin => repository.drafts
+      .where((d) => d.id != _draftId && d.effectivePinLocation != null)
+      .toList(growable: false);
+
+  ({ReportDraft draft, double distanceMeters})? get nearbySimilarSavedDraft {
+    ({ReportDraft draft, double distanceMeters})? closest;
+    for (final d in otherSavedDraftsWithPin) {
+      if (d.category != _category) continue;
+      final pt = d.effectivePinLocation;
+      if (pt == null) continue;
+      final dist = SpatialClusteringService.distanceMeters(_pinLocation, pt);
+      if (dist <= 50.0 && (closest == null || dist < closest.distanceMeters)) {
+        closest = (draft: d, distanceMeters: dist);
+      }
+    }
+    return closest;
   }
 
   void saveDraft() => repository.saveDraft(toDraft());
@@ -1563,6 +1588,7 @@ class ReportWizardViewModel extends ChangeNotifier {
       locationVerificationTier: verificationTier,
       targetMasterReportId: targetMasterId,
       forceCreateNew: createNew,
+      sourceDraftId: _draftId,
       photoVerificationToken: localPhotoPath != null
           ? _photoAiByPath[localPhotoPath!]?.photoVerificationToken
           : null,

@@ -57,7 +57,8 @@ Future<void> writeLocalState(String fileName, Map<String, dynamic> data) async {
     web.window.localStorage.setItem(fileName, jsonEncode(data));
   } catch (_) {
     // Quota exceeded — trim large base64 photo attachments ONLY from already-
-    // synced reports first so queued offline (`pendingSync`) reports strictly
+    // synced reports first so queued offline (`pendingSync`), rejected
+    // (`rejectedByAi`), and saved multi-draft (`drafts`) entries strictly
     // preserve their required photo and transcript until synced.
     try {
       final slim = Map<String, dynamic>.from(data);

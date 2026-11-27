@@ -202,7 +202,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
     if (action == 'save') {
       vm.saveDraft();
     } else if (action == 'discard') {
-      vm.repository.clearDraft();
+      vm.repository.deleteDraft(vm.draftId);
     }
     Navigator.pop(context);
   }
@@ -2982,6 +2982,67 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                       })
                       .toList(growable: false),
                 ),
+                if (vm.otherSavedDraftsWithPin.isNotEmpty)
+                  MarkerLayer(
+                    markers: vm.otherSavedDraftsWithPin
+                        .map((savedDraft) {
+                          final point = savedDraft.effectivePinLocation!;
+                          return Marker(
+                            point: point,
+                            width: 44,
+                            height: 44,
+                            child: Semantics(
+                              button: true,
+                              label: tr.primary(
+                                'សេចក្តីព្រាងបានរក្សាទុក · ${savedDraft.category.khmerName}',
+                                'Saved draft · ${savedDraft.category.englishName}',
+                              ),
+                              child: GestureDetector(
+                                key: Key('step3-draft-pin-${savedDraft.id}'),
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  final note = savedDraft.description.trim();
+                                  final suffix = note.isNotEmpty
+                                      ? ' · $note'
+                                      : '';
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        tr.primary(
+                                          'សេចក្តីព្រាងបានរក្សាទុក · ${savedDraft.category.khmerName}$suffix',
+                                          'Saved draft · ${savedDraft.category.englishName}$suffix',
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: Center(
+                                  child: Container(
+                                    width: 34,
+                                    height: 34,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.saffron,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white,
+                                        width: 2.5,
+                                      ),
+                                      boxShadow: AppColors.cardShadow,
+                                    ),
+                                    child: const Icon(
+                                      Icons.edit_note_rounded,
+                                      size: 18,
+                                      color: AppColors.saffronInk,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        })
+                        .toList(growable: false),
+                  ),
                 MapTileConfig.buildAttributionBadge(
                   bottomPadding: sheetCornerRadius + 6,
                 ),
@@ -3174,6 +3235,48 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                     ),
                   ],
                 ),
+                if (vm.otherSavedDraftsWithPin.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      key: const Key('step3-draft-pins-legend'),
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.saffronSoft,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: AppColors.saffron.withValues(alpha: 0.7),
+                        ),
+                        boxShadow: AppColors.cardShadow,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.edit_note_rounded,
+                            size: 14,
+                            color: AppColors.saffronInk,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            tr.primary(
+                              '${vm.otherSavedDraftsWithPin.length} សេចក្តីព្រាងបានរក្សាទុក',
+                              '${vm.otherSavedDraftsWithPin.length} saved draft pin(s)',
+                            ),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.saffronInk,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 if (!vm.repository.isOnline)
                   Container(
                     margin: const EdgeInsets.only(top: 10),
@@ -3575,6 +3678,55 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                 ),
                               ),
                             ),
+
+                            if (vm.nearbySimilarSavedDraft != null)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  4,
+                                  16,
+                                  4,
+                                ),
+                                child: Container(
+                                  key: const Key('step3-nearby-draft-warning'),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.saffronSoft,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: AppColors.saffron.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.edit_note_rounded,
+                                        size: 16,
+                                        color: AppColors.saffronInk,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          tr.primary(
+                                            'អ្នកមានសេចក្តីព្រាង ${vm.nearbySimilarSavedDraft!.draft.category.khmerName} នៅក្បែរនេះ (${vm.nearbySimilarSavedDraft!.distanceMeters.round()} ម៉ែត្រ)',
+                                            'You already saved a ${vm.nearbySimilarSavedDraft!.draft.category.englishName} draft nearby (${vm.nearbySimilarSavedDraft!.distanceMeters.round()} m away)',
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.saffronInk,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
 
                             // Pinned Primary CTA Footer
                             Padding(

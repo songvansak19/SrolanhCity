@@ -3367,6 +3367,106 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'HomePage shows multi-drafts, OfflineSyncBanner shows Resume CTA online, and Step 3 renders saved draft pins',
+      (tester) async {
+        final d1 = ReportDraft(
+          id: 'd-one',
+          category: IssueCategory.pothole,
+          severity: 3,
+          description: 'Corner pothole',
+          isAnonymous: false,
+          localPhotoPaths: const [],
+          pinLat: 11.5564,
+          pinLng: 104.9282,
+        );
+        final d2 = ReportDraft(
+          id: 'd-two',
+          category: IssueCategory.drain,
+          severity: 4,
+          description: 'Flooded drain',
+          isAnonymous: false,
+          localPhotoPaths: const [],
+          pinLat: 11.5570,
+          pinLng: 104.9290,
+        );
+        final repo = ReportRepository(
+          initialReports: const [],
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        repo.saveDraft(d1);
+        repo.saveDraft(d2);
+
+        await tester.pumpWidget(
+          ReportScope(
+            repository: repo,
+            child: const MaterialApp(home: MainShell()),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('banner-resume-draft-btn')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('home-draft-card-d-one')), findsOneWidget);
+        expect(find.byKey(const Key('home-draft-card-d-two')), findsOneWidget);
+
+        // Discard d-two leaves d-one intact.
+        await tester.tap(find.byKey(const Key('home-draft-discard-d-two')));
+        await tester.pumpAndSettle();
+        expect(repo.draftCount, equals(1));
+        expect(find.byKey(const Key('home-draft-card-d-one')), findsOneWidget);
+        expect(find.byKey(const Key('home-draft-card-d-two')), findsNothing);
+
+        // Open another wizard with a photo draft -> advance Step 2 -> Step 3 and verify d-one pin renders.
+        final activeDraft = ReportDraft(
+          id: 'd-current',
+          category: IssueCategory.pothole,
+          severity: 3,
+          description: 'Current offline spot',
+          isAnonymous: false,
+          localPhotoPaths: const ['sample-photo.jpg'],
+          photoAnchorLat: 11.55645,
+          photoAnchorLng: 104.92825,
+          photoAnchorSource: 'liveCameraCapture',
+          photoAnchorCapturedAt: DateTime.now(),
+        );
+        await tester.pumpWidget(
+          ReportScope(
+            repository: repo,
+            child: MaterialApp(
+              home: ReportWizardPage(
+                initialDraft: activeDraft,
+                locationService: const _FakeLocationService(
+                  LocationSuccess(
+                    point: LatLng(11.55645, 104.92825),
+                    accuracyMeters: 10,
+                    isOutsideCambodia: false,
+                  ),
+                ),
+                civicAiService: _UnconfiguredTestAiService(),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('step2-confirm-location-btn')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('step3-draft-pins-legend')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('step3-draft-pin-d-one')), findsOneWidget);
+        expect(
+          find.byKey(const Key('step3-nearby-draft-warning')),
+          findsOneWidget,
+        );
+      },
+    );
   });
 }
 

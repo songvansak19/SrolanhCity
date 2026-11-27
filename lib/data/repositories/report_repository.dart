@@ -58,9 +58,11 @@ class ReportRepository extends ChangeNotifier {
        _alerts = List<AlertItem>.of(initialAlerts ?? _seedAlerts()),
        _settings = initialSettings ?? const AppSettings(),
        _profile = initialProfile ?? const UserProfile(),
-       _draft = initialDraft,
+       _drafts = initialDraft != null ? [initialDraft] : <ReportDraft>[],
        apiService = apiService ?? CivicBackendApiService(),
        civicAiService = civicAiService ?? BackendCivicAiService();
+
+  static const int maxSavedDrafts = 20;
 
   final List<CivicReport> _reports;
   final List<AlertItem> _alerts;
@@ -72,7 +74,7 @@ class ReportRepository extends ChangeNotifier {
   final CivicAiService civicAiService;
   AppSettings _settings;
   UserProfile _profile;
-  ReportDraft? _draft;
+  final List<ReportDraft> _drafts;
   GpsCheckpoint? _lastVerifiedGpsCheckpoint;
   String? _authAccessToken;
   String? _authUserId;
@@ -108,7 +110,9 @@ class ReportRepository extends ChangeNotifier {
 
   UserProfile get profile => _profile;
 
-  ReportDraft? get draft => _draft;
+  ReportDraft? get draft => _drafts.isNotEmpty ? _drafts.first : null;
+  UnmodifiableListView<ReportDraft> get drafts => UnmodifiableListView(_drafts);
+  int get draftCount => _drafts.length;
 
   GpsCheckpoint? get lastVerifiedGpsCheckpoint => _lastVerifiedGpsCheckpoint;
 
@@ -391,9 +395,23 @@ class ReportRepository extends ChangeNotifier {
       _profile = UserProfile.fromJson(rawProfile);
     }
 
-    final rawDraft = data['draft'];
-    if (rawDraft is Map<String, dynamic>) {
-      _draft = ReportDraft.fromJson(rawDraft);
+    final rawDrafts = data['drafts'];
+    if (rawDrafts is List) {
+      _drafts
+        ..clear()
+        ..addAll(
+          rawDrafts
+              .whereType<Map<String, dynamic>>()
+              .map(ReportDraft.fromJson)
+              .take(maxSavedDrafts),
+        );
+    } else {
+      final rawDraft = data['draft'];
+      if (rawDraft is Map<String, dynamic>) {
+        _drafts
+          ..clear()
+          ..add(ReportDraft.fromJson(rawDraft));
+      }
     }
 
     final savedNext = data['nextTicketNumber'];
@@ -459,7 +477,8 @@ class ReportRepository extends ChangeNotifier {
         'alerts': _alerts.map((a) => a.toJson()).toList(),
         'settings': _settings.toJson(),
         'profile': _profile.toJson(),
-        'draft': _draft?.toJson(),
+        'draft': draft?.toJson(),
+        'drafts': _drafts.map((d) => d.toJson()).toList(),
         'nextTicketNumber': _nextTicketNumber,
         'supportVoteTimestamps': _supportVoteTimestamps
             .map((ts) => ts.toIso8601String())
@@ -655,14 +674,26 @@ class ReportRepository extends ChangeNotifier {
   }
 
   void saveDraft(ReportDraft draft) {
-    _draft = draft;
+    _drafts.removeWhere((d) => d.id == draft.id);
+    _drafts.insert(0, draft);
+    if (_drafts.length > maxSavedDrafts) {
+      _drafts.removeRange(maxSavedDrafts, _drafts.length);
+    }
+    _persist();
+    notifyListeners();
+  }
+
+  void deleteDraft(String draftId) {
+    final before = _drafts.length;
+    _drafts.removeWhere((d) => d.id == draftId);
+    if (_drafts.length == before) return;
     _persist();
     notifyListeners();
   }
 
   void clearDraft() {
-    if (_draft == null) return;
-    _draft = null;
+    if (_drafts.isEmpty) return;
+    _drafts.clear();
     _persist();
     notifyListeners();
   }
@@ -739,10 +770,15 @@ class ReportRepository extends ChangeNotifier {
     String? targetMasterReportId,
     bool forceCreateNew = false,
     String? photoVerificationToken,
+    String? sourceDraftId,
     DateTime? now,
   }) {
     final submittedAt = now ?? DateTime.now();
-    _draft = null;
+    if (sourceDraftId != null && sourceDraftId.isNotEmpty) {
+      _drafts.removeWhere((d) => d.id == sourceDraftId);
+    } else if (_drafts.length == 1) {
+      _drafts.clear();
+    }
     final candidates = findSimilarReportsNearby(
       point: detectionAnchorCoordinates ?? coordinates,
       category: category,

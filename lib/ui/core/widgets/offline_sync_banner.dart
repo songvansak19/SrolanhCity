@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../domain/models/report_models.dart';
+import '../../features/report/views/report_wizard_page.dart';
 import '../../features/tracking/tracking_page.dart';
 import '../l10n.dart';
 import '../report_scope.dart';
@@ -16,7 +17,10 @@ class OfflineSyncBanner extends StatelessWidget {
 
   static bool shouldShow(BuildContext context) {
     final repo = ReportScope.of(context);
-    return !repo.isOnline || repo.hasPendingSync || repo.rejectedByAiCount > 0;
+    return !repo.isOnline ||
+        repo.hasPendingSync ||
+        repo.rejectedByAiCount > 0 ||
+        (repo.isOnline && repo.draftCount > 0);
   }
 
   @override
@@ -25,9 +29,16 @@ class OfflineSyncBanner extends StatelessWidget {
     final isOnline = repo.isOnline;
     final pendingCount = repo.pendingSyncCount;
     final rejectedCount = repo.rejectedByAiCount;
-    final visible = !isOnline || pendingCount > 0 || rejectedCount > 0;
+    final draftCount = repo.draftCount;
     final showRejectedBanner =
         isOnline && pendingCount == 0 && rejectedCount > 0;
+    final showDraftsReadyBanner =
+        isOnline && pendingCount == 0 && rejectedCount == 0 && draftCount > 0;
+    final visible =
+        !isOnline ||
+        pendingCount > 0 ||
+        rejectedCount > 0 ||
+        showDraftsReadyBanner;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final tr = Bilingual(repo.settings.englishFirst);
 
@@ -45,10 +56,12 @@ class OfflineSyncBanner extends StatelessWidget {
             ? const SizedBox.shrink(key: ValueKey('offline-banner-hidden'))
             : Material(
                 key: ValueKey(
-                  'offline-banner-$isOnline-$pendingCount-$rejectedCount',
+                  'offline-banner-$isOnline-$pendingCount-$rejectedCount-$draftCount',
                 ),
                 color: showRejectedBanner
                     ? AppColors.dangerSoft
+                    : showDraftsReadyBanner
+                    ? AppColors.saffronSoft
                     : (isOnline ? AppColors.tealSoft : AppColors.ink),
                 child: SafeArea(
                   bottom: false,
@@ -63,12 +76,16 @@ class OfflineSyncBanner extends StatelessWidget {
                         Icon(
                           showRejectedBanner
                               ? Icons.warning_amber_rounded
+                              : showDraftsReadyBanner
+                              ? Icons.edit_note_rounded
                               : (isOnline
                                     ? Icons.cloud_upload_outlined
                                     : Icons.wifi_off_rounded),
                           size: 17,
                           color: showRejectedBanner
                               ? AppColors.danger
+                              : showDraftsReadyBanner
+                              ? AppColors.saffronInk
                               : (isOnline ? AppColors.teal : AppColors.saffron),
                         ),
                         const SizedBox(width: 9),
@@ -81,6 +98,11 @@ class OfflineSyncBanner extends StatelessWidget {
                                   ? tr.primary(
                                       'របាយការណ៍ក្រៅបណ្តាញ $rejectedCount ត្រូវបានបដិសេធដោយ AI — សូមលុប ហើយរាយការណ៍ម្តងទៀត',
                                       '$rejectedCount offline report(s) rejected by AI — please delete & report again',
+                                    )
+                                  : showDraftsReadyBanner
+                                  ? tr.primary(
+                                      'មានសេចក្តីព្រាង $draftCount កំពុងរង់ចាំផ្ទៀងផ្ទាត់ និងផ្ញើ',
+                                      '$draftCount saved draft(s) ready to verify & submit',
                                     )
                                   : isOnline
                                   ? tr.primary(
@@ -102,6 +124,8 @@ class OfflineSyncBanner extends StatelessWidget {
                                 fontWeight: FontWeight.w700,
                                 color: showRejectedBanner
                                     ? AppColors.danger
+                                    : showDraftsReadyBanner
+                                    ? AppColors.saffronInk
                                     : (isOnline
                                           ? AppColors.tealDark
                                           : AppColors.paper),
@@ -137,6 +161,35 @@ class OfflineSyncBanner extends StatelessWidget {
                             ),
                             child: Text(
                               tr.primary('ពិនិត្យ', 'Review'),
+                              style: const TextStyle(fontSize: 11.5),
+                            ),
+                          ),
+                        ] else if (showDraftsReadyBanner) ...[
+                          const SizedBox(width: 8),
+                          FilledButton(
+                            key: const Key('banner-resume-draft-btn'),
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ReportWizardPage(
+                                    initialDraft: repo.drafts.first,
+                                  ),
+                                ),
+                              );
+                            },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.saffronInk,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 8,
+                              ),
+                              minimumSize: const Size(48, 44),
+                            ),
+                            child: Text(
+                              tr.primary('បន្តផ្ញើ', 'Resume'),
                               style: const TextStyle(fontSize: 11.5),
                             ),
                           ),

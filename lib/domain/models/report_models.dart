@@ -449,6 +449,7 @@ class UserProfile {
 /// auto-saved when a photo GPS anchor locks on Step 1.
 class ReportDraft {
   const ReportDraft({
+    this.id = 'draft-default',
     required this.category,
     required this.severity,
     required this.description,
@@ -461,8 +462,10 @@ class ReportDraft {
     this.photoAnchorCapturedAt,
     this.pinLat,
     this.pinLng,
+    this.savedAt,
   });
 
+  final String id;
   final IssueCategory category;
   final int severity;
   final String description;
@@ -475,6 +478,7 @@ class ReportDraft {
   final DateTime? photoAnchorCapturedAt;
   final double? pinLat;
   final double? pinLng;
+  final DateTime? savedAt;
 
   bool get hasPhotoAnchor =>
       photoAnchorLat != null &&
@@ -484,7 +488,14 @@ class ReportDraft {
 
   bool get hasPinLocation => pinLat != null && pinLng != null;
 
+  LatLng? get effectivePinLocation {
+    if (hasPinLocation) return LatLng(pinLat!, pinLng!);
+    if (hasPhotoAnchor) return LatLng(photoAnchorLat!, photoAnchorLng!);
+    return null;
+  }
+
   Map<String, dynamic> toJson() => {
+    'id': id,
     'category': category.name,
     'severity': severity,
     'description': description,
@@ -498,6 +509,7 @@ class ReportDraft {
       'photoAnchorCapturedAt': photoAnchorCapturedAt!.toIso8601String(),
     if (pinLat != null) 'pinLat': pinLat,
     if (pinLng != null) 'pinLng': pinLng,
+    if (savedAt != null) 'savedAt': savedAt!.toUtc().toIso8601String(),
   };
 
   factory ReportDraft.fromJson(Map<String, dynamic> json) {
@@ -506,7 +518,10 @@ class ReportDraft {
         ? rawPaths.whereType<String>().toList()
         : const <String>[];
     final rawCapturedAt = json['photoAnchorCapturedAt'] as String?;
+    final rawSavedAt = json['savedAt'] as String?;
+    final rawId = (json['id'] as String?)?.trim();
     return ReportDraft(
+      id: (rawId != null && rawId.isNotEmpty) ? rawId : 'draft-default',
       category: IssueCategory.fromName(json['category'] as String?),
       severity: (json['severity'] as num?)?.toInt() ?? 3,
       description: (json['description'] as String?) ?? '',
@@ -521,6 +536,7 @@ class ReportDraft {
           : DateTime.tryParse(rawCapturedAt),
       pinLat: (json['pinLat'] as num?)?.toDouble(),
       pinLng: (json['pinLng'] as num?)?.toDouble(),
+      savedAt: rawSavedAt == null ? null : DateTime.tryParse(rawSavedAt),
     );
   }
 }

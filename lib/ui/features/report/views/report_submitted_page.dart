@@ -9,6 +9,7 @@ import '../../../core/widgets/bilingual_text.dart';
 import '../../../core/widgets/offline_sync_banner.dart';
 import '../../../core/widgets/priority_badge.dart';
 import '../../tracking/tracking_page.dart';
+import 'report_wizard_page.dart';
 
 /// Screen 2.5 / Slide 05: Full-Screen Submitted & Routed Confirmation.
 class ReportSubmittedPage extends StatelessWidget {
@@ -295,6 +296,31 @@ class ReportSubmittedPage extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (repo.draftCount > 0) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: OutlinedButton.icon(
+                        key: const Key('submitted-continue-next-draft-btn'),
+                        onPressed: () => Navigator.pushReplacement<void, void>(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => ReportWizardPage(
+                              initialDraft: repo.drafts.first,
+                            ),
+                          ),
+                        ),
+                        icon: const Icon(Icons.edit_note_rounded, size: 18),
+                        label: Text(
+                          tr.primary(
+                            'បន្តសេចក្តីព្រាងបន្ទាប់ (${repo.draftCount} នៅសល់)',
+                            'Continue next draft (${repo.draftCount} left)',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 6),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
