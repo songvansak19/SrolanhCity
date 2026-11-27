@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # Gemini AI Proxy (kept server-side only)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
+    gemini_audio_model: str = ""
 
     # Auth (PyJWT)
     jwt_secret_key: str = "change-me-in-production-use-32-plus-chars"

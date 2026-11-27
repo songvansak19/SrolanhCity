@@ -159,16 +159,23 @@ class AiProxyService:
             )
         return value
 
-    async def _generate_json(self, client: genai.Client, contents: Any) -> dict[str, Any]:
+    async def _generate_json(
+        self,
+        client: genai.Client,
+        contents: Any,
+        *,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        selected_model = (model or self.settings.gemini_model).strip() or self.settings.gemini_model
         try:
             response = await client.aio.models.generate_content(
-                model=self.settings.gemini_model,
+                model=selected_model,
                 contents=contents,
                 config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
         except Exception as exc:
             raise AiUpstreamResponseError(
-                f"Upstream AI error ({self.settings.gemini_model}): {exc}"
+                f"Upstream AI error ({selected_model}): {exc}"
             ) from exc
         return self._parse_json_dict(response.text)
 
@@ -263,12 +270,14 @@ class AiProxyService:
             "category ('pothole'|'streetlight'|'drain'|'trash'|'other'|null). "
             f"Expected language: {payload.language}."
         )
+        audio_model = self.settings.gemini_audio_model.strip() or self.settings.gemini_model
         data = await self._generate_json(
             client,
             [
                 types.Part.from_bytes(data=audio_bytes, mime_type=payload.mime_type),
                 prompt,
             ],
+            model=audio_model,
         )
         try:
             raw_cat = self._require_optional_str(data.get("category"), field_name="category")

@@ -207,6 +207,34 @@ class _ReportWizardPageState extends State<ReportWizardPage>
     Navigator.pop(context);
   }
 
+  bool _hasVerifiedCambodiaCameraExif(PhotoExifMetadata exif) {
+    final coords = exif.coordinates;
+    if (coords == null || !LocationService.isInsideCambodia(coords)) {
+      return false;
+    }
+    final capturedAt = exif.capturedAt;
+    if (capturedAt != null &&
+        DateTime.now().difference(capturedAt).abs() >
+            const Duration(days: 30)) {
+      return false;
+    }
+    return true;
+  }
+
+  void _showMissingCameraExifSnackBar(Bilingual tr) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          tr.primary(
+            'រូបភាពពីវិចិត្រសាលមិនមានទិន្នន័យ GPS កាមេរ៉ានៅកម្ពុជាទេ — សូមប្រើកាមេរ៉ាថតផ្ទាល់',
+            'Gallery photo lacks Cambodia camera EXIF GPS — please take a live photo with your phone camera.',
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickPhoto(ImageSource source, Bilingual tr) async {
     final vm = _viewModel;
     if (vm == null || !vm.canAddMorePhotos) return;
@@ -222,12 +250,15 @@ class _ReportWizardPageState extends State<ReportWizardPage>
         final validPaths = <String>[];
         final perPhotoExif = <PhotoExifMetadata?>[];
         var hadUnsupported = false;
+        var hadMissingCameraExif = false;
         for (final item in results) {
           if (item.isValid) {
+            if (!_hasVerifiedCambodiaCameraExif(item.exifMetadata)) {
+              hadMissingCameraExif = true;
+              continue;
+            }
             validPaths.add(item.path);
-            perPhotoExif.add(
-              item.exifMetadata.isEmpty ? null : item.exifMetadata,
-            );
+            perPhotoExif.add(item.exifMetadata);
           } else if (item.unsupportedFormat) {
             hadUnsupported = true;
           }
@@ -239,7 +270,9 @@ class _ReportWizardPageState extends State<ReportWizardPage>
             perPhotoExif: perPhotoExif,
           );
         }
-        if (hadUnsupported && mounted) {
+        if (hadMissingCameraExif) {
+          _showMissingCameraExifSnackBar(tr);
+        } else if (hadUnsupported && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -271,6 +304,11 @@ class _ReportWizardPageState extends State<ReportWizardPage>
             ),
           ),
         );
+        return;
+      }
+      if (source == ImageSource.gallery &&
+          !_hasVerifiedCambodiaCameraExif(result.exifMetadata)) {
+        _showMissingCameraExifSnackBar(tr);
         return;
       }
       HapticFeedback.selectionClick();
@@ -1958,28 +1996,64 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                       color: AppColors.paper,
                       border: Border(top: BorderSide(color: AppColors.border)),
                     ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: FilledButton(
-                        key: const Key('step2-confirm-location-btn'),
-                        onPressed: vm.hasRequiredPhoto
-                            ? () async {
-                                HapticFeedback.selectionClick();
-                                await vm.stopVoiceRecordingIfActive();
-                                if (!mounted || !vm.hasRequiredPhoto) return;
-                                vm.nextStep();
-                                _reverseGeocodeCurrentPin(vm.pinLocation);
-                                _maybeTriggerAutoGps(tr);
-                              }
-                            : null,
-                        child: Text(
-                          tr.paired(
-                            'បន្ទាប់ · បញ្ជាក់ទីតាំង',
-                            'Next · Confirm location',
-                          ),
-                        ),
-                      ),
+                    child: Builder(
+                      builder: (context) {
+                        final isNonCivicBlocked =
+                            vm.photoAi.status == PhotoAiStatus.notCivicIssue;
+                        final canProceedToStep3 =
+                            vm.hasRequiredPhoto && !isNonCivicBlocked;
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (isNonCivicBlocked) ...[
+                              Text(
+                                tr.primary(
+                                  'សូមថត ឬជ្រើសរូបបញ្ហាផ្លូវពិតប្រាកដមុនបន្តទៅជំហានទី ៣',
+                                  'Please retake or choose a real street-issue photo before continuing to Step 3.',
+                                ),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppColors.saffronInk,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                            SizedBox(
+                              width: double.infinity,
+                              height: 54,
+                              child: FilledButton(
+                                key: const Key('step2-confirm-location-btn'),
+                                onPressed: canProceedToStep3
+                                    ? () async {
+                                        HapticFeedback.selectionClick();
+                                        await vm.stopVoiceRecordingIfActive();
+                                        if (!mounted ||
+                                            !vm.hasRequiredPhoto ||
+                                            vm.photoAi.status ==
+                                                PhotoAiStatus.notCivicIssue) {
+                                          return;
+                                        }
+                                        vm.nextStep();
+                                        _reverseGeocodeCurrentPin(
+                                          vm.pinLocation,
+                                        );
+                                        _maybeTriggerAutoGps(tr);
+                                      }
+                                    : null,
+                                child: Text(
+                                  tr.paired(
+                                    'បន្ទាប់ · បញ្ជាក់ទីតាំង',
+                                    'Next · Confirm location',
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
