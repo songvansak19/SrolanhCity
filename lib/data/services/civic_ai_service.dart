@@ -171,7 +171,7 @@ class BackendCivicAiService implements CivicAiService {
   static const String classifyPath = '/api/v1/ai/classify-issue';
   static const String transcribePath = '/api/v1/ai/transcribe-voice';
   static const String helpChatPath = '/api/v1/ai/help-chat';
-  static const Duration requestTimeout = Duration(seconds: 18);
+  static const Duration requestTimeout = Duration(seconds: 45);
 
   final http.Client? httpClient;
   final String _resolvedBaseUrl;
@@ -239,9 +239,7 @@ class BackendCivicAiService implements CivicAiService {
         errorMessage: 'Image file not found.',
       );
     }
-    final mimeType = imagePath.toLowerCase().endsWith('.png')
-        ? 'image/png'
-        : 'image/jpeg';
+    final mimeType = _resolveImageMimeType(imagePath);
 
     final payload = buildPhotoRequestBody(
       base64Image: base64Encode(bytes),
@@ -478,6 +476,25 @@ class BackendCivicAiService implements CivicAiService {
       success: false,
       errorMessage: 'Could not parse backend transcription response.',
     );
+  }
+
+  static String _resolveImageMimeType(String imagePath) {
+    if (imagePath.startsWith('data:')) {
+      final semi = imagePath.indexOf(';base64,');
+      if (semi > 5) {
+        final raw = imagePath.substring(5, semi).trim().toLowerCase();
+        if (raw == 'image/jpeg' ||
+            raw == 'image/jpg' ||
+            raw == 'image/png' ||
+            raw == 'image/webp') {
+          return raw;
+        }
+      }
+    }
+    final lower = imagePath.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
   }
 
   static IssueCategory? _parseCategory(String? raw) {

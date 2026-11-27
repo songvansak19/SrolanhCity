@@ -3645,6 +3645,121 @@ void main() {
       vm.dispose();
       repo.dispose();
     });
+
+    test('Step 2 blocks advancing on transient AI failure when online and BackendCivicAiService extracts data-URI MIME type', () async {
+      final repo = ReportRepository(initialReports: const []);
+      repo.setOnlineStatus(true);
+      final ai = _FakeConfiguredCivicAiService(
+        photoResult: const PhotoAiAnalysis(
+          status: PhotoAiStatus.failed,
+          errorMessage: 'Timeout',
+        ),
+        audioResult: const AudioTranscriptionResult(success: false),
+      );
+      final draft = ReportDraft(
+        category: IssueCategory.pothole,
+        severity: 3,
+        description: 'Draft',
+        isAnonymous: false,
+        localPhotoPaths: const ['data:image/png;base64,AAAA'],
+      );
+      final vm = ReportWizardViewModel(
+        repository: repo,
+        initialDraft: draft,
+        civicAiService: ai,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(vm.photoAi.status, equals(PhotoAiStatus.failed));
+      expect(vm.isPhotoAiBlockedForNextStep, isTrue);
+      vm.nextStep();
+      expect(vm.step, equals(1));
+      vm.dispose();
+      repo.dispose();
+
+      String? sentMime;
+      final mockClient = MockClient((req) async {
+        final body = jsonDecode(req.body) as Map<String, dynamic>;
+        sentMime = body['mime_type'] as String?;
+        return http.Response(
+          jsonEncode({
+            'is_civic_issue': false,
+            'category': null,
+            'confidence_percent': 95,
+            'severity': 2,
+          }),
+          200,
+        );
+      });
+      final backendAi = BackendCivicAiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      final res = await backendAi.analyzeIssuePhoto(
+        imagePath: 'data:image/png;base64,AQID',
+        englishFirst: true,
+      );
+      expect(sentMime, equals('image/png'));
+      expect(res.status, equals(PhotoAiStatus.notCivicIssue));
+    });
+
+    test(
+      'Step 2 blocks advancing on transient AI failure when online and BackendCivicAiService extracts data-URI MIME type',
+      () async {
+        final repo = ReportRepository(initialReports: const []);
+        repo.setOnlineStatus(true);
+        final ai = _FakeConfiguredCivicAiService(
+          photoResult: const PhotoAiAnalysis(
+            status: PhotoAiStatus.failed,
+            errorMessage: 'Timeout',
+          ),
+          audioResult: const AudioTranscriptionResult(success: false),
+        );
+        final draft = ReportDraft(
+          category: IssueCategory.pothole,
+          severity: 3,
+          description: 'Draft',
+          isAnonymous: false,
+          localPhotoPaths: const ['data:image/png;base64,AAAA'],
+        );
+        final vm = ReportWizardViewModel(
+          repository: repo,
+          initialDraft: draft,
+          civicAiService: ai,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(vm.photoAi.status, equals(PhotoAiStatus.failed));
+        expect(vm.isPhotoAiBlockedForNextStep, isTrue);
+        vm.nextStep();
+        expect(vm.step, equals(1));
+        vm.dispose();
+        repo.dispose();
+
+        String? sentMime;
+        final mockClient = MockClient((req) async {
+          final body = jsonDecode(req.body) as Map<String, dynamic>;
+          sentMime = body['mime_type'] as String?;
+          return http.Response(
+            jsonEncode({
+              'is_civic_issue': false,
+              'category': null,
+              'confidence_percent': 95,
+              'severity': 2,
+            }),
+            200,
+          );
+        });
+        final backendAi = BackendCivicAiService(
+          httpClient: mockClient,
+          baseUrl: 'http://localhost:8000',
+        );
+        final res = await backendAi.analyzeIssuePhoto(
+          imagePath: 'data:image/png;base64,AQID',
+          englishFirst: true,
+        );
+        expect(sentMime, equals('image/png'));
+        expect(res.status, equals(PhotoAiStatus.notCivicIssue));
+      },
+    );
   });
 }
 

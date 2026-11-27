@@ -555,7 +555,7 @@ class ReportWizardViewModel extends ChangeNotifier {
     if (repository.isOnline &&
         _civicAiService.isBackendConfigured &&
         hasRequiredPhoto &&
-        _photoAi.status == PhotoAiStatus.noPhoto) {
+        _photoAi.status != PhotoAiStatus.analyzed) {
       return true;
     }
     return false;
