@@ -738,6 +738,7 @@ class ReportRepository extends ChangeNotifier {
     ReportLocationVerificationTier? locationVerificationTier,
     String? targetMasterReportId,
     bool forceCreateNew = false,
+    String? photoVerificationToken,
     DateTime? now,
   }) {
     final submittedAt = now ?? DateTime.now();
@@ -975,7 +976,12 @@ class ReportRepository extends ChangeNotifier {
     _persist();
     notifyListeners();
     if (_isOnline && apiService.isConfigured) {
-      unawaited(_syncCreatedReport(created));
+      unawaited(
+        _syncCreatedReport(
+          created,
+          photoVerificationToken: photoVerificationToken,
+        ),
+      );
     }
     return ReportSubmissionResult(
       report: created,
@@ -1612,9 +1618,71 @@ class ReportRepository extends ChangeNotifier {
     await action();
   }
 
-  Future<CivicReport?> _syncCreatedReport(CivicReport created) async {
+  void _markReportRejectedByAi(
+    String reportId, {
+    required bool isDuplicatePhoto,
+    String? khmerReason,
+    String? englishReason,
+  }) {
+    final idx = _reports.indexWhere((r) => r.id == reportId);
+    final resolvedKhmer =
+        khmerReason ??
+        (isDuplicatePhoto
+            ? 'រូបភាពនេះត្រូវបានប្រើក្នុងរបាយការណ៍ដែលកំពុងបើករួចហើយ។'
+            : 'រូបភាពនេះមិនបង្ហាញពីបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈទេ។ សូមលុប ហើយរាយការណ៍ម្តងទៀត។');
+    final resolvedEnglish =
+        englishReason ??
+        (isDuplicatePhoto
+            ? 'This exact photo is already attached to an open report.'
+            : 'Photo was not recognized as a public civic issue. Please delete and report again.');
+    if (idx != -1) {
+      _reports[idx] = _reports[idx].copyWith(
+        syncStatus: SyncStatus.rejectedByAi,
+        aiRejectionReasonKhmer: resolvedKhmer,
+        aiRejectionReasonEnglish: resolvedEnglish,
+      );
+    }
+    final now = DateTime.now();
+    _alerts.insert(
+      0,
+      AlertItem(
+        id: 'alert-ai-reject-${now.microsecondsSinceEpoch}',
+        reportId: reportId,
+        khmerTitle: isDuplicatePhoto
+            ? 'រូបភាពរបាយការណ៍ $reportId ស្ទួនគ្នា'
+            : 'រូបភាពរបាយការណ៍ $reportId មិនមែនជាបញ្ហាសាធារណៈ',
+        englishTitle: isDuplicatePhoto
+            ? 'Report $reportId duplicate photo rejected'
+            : 'Report $reportId photo not accepted',
+        khmerSubtitle: resolvedKhmer,
+        englishSubtitle: resolvedEnglish,
+        createdAt: now,
+        isRead: false,
+      ),
+    );
+    _persist();
+    notifyListeners();
+  }
+
+  Future<CivicReport?> _syncCreatedReport(
+    CivicReport created, {
+    String? photoVerificationToken,
+  }) async {
     if (!await _ensureBackendSession()) return null;
-    final serverReport = await apiService.createReport(created);
+    final outcome = await apiService.createReportDetailed(
+      created,
+      photoVerificationToken: photoVerificationToken,
+    );
+    if (outcome.rejectedByAi || outcome.duplicatePhoto) {
+      _markReportRejectedByAi(
+        created.id,
+        isDuplicatePhoto: outcome.duplicatePhoto,
+        khmerReason: outcome.khmerReason,
+        englishReason: outcome.englishReason,
+      );
+      return null;
+    }
+    final serverReport = outcome.report;
     if (serverReport == null) return null;
     if (serverReport.id != created.id) {
       _localToServerIdMap[created.id] = serverReport.id;
@@ -1658,6 +1726,7 @@ class ReportRepository extends ChangeNotifier {
       String? latestSyncedId;
 
       for (final report in pending) {
+        String? photoToken;
         if (civicAiService.isBackendConfigured &&
             report.localPhotoPath != null &&
             report.localPhotoPath!.isNotEmpty) {
@@ -1669,39 +1738,25 @@ class ReportRepository extends ChangeNotifier {
                 : null,
           );
           if (aiResult.status == PhotoAiStatus.notCivicIssue) {
-            final idx = _reports.indexWhere((r) => r.id == report.id);
-            if (idx != -1) {
-              _reports[idx] = _reports[idx].copyWith(
-                syncStatus: SyncStatus.rejectedByAi,
-                aiRejectionReasonKhmer: aiResult.khmerReason,
-                aiRejectionReasonEnglish: aiResult.englishReason,
-              );
-            }
-            final now = DateTime.now();
-            _alerts.insert(
-              0,
-              AlertItem(
-                id: 'alert-ai-reject-${now.microsecondsSinceEpoch}',
-                reportId: report.id,
-                khmerTitle: 'រូបភាពរបាយការណ៍ ${report.id} មិនមែនជាបញ្ហាសាធារណៈ',
-                englishTitle: 'Offline report ${report.id} photo not accepted',
-                khmerSubtitle: aiResult.khmerReason ?? 'រូបភាពនេះមិនបង្ហាញពីបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈទេ។ សូមលុប ហើយរាយការណ៍ម្តងទៀត។',
-                englishSubtitle: aiResult.englishReason ?? 'Photo was not recognized as a public civic issue. Please delete and report again.',
-                createdAt: now,
-                isRead: false,
-              ),
+            _markReportRejectedByAi(
+              report.id,
+              isDuplicatePhoto: false,
+              khmerReason: aiResult.khmerReason,
+              englishReason: aiResult.englishReason,
             );
-            _persist();
-            notifyListeners();
             continue;
           }
           if (aiResult.status != PhotoAiStatus.analyzed) {
             // Keep pendingSync on transient AI errors so it retries later.
             continue;
           }
+          photoToken = aiResult.photoVerificationToken;
         }
 
-        final uploaded = await _syncCreatedReport(report);
+        final uploaded = await _syncCreatedReport(
+          report,
+          photoVerificationToken: photoToken,
+        );
         if (uploaded != null) {
           syncedCount++;
           latestSyncedId ??= uploaded.id;

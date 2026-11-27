@@ -103,6 +103,7 @@ class ReportPhoto(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     object_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    photo_sha256: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
     is_after_proof: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False)
     exif_stripped: Mapped[bool] = mapped_column(sa.Boolean, default=True, nullable=False)
 

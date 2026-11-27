@@ -727,7 +727,10 @@ class _ReportWizardPageState extends State<ReportWizardPage>
         vm.updatePinCoordinatesLive(_mapController.camera.center);
       }
     }
-    // Enforce Rule #1 (Smart Distance Gate) defensively before submitting.
+    // Enforce Rule #1 (Smart Distance Gate) and AI / online guard defensively.
+    if (vm.isPhotoAiBlockedForNextStep || vm.requiresOfflineDraftOnly) {
+      return;
+    }
     if (!vm.canSubmitAtCurrentPin) {
       final eligibility = vm.locationEligibility;
       if (eligibility is ReportLocationDeniedLocationRequired &&
@@ -3921,6 +3924,60 @@ class _ReportWizardPageState extends State<ReportWizardPage>
     required double expandFactor,
     required Bilingual tr,
   }) {
+    if (vm.requiresOfflineDraftOnly) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            tr.primary(
+              'អ្នកកំពុងគ្មានអ៊ីនធឺណិត — សូមរក្សាទុកសេចក្តីព្រាង ហើយបន្តផ្ញើពេលមានអ៊ីនធឺណិតវិញ (AI នឹងពិនិត្យរូបភាពម្តងទៀត)',
+              'You are offline — save as a draft until online (AI will verify your photo on Step 2 when reconnected).',
+            ),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.saffronInk,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: const Key('step3-save-offline-draft-btn'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                backgroundColor: AppColors.saffronInk,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                vm.saveDraft();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      tr.primary(
+                        'បានរក្សាទុកសេចក្តីព្រាង! សូមបន្តផ្ញើពីទំព័រដើមពេលមានអ៊ីនធឺណិតវិញ។',
+                        'Draft saved! Resume from Home once you are back online.',
+                      ),
+                    ),
+                  ),
+                );
+                Navigator.pop(context);
+              },
+              icon: const Icon(Icons.save_outlined, size: 18),
+              label: Text(
+                tr.paired(
+                  'រក្សាទុកសេចក្តីព្រាងរង់ចាំអ៊ីនធឺណិត',
+                  'Save draft until online',
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
     if (!hasSimilar) {
       return SizedBox(
         width: double.infinity,

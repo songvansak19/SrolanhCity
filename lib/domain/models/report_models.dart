@@ -459,6 +459,8 @@ class ReportDraft {
     this.photoAnchorLng,
     this.photoAnchorSource,
     this.photoAnchorCapturedAt,
+    this.pinLat,
+    this.pinLng,
   });
 
   final IssueCategory category;
@@ -471,12 +473,16 @@ class ReportDraft {
   final double? photoAnchorLng;
   final String? photoAnchorSource;
   final DateTime? photoAnchorCapturedAt;
+  final double? pinLat;
+  final double? pinLng;
 
   bool get hasPhotoAnchor =>
       photoAnchorLat != null &&
       photoAnchorLng != null &&
       photoAnchorSource != null &&
       photoAnchorSource!.isNotEmpty;
+
+  bool get hasPinLocation => pinLat != null && pinLng != null;
 
   Map<String, dynamic> toJson() => {
     'category': category.name,
@@ -490,6 +496,8 @@ class ReportDraft {
     if (photoAnchorSource != null) 'photoAnchorSource': photoAnchorSource,
     if (photoAnchorCapturedAt != null)
       'photoAnchorCapturedAt': photoAnchorCapturedAt!.toIso8601String(),
+    if (pinLat != null) 'pinLat': pinLat,
+    if (pinLng != null) 'pinLng': pinLng,
   };
 
   factory ReportDraft.fromJson(Map<String, dynamic> json) {
@@ -511,6 +519,8 @@ class ReportDraft {
       photoAnchorCapturedAt: rawCapturedAt == null
           ? null
           : DateTime.tryParse(rawCapturedAt),
+      pinLat: (json['pinLat'] as num?)?.toDouble(),
+      pinLng: (json['pinLng'] as num?)?.toDouble(),
     );
   }
 }

@@ -3702,64 +3702,106 @@ void main() {
       expect(res.status, equals(PhotoAiStatus.notCivicIssue));
     });
 
-    test(
-      'Step 2 blocks advancing on transient AI failure when online and BackendCivicAiService extracts data-URI MIME type',
-      () async {
-        final repo = ReportRepository(initialReports: const []);
-        repo.setOnlineStatus(true);
-        final ai = _FakeConfiguredCivicAiService(
-          photoResult: const PhotoAiAnalysis(
-            status: PhotoAiStatus.failed,
-            errorMessage: 'Timeout',
-          ),
-          audioResult: const AudioTranscriptionResult(success: false),
-        );
-        final draft = ReportDraft(
-          category: IssueCategory.pothole,
-          severity: 3,
-          description: 'Draft',
-          isAnonymous: false,
-          localPhotoPaths: const ['data:image/png;base64,AAAA'],
-        );
-        final vm = ReportWizardViewModel(
-          repository: repo,
-          initialDraft: draft,
-          civicAiService: ai,
-        );
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-        expect(vm.photoAi.status, equals(PhotoAiStatus.failed));
-        expect(vm.isPhotoAiBlockedForNextStep, isTrue);
-        vm.nextStep();
-        expect(vm.step, equals(1));
-        vm.dispose();
-        repo.dispose();
+    test('Multi-photo swap (unrelated + pothole) is blocked and offline Step 3 forces draft-only until online', () async {
+      final repo = ReportRepository(initialReports: const []);
+      repo.setOnlineStatus(true);
+      final ai = _PathAwareFakeCivicAiService({
+        'data:image/jpeg;base64,BAD1': const PhotoAiAnalysis(
+          status: PhotoAiStatus.notCivicIssue,
+          englishReason: 'Backyard',
+        ),
+        'data:image/jpeg;base64,GOOD2': const PhotoAiAnalysis(
+          status: PhotoAiStatus.analyzed,
+          detectedCategory: IssueCategory.pothole,
+          confidencePercent: 95,
+          photoVerificationToken: 'tok-good2',
+        ),
+      });
+      final vm = ReportWizardViewModel(
+        repository: repo,
+        initialCoordinates: const LatLng(11.5564, 104.9282),
+        civicAiService: ai,
+      );
+      vm.addLocalPhotoPath('data:image/jpeg;base64,BAD1');
+      vm.addLocalPhotoPath(
+        'data:image/jpeg;base64,GOOD2',
+        photoAnchor: PhotoLocationAnchor(
+          point: const LatLng(11.5564, 104.9282),
+          source: PhotoAnchorSource.liveCameraCapture,
+          capturedAt: DateTime.now(),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
 
-        String? sentMime;
-        final mockClient = MockClient((req) async {
-          final body = jsonDecode(req.body) as Map<String, dynamic>;
-          sentMime = body['mime_type'] as String?;
+      // Even though photo #2 is valid, photo #1 is unrelated -> blocked!
+      expect(vm.isPhotoAiBlockedForNextStep, isTrue);
+      expect(vm.canSubmitAtCurrentPin, isFalse);
+
+      // Remove unrelated photo #1 -> photo #2 re-verifies and unblocks.
+      vm.removeLocalPhotoAt(0);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(vm.isPhotoAiBlockedForNextStep, isFalse);
+      expect(vm.canSubmitAtCurrentPin, isTrue);
+
+      // Going offline while backend AI is configured -> auto-saves draft & blocks Step 3 submit.
+      repo.setOnlineStatus(false);
+      expect(vm.requiresOfflineDraftOnly, isTrue);
+      expect(vm.canSubmitAtCurrentPin, isFalse);
+      expect(repo.draft, isNotNull);
+      expect(repo.draft!.pinLat, closeTo(11.5564, 0.0001));
+
+      vm.dispose();
+      repo.dispose();
+    });
+
+    test('Backend 422 not_civic_issue or 409 duplicate_photo flips local report to SyncStatus.rejectedByAi', () async {
+      final mockClient = MockClient((req) async {
+        if (req.url.path == '/api/v1/auth/guest') {
           return http.Response(
-            jsonEncode({
-              'is_civic_issue': false,
-              'category': null,
-              'confidence_percent': 95,
-              'severity': 2,
-            }),
+            jsonEncode({'access_token': 'tok-1', 'user_id': 'u-1'}),
             200,
           );
-        });
-        final backendAi = BackendCivicAiService(
-          httpClient: mockClient,
-          baseUrl: 'http://localhost:8000',
-        );
-        final res = await backendAi.analyzeIssuePhoto(
-          imagePath: 'data:image/png;base64,AQID',
-          englishFirst: true,
-        );
-        expect(sentMime, equals('image/png'));
-        expect(res.status, equals(PhotoAiStatus.notCivicIssue));
-      },
-    );
+        }
+        if (req.url.path == '/api/v1/reports' && req.method == 'POST') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'detail': {
+                  'code': 'not_civic_issue',
+                  'english_reason': 'Rejected by server AI',
+                  'khmer_reason': 'បដិសេធដោយ AI',
+                },
+              }),
+            ),
+            422,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+      final api = CivicBackendApiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      final repo = ReportRepository(initialReports: const [], apiService: api);
+      final submitted = repo.submitReport(
+        category: IssueCategory.pothole,
+        description: 'Test',
+        severity: 3,
+        coordinates: const LatLng(11.5564, 104.9282),
+        isAnonymous: false,
+        localPhotoPath: 'data:image/jpeg;base64,/9j/4AAQ',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      final updated = repo.findById(submitted.report.id);
+      expect(updated, isNotNull);
+      expect(updated!.syncStatus, equals(SyncStatus.rejectedByAi));
+      expect(updated.aiRejectionReasonEnglish, equals('Rejected by server AI'));
+      repo.dispose();
+    });
   });
 }
 
@@ -3804,6 +3846,39 @@ class _FakeVoiceInputService implements VoiceInputService {
 
   @override
   Future<void> cancel() async {}
+}
+
+class _PathAwareFakeCivicAiService implements CivicAiService {
+  _PathAwareFakeCivicAiService(this.byPath);
+
+  final Map<String, PhotoAiAnalysis> byPath;
+
+  @override
+  bool get isBackendConfigured => true;
+
+  @override
+  Future<PhotoAiAnalysis> analyzeIssuePhoto({
+    required String imagePath,
+    required bool englishFirst,
+    String? descriptionHint,
+    bool forceRefresh = false,
+  }) async =>
+      byPath[imagePath] ??
+      const PhotoAiAnalysis(status: PhotoAiStatus.notCivicIssue);
+
+  @override
+  Future<AudioTranscriptionResult> transcribeVoiceAudio({
+    required String audioPath,
+    required bool englishFirst,
+  }) async => const AudioTranscriptionResult(success: false);
+
+  @override
+  Future<HelpChatReply> askHelpAssistant({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  }) async => const HelpChatReply(success: false, text: '');
 }
 
 class _UnconfiguredFakeCivicAiService implements CivicAiService {

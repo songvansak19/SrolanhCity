@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1.ai import get_ai_proxy_service
+from app.api.v1.citizen.reports import get_report_create_limiter
 from app.config import Settings
 from app.core.auth import UserRole, create_access_token
 from app.db.models.agency import Agency, Province
@@ -1013,3 +1014,129 @@ async def test_translate_text_rejects_thai_script_for_khmer_target() -> None:
     ).translate_text(req)
     assert ok_res.translated_text == "គម្របលូត្រូវបានស្ទះដោយថង់ប្លាស្ទិក"
     assert ok_res.target_lang == "km"
+
+
+def test_create_report_enforces_photo_hmac_duplicate_and_rate_limits(
+    sqlite_app: FastAPI,
+) -> None:
+    """Verify photo requirement, magic bytes, HMAC token, duplicate check, and rate limit."""
+    valid_jpeg = b"\xff\xd8\xff\xe0" + (b"\x11" * 1200) + b"\xff\xd9"
+    alt_jpeg = b"\xff\xd8\xff\xe0" + (b"\x22" * 1200) + b"\xff\xd9"
+    valid_b64 = base64.b64encode(valid_jpeg).decode("ascii")
+    alt_b64 = base64.b64encode(alt_jpeg).decode("ascii")
+
+    gemini_calls = 0
+    next_ai_response = (
+        '{"is_civic_issue": true, "is_public_space": true, "category": "pothole", '
+        '"confidence_percent": 92, "severity": 3}'
+    )
+
+    proxy = AiProxyService(
+        settings=Settings(
+            gemini_api_key="fake-key",
+            jwt_secret_key="test-secret-key",
+            offline_stub_db=False,
+        )
+    )
+
+    async def _fake_generate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        nonlocal gemini_calls
+        gemini_calls += 1
+        return SimpleNamespace(text=next_ai_response)
+
+    fake_client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=_fake_generate))
+    )
+    proxy._require_client = lambda: fake_client  # type: ignore[method-assign]
+
+    limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=3600)
+    sqlite_app.dependency_overrides[get_ai_proxy_service] = lambda: proxy
+    sqlite_app.dependency_overrides[get_report_create_limiter] = lambda: limiter
+
+    base_payload = {
+        "category": "pothole",
+        "description": "Deep pothole",
+        "lat": 11.5564,
+        "lng": 104.9282,
+        "severity": 3,
+        "is_anonymous": False,
+    }
+
+    try:
+        with TestClient(sqlite_app) as client:
+            # 1. Missing photo -> 422 photo_required
+            r_missing = client.post("/api/v1/reports", json=base_payload)
+            assert r_missing.status_code == 422
+            assert r_missing.json()["detail"]["code"] == "photo_required"
+
+            # 2. Invalid binary / tiny payload -> 400
+            r_tiny = client.post(
+                "/api/v1/reports",
+                json={
+                    **base_payload,
+                    "photo_base64": base64.b64encode(b"not-an-image").decode("ascii"),
+                },
+            )
+            assert r_tiny.status_code == 400
+
+            # 3. Classify legit photo -> receives HMAC photo_verification_token
+            r_cls = client.post(
+                "/api/v1/ai/classify-issue",
+                json={"image_base64": valid_b64, "mime_type": "image/jpeg", "language": "en"},
+            )
+            assert r_cls.status_code == 200
+            token = r_cls.json()["photo_verification_token"]
+            assert isinstance(token, str) and len(token) > 20
+            assert gemini_calls == 1
+
+            # 4. Create report with valid HMAC token -> 201 with ZERO second Gemini call
+            r_ok = client.post(
+                "/api/v1/reports",
+                json={
+                    **base_payload,
+                    "photo_base64": valid_b64,
+                    "photo_verification_token": token,
+                },
+            )
+            assert r_ok.status_code == 201
+            assert gemini_calls == 1
+
+            # 5. Re-submitting exact same photo on open report -> 409 duplicate_photo
+            r_dup = client.post(
+                "/api/v1/reports",
+                json={
+                    **base_payload,
+                    "lat": 11.5664,
+                    "photo_base64": valid_b64,
+                    "photo_verification_token": token,
+                },
+            )
+            assert r_dup.status_code == 409
+            assert r_dup.json()["detail"]["code"] == "duplicate_photo"
+
+            # 6. Tampered photo reusing valid token -> falls back to Gemini & rejects 422
+            next_ai_response = (
+                '{"is_civic_issue": false, "is_public_space": false, "category": null, '
+                '"confidence_percent": 95, "severity": 2, '
+                '"english_reason": "Private backyard"}'
+            )
+            r_tampered = client.post(
+                "/api/v1/reports",
+                json={
+                    **base_payload,
+                    "lat": 11.5764,
+                    "photo_base64": alt_b64,
+                    "photo_verification_token": token,
+                },
+            )
+            assert r_tampered.status_code == 422
+            assert r_tampered.json()["detail"]["code"] == "not_civic_issue"
+            assert gemini_calls == 2
+
+            # 7. Exceeding creation rate limit (5 requests used above) -> 429 rate_limited
+            r_rate = client.post("/api/v1/reports", json=base_payload)
+            assert r_rate.status_code == 429
+            assert r_rate.json()["detail"]["code"] == "rate_limited"
+    finally:
+        sqlite_app.dependency_overrides.pop(get_ai_proxy_service, None)
+        sqlite_app.dependency_overrides.pop(get_report_create_limiter, None)

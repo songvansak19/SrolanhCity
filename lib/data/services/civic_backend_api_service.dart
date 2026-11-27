@@ -31,6 +31,22 @@ class GuestAuthSession {
   final String userId;
 }
 
+class CreateReportOutcome {
+  const CreateReportOutcome({
+    this.report,
+    this.rejectedByAi = false,
+    this.duplicatePhoto = false,
+    this.khmerReason,
+    this.englishReason,
+  });
+
+  final CivicReport? report;
+  final bool rejectedByAi;
+  final bool duplicatePhoto;
+  final String? khmerReason;
+  final String? englishReason;
+}
+
 class CivicBackendApiService {
   CivicBackendApiService({
     this.httpClient,
@@ -162,8 +178,22 @@ class CivicBackendApiService {
     return reports;
   }
 
-  Future<CivicReport?> createReport(CivicReport report) async {
-    if (!isConfigured) return null;
+  Future<CivicReport?> createReport(
+    CivicReport report, {
+    String? photoVerificationToken,
+  }) async {
+    final outcome = await createReportDetailed(
+      report,
+      photoVerificationToken: photoVerificationToken,
+    );
+    return outcome.report;
+  }
+
+  Future<CreateReportOutcome> createReportDetailed(
+    CivicReport report, {
+    String? photoVerificationToken,
+  }) async {
+    if (!isConfigured) return const CreateReportOutcome();
     String? photoBase64;
     final photoPath = report.localPhotoPath;
     if (photoPath != null && photoPath.isNotEmpty) {
@@ -172,25 +202,64 @@ class CivicBackendApiService {
         photoBase64 = base64Encode(bytes);
       }
     }
-    final decoded = await _sendJson(
-      method: 'POST',
-      uri: _uri('/api/v1/reports'),
-      body: <String, dynamic>{
-        'category': report.category.name,
-        'description': report.description,
-        'lat': report.coordinates.latitude,
-        'lng': report.coordinates.longitude,
-        'severity': report.severity,
-        'is_anonymous': report.isAnonymous,
-        'khmer_location': report.khmerLocation,
-        'english_location': report.englishLocation,
-        'voice_transcript': ?report.voiceTranscript,
-        'photo_base64': ?photoBase64,
-        'exif_stripped': report.exifStripped,
-      },
-    );
-    if (decoded == null) return null;
-    return CivicReport.fromJson(decoded);
+    final client = httpClient ?? http.Client();
+    final shouldClose = httpClient == null;
+    try {
+      final response = await _dispatchWithAuthRetry(
+        client: client,
+        method: 'POST',
+        uri: _uri('/api/v1/reports'),
+        body: <String, dynamic>{
+          'category': report.category.name,
+          'description': report.description,
+          'lat': report.coordinates.latitude,
+          'lng': report.coordinates.longitude,
+          'severity': report.severity,
+          'is_anonymous': report.isAnonymous,
+          'khmer_location': report.khmerLocation,
+          'english_location': report.englishLocation,
+          'voice_transcript': ?report.voiceTranscript,
+          'photo_base64': ?photoBase64,
+          'photo_verification_token': ?photoVerificationToken,
+          'exif_stripped': report.exifStripped,
+        },
+      );
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          return CreateReportOutcome(report: CivicReport.fromJson(decoded));
+        }
+        return const CreateReportOutcome();
+      }
+      if (response.statusCode == 422 || response.statusCode == 409) {
+        final decoded = jsonDecode(response.body);
+        final detail = decoded is Map<String, dynamic>
+            ? decoded['detail']
+            : null;
+        if (detail is Map<String, dynamic>) {
+          final code = detail['code'] as String?;
+          if (code == 'not_civic_issue' || code == 'photo_required') {
+            return CreateReportOutcome(
+              rejectedByAi: true,
+              khmerReason: detail['khmer_reason'] as String?,
+              englishReason: detail['english_reason'] as String?,
+            );
+          }
+          if (code == 'duplicate_photo') {
+            return CreateReportOutcome(
+              duplicatePhoto: true,
+              khmerReason: detail['khmer_reason'] as String?,
+              englishReason: detail['english_reason'] as String?,
+            );
+          }
+        }
+      }
+      return const CreateReportOutcome();
+    } catch (_) {
+      return const CreateReportOutcome();
+    } finally {
+      if (shouldClose) client.close();
+    }
   }
 
   Future<CivicReport?> quickEditReport({

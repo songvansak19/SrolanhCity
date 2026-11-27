@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import uuid4
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.v1.ai import AiServiceDep
 from app.api.v1.citizen.auth import ensure_user_exists
 from app.api.v1.ws import report_ws_manager
 from app.core.auth import (
@@ -29,7 +31,7 @@ from app.db.models.report import (
     ReportTimelineEntry,
 )
 from app.db.session import get_db
-from app.schemas.ai import IssueCategoryEnum
+from app.schemas.ai import ClassifyIssueRequest, IssueCategoryEnum
 from app.schemas.comment import (
     CitizenCommentOut,
     SupportReasonCategoryEnum,
@@ -47,6 +49,12 @@ from app.schemas.report import (
     RoadClassEnum,
     TimelineEntrySchema,
 )
+from app.services.ai_proxy import (
+    AiProxyService,
+    AiRateLimitError,
+    AiUpstreamResponseError,
+    SlidingWindowRateLimiter,
+)
 from app.services.routing import GisRoutingService
 from app.services.spatial import SpatialService
 
@@ -57,6 +65,12 @@ CurrentUser = Annotated[TokenClaims, Depends(get_current_user)]
 OptionalUser = Annotated[TokenClaims | None, Depends(get_current_user_optional)]
 
 _WITHDRAWAL_WINDOW = timedelta(minutes=15)
+_report_create_limiter = SlidingWindowRateLimiter(max_requests=10, window_seconds=3600)
+
+
+def get_report_create_limiter() -> SlidingWindowRateLimiter:
+    """Dependency returning the report-creation sliding-window rate limiter."""
+    return _report_create_limiter
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
@@ -278,33 +292,141 @@ async def list_reports_viewport(
 @router.post("", response_model=ReportResponse, status_code=status.HTTP_201_CREATED)
 async def create_report(
     payload: ReportCreateRequest,
+    request: Request,
     db: DbSession,
     current_user: OptionalUser,
+    ai_service: AiServiceDep,
+    create_limiter: Annotated[
+        SlidingWindowRateLimiter, Depends(get_report_create_limiter)
+    ],
 ) -> ReportResponse:
-    """Create a civic report with Cambodia bounds check, EXIF stripping, GIS routing & priority."""
+    """Create a civic report with bounds, AI photo guard, EXIF stripping, GIS & priority."""
+    uid = current_user.sub if current_user else None
+    rate_key = uid or (request.client.host if request.client else "anonymous")
+    try:
+        create_limiter.check_and_record(rate_key)
+    except AiRateLimitError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": "rate_limited", "message": str(exc)},
+        ) from exc
+
     if not is_inside_cambodia(payload.lat, payload.lng):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Coordinates must be inside Cambodia bounds (lat 9.9..14.7, lng 102.3..107.7).",
         )
 
+    ai_enforcement_active = bool(ai_service.settings.gemini_api_key.strip())
+    if ai_enforcement_active and not payload.photo_base64:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "photo_required",
+                "english_reason": "A verified photo of the civic issue is required.",
+                "khmer_reason": "តម្រូវឱ្យមានរូបភាពពិតប្រាកដនៃបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈ។",
+            },
+        )
+
     exif_stripped = payload.exif_stripped
     stripped_photo_data_uri: str | None = None
+    photo_sha256: str | None = None
     if payload.photo_base64:
         try:
             raw_bytes = base64.b64decode(payload.photo_base64, validate=True)
-            stripped_bytes = strip_jpeg_metadata(raw_bytes)
-            exif_stripped = True
-            stripped_photo_data_uri = (
-                f"data:image/jpeg;base64,{base64.b64encode(stripped_bytes).decode('ascii')}"
-            )
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid base64 image payload.",
             ) from exc
 
-    uid = current_user.sub if current_user else None
+        if len(raw_bytes) > AiProxyService.MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="Image payload exceeds maximum allowed size (10 MiB).",
+            )
+        if ai_enforcement_active and len(raw_bytes) < AiProxyService.MIN_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Image file is too small or corrupted.",
+            )
+        detected_mime = AiProxyService.detect_image_mime(raw_bytes)
+        if detected_mime is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported or invalid image binary (JPEG, PNG, or WebP required).",
+            )
+
+        stripped_bytes = (
+            strip_jpeg_metadata(raw_bytes)
+            if detected_mime == "image/jpeg"
+            else raw_bytes
+        )
+        exif_stripped = True
+        photo_sha256 = hashlib.sha256(stripped_bytes).hexdigest()
+        stripped_photo_data_uri = (
+            f"data:{detected_mime};base64,{base64.b64encode(stripped_bytes).decode('ascii')}"
+        )
+
+        dup_stmt = (
+            sa.select(ReportPhoto.id)
+            .join(Report, ReportPhoto.report_id == Report.id)
+            .where(
+                ReportPhoto.photo_sha256 == photo_sha256,
+                ReportPhoto.is_after_proof.is_(False),
+                Report.status != ReportStatusEnum.RESOLVED.value,
+            )
+            .limit(1)
+        )
+        if (await db.execute(dup_stmt)).scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "duplicate_photo",
+                    "english_reason": "This exact photo is already attached to an open report.",
+                    "khmer_reason": "រូបភាពនេះត្រូវបានប្រើក្នុងរបាយការណ៍ដែលកំពុងបើករួចហើយ។",
+                },
+            )
+
+        if ai_enforcement_active:
+            token_valid = ai_service.verify_photo_verification_token(
+                payload.photo_verification_token,
+                photo_sha256,
+            )
+            if not token_valid:
+                try:
+                    ai_res = await ai_service.classify_issue(
+                        ClassifyIssueRequest(
+                            image_base64=base64.b64encode(stripped_bytes).decode("ascii"),
+                            mime_type=detected_mime,
+                            language="en",
+                            description_hint=None,
+                        ),
+                        client_key=rate_key,
+                    )
+                except AiRateLimitError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail={"code": "ai_rate_limited", "message": str(exc)},
+                    ) from exc
+                except AiUpstreamResponseError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={"code": "ai_unavailable", "message": str(exc)},
+                    ) from exc
+
+                if not ai_res.is_civic_issue:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail={
+                            "code": "not_civic_issue",
+                            "english_reason": ai_res.english_reason
+                            or "Photo does not clearly show a public civic infrastructure issue.",
+                            "khmer_reason": ai_res.khmer_reason
+                            or "រូបភាពនេះមិនបង្ហាញច្បាស់ពីបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈទេ។",
+                        },
+                    )
+
     await ensure_user_exists(db, uid)
     nearby_duplicate_ids: list[str] = []
     if not payload.force_create_new:
@@ -454,6 +576,7 @@ async def create_report(
             ReportPhoto(
                 report_id=report_id,
                 object_key=stripped_photo_data_uri,
+                photo_sha256=photo_sha256,
                 is_after_proof=False,
                 exif_stripped=True,
             )

@@ -31,6 +31,7 @@ class PhotoAiAnalysis {
     this.englishSummary,
     this.khmerReason,
     this.englishReason,
+    this.photoVerificationToken,
     this.errorMessage,
   });
 
@@ -58,6 +59,7 @@ class PhotoAiAnalysis {
   final String? englishSummary;
   final String? khmerReason;
   final String? englishReason;
+  final String? photoVerificationToken;
   final String? errorMessage;
 
   bool get hasDetectedIssue =>
@@ -435,6 +437,7 @@ class BackendCivicAiService implements CivicAiService {
         );
       }
 
+      final rawToken = (decoded['photo_verification_token'] as String?)?.trim();
       return PhotoAiAnalysis(
         status: PhotoAiStatus.analyzed,
         detectedCategory: category,
@@ -444,6 +447,7 @@ class BackendCivicAiService implements CivicAiService {
         englishSummary: enSummary?.isNotEmpty == true ? enSummary : null,
         khmerReason: khReason?.isNotEmpty == true ? khReason : null,
         englishReason: enReason?.isNotEmpty == true ? enReason : null,
+        photoVerificationToken: rawToken?.isNotEmpty == true ? rawToken : null,
       );
     } catch (_) {
       return const PhotoAiAnalysis(

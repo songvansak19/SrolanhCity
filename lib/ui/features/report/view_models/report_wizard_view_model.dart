@@ -89,6 +89,8 @@ class ReportWizardViewModel extends ChangeNotifier {
                  ).province.center
                : LocationService.phnomPenhCenter),
        _locationVerified = initialCoordinates != null {
+    _wasOnline = repository.isOnline;
+    repository.addListener(_onRepositoryChanged);
     if (initialDraft != null && initialDraft.hasPhotoAnchor) {
       final point = LatLng(
         initialDraft.photoAnchorLat!,
@@ -116,11 +118,20 @@ class ReportWizardViewModel extends ChangeNotifier {
         }
       }
     }
+    if (initialDraft != null &&
+        initialDraft.hasPinLocation &&
+        !_hasExplicitInitialCoordinates) {
+      final draftPin = LatLng(initialDraft.pinLat!, initialDraft.pinLng!);
+      if (LocationService.isInsideCambodia(draftPin)) {
+        _pinLocation = draftPin;
+        _locationVerified = true;
+      }
+    }
     if (_localPhotoPaths.isNotEmpty) {
       if (repository.isOnline && _civicAiService.isBackendConfigured) {
         _photoAi = PhotoAiAnalysis.analyzing;
       }
-      unawaited(analyzeLatestPhoto());
+      unawaited(analyzeAllPhotos());
     }
   }
 
@@ -150,7 +161,10 @@ class ReportWizardViewModel extends ChangeNotifier {
   bool _isCapturingCameraAnchor = false;
   bool _autoSavedPhotoAnchorDraft = false;
   PhotoAiAnalysis _photoAi = PhotoAiAnalysis.noPhoto;
+  final Map<String, PhotoAiAnalysis> _photoAiByPath =
+      <String, PhotoAiAnalysis>{};
   int _photoAnalysisGeneration = 0;
+  late bool _wasOnline;
 
   LatLng _pinLocation;
   GeocodedPlace? _geocodedPlace;
@@ -347,9 +361,17 @@ class ReportWizardViewModel extends ChangeNotifier {
     _ => null,
   };
 
+  /// True when the device is offline while a live backend is configured,
+  /// requiring the citizen to save a draft until internet returns.
+  bool get requiresOfflineDraftOnly =>
+      !repository.isOnline && _civicAiService.isBackendConfigured;
+
   /// Whether the citizen is currently permitted to submit at [pinLocation].
   bool get canSubmitAtCurrentPin =>
-      hasRequiredPhoto && locationEligibility.isAllowed;
+      hasRequiredPhoto &&
+      locationEligibility.isAllowed &&
+      !isPhotoAiBlockedForNextStep &&
+      !requiresOfflineDraftOnly;
 
   /// Layer 4 pre-strip photo EXIF assessment against the current pin.
   SpoofAssessment get photoExifAssessment => AntiSpoofService.evaluatePhotoExif(
@@ -532,6 +554,8 @@ class ReportWizardViewModel extends ChangeNotifier {
       photoAnchorLng: anchor?.point.longitude,
       photoAnchorSource: anchor?.source.name,
       photoAnchorCapturedAt: anchor?.capturedAt,
+      pinLat: _pinLocation.latitude,
+      pinLng: _pinLocation.longitude,
     );
   }
 
@@ -550,12 +574,20 @@ class ReportWizardViewModel extends ChangeNotifier {
   }
 
   bool get isPhotoAiBlockedForNextStep {
+    if (_localPhotoPaths.any(
+      (p) => _photoAiByPath[p]?.status == PhotoAiStatus.notCivicIssue,
+    )) {
+      return true;
+    }
     if (_photoAi.status == PhotoAiStatus.notCivicIssue) return true;
     if (_photoAi.status == PhotoAiStatus.analyzing) return true;
     if (repository.isOnline &&
         _civicAiService.isBackendConfigured &&
         hasRequiredPhoto &&
-        _photoAi.status != PhotoAiStatus.analyzed) {
+        (_photoAi.status != PhotoAiStatus.analyzed ||
+            _localPhotoPaths.any(
+              (p) => _photoAiByPath[p]?.status != PhotoAiStatus.analyzed,
+            ))) {
       return true;
     }
     return false;
@@ -566,6 +598,9 @@ class ReportWizardViewModel extends ChangeNotifier {
     if (_step == 1 && isPhotoAiBlockedForNextStep) return;
     if (_step < 2) {
       _step++;
+      if (_localPhotoPaths.isNotEmpty) {
+        saveDraft();
+      }
       notifyListeners();
       if (_step == 2) {
         unawaited(refreshIpIntegrityCheck());
@@ -759,8 +794,11 @@ class ReportWizardViewModel extends ChangeNotifier {
     _photoAnchors.add(resolvedAnchor);
     _maybeAutoSnapToAnchor(resolvedAnchor);
     _maybeAutoSavePhotoAnchorDraft();
+    if (repository.isOnline && _civicAiService.isBackendConfigured) {
+      _photoAi = PhotoAiAnalysis.analyzing;
+    }
     notifyListeners();
-    unawaited(analyzeLatestPhoto());
+    unawaited(analyzeAllPhotos());
     return true;
   }
 
@@ -792,15 +830,19 @@ class ReportWizardViewModel extends ChangeNotifier {
     if (added > 0) {
       _maybeAutoSnapToAnchor(firstFreshAnchor);
       _maybeAutoSavePhotoAnchorDraft();
+      if (repository.isOnline && _civicAiService.isBackendConfigured) {
+        _photoAi = PhotoAiAnalysis.analyzing;
+      }
       notifyListeners();
-      unawaited(analyzeLatestPhoto());
+      unawaited(analyzeAllPhotos());
     }
     return added;
   }
 
   void removeLocalPhotoAt(int index) {
     if (index < 0 || index >= _localPhotoPaths.length) return;
-    _localPhotoPaths.removeAt(index);
+    final removedPath = _localPhotoPaths.removeAt(index);
+    _photoAiByPath.remove(removedPath);
     if (index < _photoExifEntries.length) {
       _photoExifEntries.removeAt(index);
     }
@@ -814,16 +856,43 @@ class ReportWizardViewModel extends ChangeNotifier {
       _photoAnalysisGeneration++;
       _photoAi = PhotoAiAnalysis.noPhoto;
     } else {
-      unawaited(analyzeLatestPhoto());
+      if (repository.isOnline && _civicAiService.isBackendConfigured) {
+        _photoAi = PhotoAiAnalysis.analyzing;
+      }
+      unawaited(analyzeAllPhotos());
     }
     notifyListeners();
   }
 
-  /// Runs backend AI classification (`hackathonshow.md §4 Step 1`) on the
-  /// latest user-attached photo combined with any Khmer/English description.
-  Future<void> analyzeLatestPhoto({bool forceRefresh = false}) async {
-    final photoPath = latestLocalPhotoPath;
-    if (photoPath == null) {
+  void _onRepositoryChanged() {
+    if (_disposed) return;
+    final nowOnline = repository.isOnline;
+    if (nowOnline == _wasOnline) return;
+    _wasOnline = nowOnline;
+    if (!nowOnline) {
+      if (_localPhotoPaths.isNotEmpty) {
+        saveDraft();
+        _photoAi = PhotoAiAnalysis.offline;
+      }
+      notifyListeners();
+      return;
+    }
+    if (_localPhotoPaths.isNotEmpty) {
+      if (_civicAiService.isBackendConfigured) {
+        _photoAi = PhotoAiAnalysis.analyzing;
+      }
+      notifyListeners();
+      unawaited(analyzeAllPhotos());
+    }
+  }
+
+  /// Runs backend AI classification (`hackathonshow.md §4 Step 1`) on every
+  /// attached photo so no unrelated image can hide behind a valid second photo.
+  Future<void> analyzeLatestPhoto({bool forceRefresh = false}) =>
+      analyzeAllPhotos(forceRefresh: forceRefresh);
+
+  Future<void> analyzeAllPhotos({bool forceRefresh = false}) async {
+    if (_localPhotoPaths.isEmpty) {
       _photoAi = PhotoAiAnalysis.noPhoto;
       notifyListeners();
       return;
@@ -845,28 +914,54 @@ class ReportWizardViewModel extends ChangeNotifier {
     _photoAi = PhotoAiAnalysis.analyzing;
     notifyListeners();
 
-    final result = await _civicAiService.analyzeIssuePhoto(
-      imagePath: photoPath,
-      englishFirst: repository.settings.englishFirst,
-      descriptionHint: _description.trim().isNotEmpty ? _description : null,
-      forceRefresh: forceRefresh,
-    );
+    final pathsSnapshot = List<String>.of(_localPhotoPaths);
+    PhotoAiAnalysis? primaryResult;
 
-    if (_disposed || gen != _photoAnalysisGeneration) return;
-    _photoAi = result;
+    for (final path in pathsSnapshot) {
+      final cached = !forceRefresh ? _photoAiByPath[path] : null;
+      final PhotoAiAnalysis result;
+      if (cached != null && cached.status == PhotoAiStatus.analyzed) {
+        result = cached;
+      } else {
+        result = await _civicAiService.analyzeIssuePhoto(
+          imagePath: path,
+          englishFirst: repository.settings.englishFirst,
+          descriptionHint: _description.trim().isNotEmpty ? _description : null,
+          forceRefresh: forceRefresh,
+        );
+      }
 
-    if (result.hasDetectedIssue) {
-      final detected = result.detectedCategory!;
+      if (_disposed || gen != _photoAnalysisGeneration) return;
+      _photoAiByPath[path] = result;
+
+      if (result.status == PhotoAiStatus.notCivicIssue) {
+        _photoAi = result;
+        notifyListeners();
+        return;
+      }
+      if (result.status != PhotoAiStatus.analyzed) {
+        _photoAi = result;
+        notifyListeners();
+        return;
+      }
+      primaryResult ??= result;
+    }
+
+    final finalResult = primaryResult ?? PhotoAiAnalysis.noPhoto;
+    _photoAi = finalResult;
+
+    if (finalResult.hasDetectedIssue) {
+      final detected = finalResult.detectedCategory!;
       if (!_categoryLockedByUser || forceRefresh) {
         _category = detected;
       }
-      if (result.suggestedSeverity != null) {
-        _severity = result.suggestedSeverity!.clamp(1, 5);
+      if (finalResult.suggestedSeverity != null) {
+        _severity = finalResult.suggestedSeverity!.clamp(1, 5);
       }
       if (!_descriptionEditedByUser) {
         final summary = repository.settings.englishFirst
-            ? (result.englishSummary ?? result.khmerSummary)
-            : (result.khmerSummary ?? result.englishSummary);
+            ? (finalResult.englishSummary ?? finalResult.khmerSummary)
+            : (finalResult.khmerSummary ?? finalResult.englishSummary);
         if (summary != null && summary.trim().isNotEmpty) {
           _description = summary.trim();
         }
@@ -1468,12 +1563,16 @@ class ReportWizardViewModel extends ChangeNotifier {
       locationVerificationTier: verificationTier,
       targetMasterReportId: targetMasterId,
       forceCreateNew: createNew,
+      photoVerificationToken: localPhotoPath != null
+          ? _photoAiByPath[localPhotoPath!]?.photoVerificationToken
+          : null,
     );
   }
 
   @override
   void dispose() {
     _disposed = true;
+    repository.removeListener(_onRepositoryChanged);
     _stopAllVoiceTimers();
     unawaited(_voiceService.cancel());
     unawaited(_audioRecorder.dispose());

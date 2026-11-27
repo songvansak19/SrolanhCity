@@ -47,6 +47,7 @@ class ClassifyIssueResponse(BaseModel):
     english_summary: str | None = None
     khmer_reason: str | None = None
     english_reason: str | None = None
+    photo_verification_token: str | None = None
 
 
 class TranscribeVoiceRequest(BaseModel):

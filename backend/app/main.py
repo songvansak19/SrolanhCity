@@ -31,6 +31,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             "ALTER TABLE report_photos ALTER COLUMN object_key TYPE TEXT"
                         )
                     )
+                    await conn.execute(
+                        sa.text(
+                            "ALTER TABLE report_photos "
+                            "ADD COLUMN IF NOT EXISTS photo_sha256 VARCHAR(64)"
+                        )
+                    )
             factory = get_session_factory(engine)
             async with factory() as session:
                 await seed_reference_data(session)

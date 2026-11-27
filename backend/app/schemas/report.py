@@ -127,6 +127,9 @@ class ReportCreateRequest(BaseModel):
     )
     voice_transcript: str | None = Field(default=None, alias="voiceTranscript")
     photo_base64: str | None = Field(default=None, alias="photoBase64")
+    photo_verification_token: str | None = Field(
+        default=None, alias="photoVerificationToken"
+    )
     force_create_new: bool = Field(default=False, alias="forceCreateNew")
 
 
