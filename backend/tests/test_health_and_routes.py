@@ -981,3 +981,35 @@ async def test_classify_issue_public_space_and_confidence_guard() -> None:
     assert valid_res.category is not None
     assert valid_res.category.value == "pothole"
     assert valid_res.confidence_percent == 88
+
+
+@pytest.mark.asyncio
+async def test_translate_text_rejects_thai_script_for_khmer_target() -> None:
+    """Reject Thai script when translating to Khmer so client falls back cleanly."""
+    req = TranslateRequest(
+        text="Drain grate is packed with plastic bags; water stays stagnant for hours.",
+        targetLang="km",
+    )
+
+    def _make_proxy(raw_json: str) -> AiProxyService:
+        proxy = AiProxyService(settings=Settings(gemini_api_key="fake-key", offline_stub_db=True))
+
+        async def _fake_generate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(text=raw_json)
+
+        fake_client = SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=_fake_generate))
+        )
+        proxy._require_client = lambda: fake_client  # type: ignore[method-assign]
+        return proxy
+
+    with pytest.raises(AiUpstreamResponseError):
+        await _make_proxy(
+            '{"translated_text": "ตะแกรงระบายน้ำอัดแน่นไปด้วยถุงพลาสติก", "source_lang": "en"}'
+        ).translate_text(req)
+
+    ok_res = await _make_proxy(
+        '{"translated_text": "គម្របលូត្រូវបានស្ទះដោយថង់ប្លាស្ទិក", "source_lang": "en"}'
+    ).translate_text(req)
+    assert ok_res.translated_text == "គម្របលូត្រូវបានស្ទះដោយថង់ប្លាស្ទិក"
+    assert ok_res.target_lang == "km"

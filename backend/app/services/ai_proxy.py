@@ -363,6 +363,14 @@ class AiProxyService:
                 "Upstream AI provider returned invalid help-chat fields."
             ) from exc
 
+    @staticmethod
+    def _has_thai_script(text: str) -> bool:
+        return any("\u0e00" <= ch <= "\u0e7f" for ch in text)
+
+    @staticmethod
+    def _has_khmer_script(text: str) -> bool:
+        return any("\u1780" <= ch <= "\u17ff" for ch in text)
+
     async def translate_text(
         self,
         payload: TranslateRequest,
@@ -371,9 +379,18 @@ class AiProxyService:
     ) -> TranslateResponse:
         self.rate_limiter.check_and_record(client_key)
         client = self._require_client()
+        if payload.target_lang == "km":
+            instruction = (
+                "Translate the following civic report comment into Cambodian Khmer (ភាសាខ្មែរ) "
+                "using ONLY Khmer Unicode script (U+1780–U+17FF). NEVER output Thai, Lao, or "
+                "romanized text."
+            )
+        else:
+            instruction = (
+                "Translate the following civic report comment into clear, natural English."
+            )
         prompt = (
-            f"Translate the following civic report comment into '{payload.target_lang}' "
-            "(either Khmer 'km' or English 'en'). Respond ONLY with JSON containing "
+            f"{instruction} Respond ONLY with JSON containing "
             "translated_text (string) and source_lang ('km'|'en'|null).\n\n"
             f"Text: {payload.text}"
         )
@@ -386,6 +403,13 @@ class AiProxyService:
                 data.get("source_lang"), field_name="source_lang"
             )
             translated = (raw_translated or "").strip() or payload.text
+            if payload.target_lang == "km" and (
+                self._has_thai_script(translated)
+                or (not self._has_khmer_script(translated) and translated != payload.text)
+            ):
+                raise AiUpstreamResponseError(
+                    "Upstream AI provider returned non-Khmer script for 'km' translation."
+                )
             source_lang = raw_source_lang or payload.source_lang
             return TranslateResponse(
                 translated_text=translated,
@@ -393,6 +417,8 @@ class AiProxyService:
                 source_lang=source_lang if source_lang in {"en", "km"} else None,
                 provider="gemini_proxy",
             )
+        except AiUpstreamResponseError:
+            raise
         except (TypeError, ValueError, ValidationError) as exc:
             raise AiUpstreamResponseError(
                 "Upstream AI provider returned invalid translation fields."
