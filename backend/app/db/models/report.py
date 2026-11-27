@@ -102,7 +102,7 @@ class ReportPhoto(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    object_key: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    object_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
     is_after_proof: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False)
     exif_stripped: Mapped[bool] = mapped_column(sa.Boolean, default=True, nullable=False)
 

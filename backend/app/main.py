@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import sqlalchemy as sa
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,6 +25,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engine = get_engine(cfg.database_url)
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                if not cfg.database_url.startswith("sqlite"):
+                    await conn.execute(
+                        sa.text(
+                            "ALTER TABLE report_photos ALTER COLUMN object_key TYPE TEXT"
+                        )
+                    )
             factory = get_session_factory(engine)
             async with factory() as session:
                 await seed_reference_data(session)
