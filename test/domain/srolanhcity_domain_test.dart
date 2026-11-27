@@ -3920,6 +3920,112 @@ void main() {
       reopened.dispose();
       repo.dispose();
     });
+
+    test('CommentTranslationService & voice transcription enforce Khmer-else-English-only scripts', () async {
+      // 1. Translation client skips Thai/Chinese backend responses and accepts valid fallback.
+      final scriptFilterClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/ai/translate') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          final badText = body['target_lang'] == 'km'
+              ? 'น้ำท่วมถนน'
+              : 'នេះជាភាសាខ្មែរ';
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode(<String, dynamic>{'translated_text': badText}),
+            ),
+            200,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (request.url.host == 'translate.googleapis.com') {
+          final tl = request.url.queryParameters['tl'];
+          final okText = tl == 'km' ? 'ទឹកលិចផ្លូវ' : 'Flooded road';
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode([
+                [
+                  [okText, 'src'],
+                ],
+              ]),
+            ),
+            200,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        return http.Response('not found', 404);
+      });
+
+      final translator = HttpCommentTranslationService(
+        httpClient: scriptFilterClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      expect(
+        await translator.translate(text: 'Flooded road', targetLang: 'km'),
+        equals('ទឹកលិចផ្លូវ'),
+      );
+      expect(
+        await translator.translate(text: 'ទឹកលិចផ្លូវ', targetLang: 'en'),
+        equals('Flooded road'),
+      );
+
+      // Returns null when every provider returns third-language script.
+      final allBadClient = MockClient((request) async {
+        if (request.url.host == 'translate.googleapis.com') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode([
+                [
+                  ['道路积水', 'src'],
+                ],
+              ]),
+            ),
+            200,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        return http.Response('err', 500);
+      });
+      final allBadTranslator = HttpCommentTranslationService(
+        httpClient: allBadClient,
+      );
+      expect(
+        await allBadTranslator.translate(
+          text: 'Flooded road',
+          targetLang: 'km',
+        ),
+        isNull,
+      );
+
+      // 2. Voice transcription rejects Thai script and Khmer in English-only mode.
+      final voice = _FakeVoiceInputService(available: true);
+      final vm = ReportWizardViewModel(
+        repository: ReportRepository(),
+        voiceInputService: voice,
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: const _FakeIpGeoService(null),
+      );
+      await vm.toggleVoiceRecording();
+      voice.emitResult('มีหลุมขนาดใหญ่บนถนน', isFinal: true);
+      expect(vm.description, isEmpty);
+      expect(vm.voiceFeedbackEnglish, contains('Khmer or English only'));
+
+      vm.setVoicePreferEnglish(true);
+      await vm.toggleVoiceRecording();
+      voice.emitResult('មានរណ្តៅផ្លូវជ្រៅ', isFinal: true);
+      expect(vm.description, isEmpty);
+      expect(vm.voiceFeedbackEnglish, contains('English only'));
+
+      await vm.toggleVoiceRecording();
+      voice.emitResult('Deep pothole near school', isFinal: true);
+      expect(vm.description, equals('Deep pothole near school'));
+      vm.dispose();
+    });
   });
 }
 

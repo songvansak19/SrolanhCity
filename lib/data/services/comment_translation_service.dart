@@ -35,6 +35,65 @@ abstract class CommentTranslationService {
     if (latinChars > khmerChars) return 'km';
     return appEnglishFirst ? 'en' : 'km';
   }
+
+  static bool hasKhmerScript(String text) {
+    for (final rune in text.runes) {
+      if ((rune >= 0x1780 && rune <= 0x17FF) ||
+          (rune >= 0x19E0 && rune <= 0x19FF)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool hasAsciiEnglishLetters(String text) {
+    for (final rune in text.runes) {
+      if ((rune >= 0x41 && rune <= 0x5A) || (rune >= 0x61 && rune <= 0x7A)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool hasDisallowedScript(String text) {
+    for (final rune in text.runes) {
+      if ((rune >= 0x1780 && rune <= 0x17FF) ||
+          (rune >= 0x19E0 && rune <= 0x19FF)) {
+        continue;
+      }
+      if ((rune >= 0x00C0 &&
+              rune <= 0x02AF &&
+              rune != 0x00D7 &&
+              rune != 0x00F7) ||
+          (rune >= 0x1E00 && rune <= 0x1EFF) ||
+          (rune >= 0x0370 && rune <= 0x177F) ||
+          (rune >= 0x1800 && rune <= 0x19DF) ||
+          (rune >= 0x1A00 && rune <= 0x1DFF) ||
+          (rune >= 0x2C00 && rune <= 0xD7FF) ||
+          (rune >= 0xF900 && rune <= 0xFAFF) ||
+          (rune >= 0xFE30 && rune <= 0xFE4F) ||
+          (rune >= 0xFF00 && rune <= 0xFFEF)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool isValidTranslationOutput(
+    String text, {
+    required String targetLang,
+    String? sourceText,
+  }) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || hasDisallowedScript(trimmed)) return false;
+    final ref = sourceText ?? trimmed;
+    final hasLetters = hasKhmerScript(ref) || hasAsciiEnglishLetters(ref);
+    if (targetLang == 'km') {
+      return hasLetters ? hasKhmerScript(trimmed) : true;
+    }
+    if (hasKhmerScript(trimmed)) return false;
+    return hasLetters ? hasAsciiEnglishLetters(trimmed) : true;
+  }
 }
 
 /// CORS-friendly dual-provider Khmer ↔ English translation client with
@@ -47,6 +106,7 @@ class HttpCommentTranslationService implements CommentTranslationService {
       HttpCommentTranslationService();
   static const String _envBaseUrl = String.fromEnvironment('API_BASE_URL');
   static const String translatePath = '/api/v1/ai/translate';
+  static const Duration backendRequestTimeout = Duration(seconds: 15);
   static const Duration requestTimeout = Duration(seconds: 5);
   static const int _maxCacheEntries = 120;
 
@@ -136,12 +196,20 @@ class HttpCommentTranslationService implements CommentTranslationService {
               'target_lang': targetLang,
             }),
           )
-          .timeout(requestTimeout);
+          .timeout(backendRequestTimeout);
       if (response.statusCode != 200) return null;
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return null;
       final translated = (decoded['translated_text'] as String?)?.trim();
-      return (translated == null || translated.isEmpty) ? null : translated;
+      if (translated == null ||
+          !CommentTranslationService.isValidTranslationOutput(
+            translated,
+            targetLang: targetLang,
+            sourceText: text,
+          )) {
+        return null;
+      }
+      return translated;
     } catch (_) {
       return null;
     }
@@ -179,7 +247,15 @@ class HttpCommentTranslationService implements CommentTranslationService {
         }
       }
       final result = buffer.toString().trim();
-      return result.isEmpty ? null : result;
+      if (result.isEmpty ||
+          !CommentTranslationService.isValidTranslationOutput(
+            result,
+            targetLang: targetLang,
+            sourceText: text,
+          )) {
+        return null;
+      }
+      return result;
     } catch (_) {
       return null;
     }
@@ -205,7 +281,14 @@ class HttpCommentTranslationService implements CommentTranslationService {
       final responseData = decoded['responseData'];
       if (responseData is! Map<String, dynamic>) return null;
       final translated = (responseData['translatedText'] as String?)?.trim();
-      if (translated == null || translated.isEmpty) return null;
+      if (translated == null ||
+          !CommentTranslationService.isValidTranslationOutput(
+            translated,
+            targetLang: targetLang,
+            sourceText: text,
+          )) {
+        return null;
+      }
       return translated;
     } catch (_) {
       return null;

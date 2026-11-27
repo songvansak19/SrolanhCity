@@ -3371,7 +3371,7 @@ void main() {
     );
 
     testWidgets(
-      'HomePage shows multi-drafts, OfflineSyncBanner shows Resume CTA online, and Step 3 renders saved draft pins',
+      'OfflineSyncBanner collapses multi-drafts into expandable top list, hides them from HomePage, and Step 3 renders saved draft pins',
       (tester) async {
         final d1 = ReportDraft(
           id: 'd-one',
@@ -3408,19 +3408,36 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        // Starts collapsed on top bar and NOT duplicated on HomePage.
         expect(
-          find.byKey(const Key('banner-resume-draft-btn')),
+          find.byKey(const Key('banner-drafts-toggle-btn')),
           findsOneWidget,
         );
-        expect(find.byKey(const Key('home-draft-card-d-one')), findsOneWidget);
-        expect(find.byKey(const Key('home-draft-card-d-two')), findsOneWidget);
+        expect(find.byKey(const Key('banner-draft-item-d-one')), findsNothing);
+        expect(find.byKey(const Key('banner-draft-item-d-two')), findsNothing);
+        expect(find.text('Saved drafts (2)'), findsNothing);
+
+        // Press top bar -> expands both saved drafts in the dropdown list.
+        await tester.tap(find.byKey(const Key('banner-drafts-toggle-btn')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('banner-draft-item-d-one')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('banner-draft-item-d-two')),
+          findsOneWidget,
+        );
 
         // Discard d-two leaves d-one intact.
-        await tester.tap(find.byKey(const Key('home-draft-discard-d-two')));
+        await tester.tap(find.byKey(const Key('banner-draft-discard-d-two')));
         await tester.pumpAndSettle();
         expect(repo.draftCount, equals(1));
-        expect(find.byKey(const Key('home-draft-card-d-one')), findsOneWidget);
-        expect(find.byKey(const Key('home-draft-card-d-two')), findsNothing);
+        expect(
+          find.byKey(const Key('banner-draft-item-d-one')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('banner-draft-item-d-two')), findsNothing);
 
         // Open another wizard with a photo draft -> advance Step 2 -> Step 3 and verify d-one pin renders.
         final activeDraft = ReportDraft(
@@ -3741,7 +3758,7 @@ void main() {
           repo.saveDraft(d1);
           repo.saveDraft(d2);
 
-          // 1. MainShell (HomePage multi-drafts + OfflineSyncBanner) at 2.0x text scale.
+          // 1. MainShell (expandable top OfflineSyncBanner drafts list, collapsed & expanded) at 2.0x text scale.
           await tester.pumpWidget(
             ReportScope(
               repository: repo,
@@ -3757,11 +3774,27 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(
-            find.byKey(const Key('banner-resume-draft-btn')),
+            find.byKey(const Key('banner-drafts-toggle-btn')),
             findsOneWidget,
           );
           expect(
-            find.byKey(const Key('home-draft-card-wcag-d1')),
+            find.byKey(const Key('banner-draft-item-wcag-d1')),
+            findsNothing,
+          );
+          await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+          // Expand top drafts list at 2.0x text scale -> verify guidelines + Discard Undo.
+          await tester.tap(find.byKey(const Key('banner-drafts-toggle-btn')));
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const Key('banner-draft-item-wcag-d1')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const Key('banner-draft-item-wcag-d2')),
             findsOneWidget,
           );
           await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
@@ -3770,15 +3803,25 @@ void main() {
           await expectLater(tester, meetsGuideline(textContrastGuideline));
 
           // Verify Discard + Undo snackbar restores draft.
-          await tester.ensureVisible(
-            find.byKey(const Key('home-draft-discard-wcag-d2')),
+          await tester.tap(
+            find.byKey(const Key('banner-draft-discard-wcag-d2')),
           );
-          await tester.tap(find.byKey(const Key('home-draft-discard-wcag-d2')));
           await tester.pumpAndSettle();
           expect(repo.draftCount, equals(1));
           await tester.tap(find.text('Undo'));
           await tester.pumpAndSettle();
           expect(repo.draftCount, equals(2));
+
+          // Offline mode still exposes top expandable drafts toggle cleanly.
+          repo.setOnlineStatus(false);
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const Key('banner-drafts-toggle-btn')),
+            findsOneWidget,
+          );
+          await expectLater(tester, meetsGuideline(textContrastGuideline));
+          repo.setOnlineStatus(true);
+          await tester.pumpAndSettle();
 
           // 2. Step 2 AI quota exhausted footer at 2.0x text scale.
           final quotaDraft = ReportDraft(
@@ -3919,6 +3962,44 @@ void main() {
         }
       },
     );
+
+    testWidgets(
+      'Step 2 AI card shows Not a public street issue and hides Deep Pothole and Change on notCivicIssue',
+      (tester) async {
+        final repo = ReportRepository(
+          initialReports: const [],
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        final draft = ReportDraft(
+          id: 'd-not-civic',
+          category: IssueCategory.pothole,
+          severity: 3,
+          description: 'Indoor photo test',
+          isAnonymous: false,
+          localPhotoPaths: const ['data:image/jpeg;base64,/9j/4AAQ'],
+        );
+
+        await tester.pumpWidget(
+          ReportScope(
+            repository: repo,
+            child: MaterialApp(
+              theme: buildSrolanhCityTheme(),
+              home: ReportWizardPage(
+                initialDraft: draft,
+                civicAiService: _NotCivicTestAiService(),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('step2-ai-card')), findsOneWidget);
+        expect(find.text('Not a public street issue'), findsOneWidget);
+        expect(find.text('Deep Pothole'), findsNothing);
+        expect(find.textContaining('Change'), findsNothing);
+        expect(find.textContaining('indoor area'), findsOneWidget);
+      },
+    );
   });
 }
 
@@ -3985,6 +4066,38 @@ class _RateLimitedTestAiService implements CivicAiService {
   }) async => const PhotoAiAnalysis(
     status: PhotoAiStatus.rateLimited,
     errorMessage: 'Quota exhausted',
+  );
+
+  @override
+  Future<AudioTranscriptionResult> transcribeVoiceAudio({
+    required String audioPath,
+    required bool englishFirst,
+  }) async => const AudioTranscriptionResult(success: false);
+
+  @override
+  Future<HelpChatReply> askHelpAssistant({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  }) async => const HelpChatReply(success: false, text: '');
+}
+
+class _NotCivicTestAiService implements CivicAiService {
+  @override
+  bool get isBackendConfigured => true;
+
+  @override
+  Future<PhotoAiAnalysis> analyzeIssuePhoto({
+    required String imagePath,
+    required bool englishFirst,
+    String? descriptionHint,
+    bool forceRefresh = false,
+  }) async => const PhotoAiAnalysis(
+    status: PhotoAiStatus.notCivicIssue,
+    confidencePercent: 95,
+    khmerReason: 'រូបភាពនេះបង្ហាញពីទីតាំងឯកជន ឬក្នុងផ្ទះ មិនមែនជាបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈទេ។',
+    englishReason: 'This photo shows a private indoor area rather than a public street issue.',
   );
 
   @override

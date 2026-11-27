@@ -2407,6 +2407,8 @@ class _ReportWizardPageState extends State<ReportWizardPage>
       _ => null,
     };
 
+    final isNotCivic = photoAi.status == PhotoAiStatus.notCivicIssue;
+
     return Container(
       key: const Key('step2-ai-card'),
       padding: const EdgeInsets.all(14),
@@ -2428,36 +2430,43 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                     const SizedBox(height: 6),
                     BilingualText(
                       bilingual: tr,
-                      khmer: vm.category.defaultKhmerTitle,
-                      english: vm.category.defaultEnglishTitle,
+                      khmer: isNotCivic
+                          ? 'មិនមែនជាបញ្ហាសាធារណៈ'
+                          : vm.category.defaultKhmerTitle,
+                      english: isNotCivic
+                          ? 'Not a public street issue'
+                          : vm.category.defaultEnglishTitle,
+                      color: isNotCivic ? AppColors.saffronInk : AppColors.ink,
                       fontSize: 15,
                     ),
                   ],
                 ),
               ),
-              if (textAi.matchedFromText &&
-                  textAi.category != vm.category &&
-                  !photoAi.hasDetectedIssue)
-                TextButton(
-                  onPressed: vm.applyAiSuggestedCategory,
-                  child: Text(
-                    tr.primary(
-                      'ប្រើ ${textAi.category.khmerName}',
-                      'Use ${textAi.category.englishName}',
+              if (!isNotCivic) ...[
+                if (textAi.matchedFromText &&
+                    textAi.category != vm.category &&
+                    !photoAi.hasDetectedIssue)
+                  TextButton(
+                    onPressed: vm.applyAiSuggestedCategory,
+                    child: Text(
+                      tr.primary(
+                        'ប្រើ ${textAi.category.khmerName}',
+                        'Use ${textAi.category.englishName}',
+                      ),
+                    ),
+                  )
+                else
+                  TextButton(
+                    onPressed: () => _showCategoryPickerSheet(vm, tr),
+                    child: Text(
+                      tr.paired('កែ', 'Change'),
+                      style: const TextStyle(
+                        color: AppColors.teal,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                )
-              else
-                TextButton(
-                  onPressed: () => _showCategoryPickerSheet(vm, tr),
-                  child: Text(
-                    tr.paired('កែ', 'Change'),
-                    style: const TextStyle(
-                      color: AppColors.teal,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
+              ],
             ],
           ),
           if (detailLine != null) ...[

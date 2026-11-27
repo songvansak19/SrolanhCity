@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../../data/repositories/report_repository.dart';
 import '../../../../data/services/audio_recorder_service.dart';
 import '../../../../data/services/civic_ai_service.dart';
+import '../../../../data/services/comment_translation_service.dart';
 import '../../../../data/services/exif_stripper.dart';
 import '../../../../data/services/ip_geolocation_service.dart';
 import '../../../../data/services/location_service.dart';
@@ -1293,19 +1294,26 @@ class ReportWizardViewModel extends ChangeNotifier {
         onResult: (words, isFinal) {
           if (_disposed) return;
           final trimmed = words.trim();
+          var rejectedUnsupportedScript = false;
           if (trimmed.isNotEmpty) {
-            _receivedSpeechInSession = true;
-            _clearVoiceFeedback();
-            _voiceTranscript = trimmed;
-            _description = trimmed;
-            _descriptionEditedByUser = true;
+            if (_isSupportedVoiceTranscript(trimmed)) {
+              _receivedSpeechInSession = true;
+              _clearVoiceFeedback();
+              _voiceTranscript = trimmed;
+              _description = trimmed;
+              _descriptionEditedByUser = true;
+            } else {
+              rejectedUnsupportedScript = true;
+            }
           }
           if (isFinal) {
             _stopAllVoiceTimers();
             _isRecordingVoice = false;
             _isHoldRecording = false;
             _voiceSoundLevel = 0.0;
-            if (!_receivedSpeechInSession) {
+            if (rejectedUnsupportedScript) {
+              _setUnsupportedLanguageFeedback();
+            } else if (!_receivedSpeechInSession) {
               _setNoSpeechFeedback();
             }
           }
@@ -1383,6 +1391,26 @@ class ReportWizardViewModel extends ChangeNotifier {
     _finishDemoRecording();
   }
 
+  bool _isSupportedVoiceTranscript(String text) {
+    if (CommentTranslationService.hasDisallowedScript(text)) return false;
+    if (_voicePreferEnglish && CommentTranslationService.hasKhmerScript(text)) {
+      return false;
+    }
+    return true;
+  }
+
+  void _setUnsupportedLanguageFeedback() {
+    _setVoiceFeedback(
+      khmer: _voicePreferEnglish
+          ? 'សូមនិយាយជាភាសាអង់គ្លេសប៉ុណ្ណោះ'
+          : 'សូមនិយាយជាភាសាខ្មែរ ឬភាសាអង់គ្លេសប៉ុណ្ណោះ',
+      english: _voicePreferEnglish
+          ? 'Please speak in English only.'
+          : 'Please speak in Khmer or English only.',
+      offerDemoFallback: true,
+    );
+  }
+
   Future<void> _finishBackendAudioRecording() async {
     _isRecordingVoice = false;
     _isHoldRecording = false;
@@ -1421,15 +1449,19 @@ class ReportWizardViewModel extends ChangeNotifier {
           result.transcript != null &&
           result.transcript!.trim().isNotEmpty) {
         final spoken = result.transcript!.trim();
-        _voiceTranscript = spoken;
-        _description = spoken;
-        _descriptionEditedByUser = true;
-        _clearVoiceFeedback();
+        if (!_isSupportedVoiceTranscript(spoken)) {
+          _setUnsupportedLanguageFeedback();
+        } else {
+          _voiceTranscript = spoken;
+          _description = spoken;
+          _descriptionEditedByUser = true;
+          _clearVoiceFeedback();
 
-        if (result.detectedCategory != null &&
-            !_categoryLockedByUser &&
-            !_photoAi.hasDetectedIssue) {
-          _category = result.detectedCategory!;
+          if (result.detectedCategory != null &&
+              !_categoryLockedByUser &&
+              !_photoAi.hasDetectedIssue) {
+            _category = result.detectedCategory!;
+          }
         }
       } else if (result.isRateLimited) {
         _setVoiceFeedback(

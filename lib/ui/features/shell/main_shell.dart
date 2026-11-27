@@ -62,7 +62,6 @@ class _MainShellState extends State<MainShell> {
         onReport: () => _openReport(),
         onSelectCategory: (cat) => _openReport(initialCategory: cat),
         onOpenMap: () => _selectTab(1),
-        onResumeDraft: (draft) => _openReport(draft: draft),
       ),
       if (_visitedTabs.contains(1))
         MapPage(onBack: () => _selectTab(0))
@@ -95,7 +94,9 @@ class _MainShellState extends State<MainShell> {
     Widget buildBodyStack() {
       return Column(
         children: [
-          const OfflineSyncBanner(),
+          OfflineSyncBanner(
+            onResumeDraft: (draft) => _openReport(draft: draft),
+          ),
           Expanded(
             child: MediaQuery.removePadding(
               context: context,

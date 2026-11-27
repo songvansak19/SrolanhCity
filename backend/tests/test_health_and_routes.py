@@ -1195,3 +1195,90 @@ def test_ai_proxy_fallback_model_and_429_quota_handling(stub_app: FastAPI) -> No
             ]
     finally:
         stub_app.dependency_overrides.pop(get_ai_proxy_service, None)
+
+
+@pytest.mark.asyncio
+async def test_ai_sanitizes_prompt_leaks_and_enforces_khmer_or_english_only() -> None:
+    """Sanitize leaked schema tokens in classify_issue and enforce Khmer-else-English scripts."""
+    from app.schemas.ai import ClassifyIssueRequest, TranscribeVoiceRequest
+
+    sample_b64 = base64.b64encode(b"\xff\xd8\xff\xe0" + (b"\x11" * 100)).decode("ascii")
+    responses: list[str] = []
+
+    proxy = AiProxyService(settings=Settings(gemini_api_key="fake-key", offline_stub_db=True))
+
+    async def _fake_generate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(text=responses.pop(0))
+
+    fake_client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=_fake_generate))
+    )
+    proxy._require_client = lambda: fake_client  # type: ignore[method-assign]
+
+    # 1. classify_issue scrubs leaked prompt/rule tokens & Thai script into polite Khmer/English.
+    responses.append(
+        '{"is_civic_issue": false, "is_public_space": false, "category": null, '
+        '"confidence_percent": 95, "severity": 2, '
+        '"khmer_reason": "យោងតាមច្បាប់ចំណាត់ថ្នាក់ រូបភាពក្នុងបន្ទប់ត្រូវកំណត់ថា '
+        'is_civic_issue=false និង is_public_space=false", '
+        '"english_reason": "Inside a bedroom so is_public_space=false"}'
+    )
+    cls_res = await proxy.classify_issue(
+        ClassifyIssueRequest(image_base64=sample_b64, mime_type="image/jpeg", language="km")
+    )
+    assert cls_res.is_civic_issue is False
+    assert cls_res.category is None
+    assert "is_civic_issue" not in (cls_res.khmer_reason or "")
+    assert "is_public_space" not in (cls_res.english_reason or "")
+    assert cls_res.khmer_reason and cls_res.english_reason
+
+    # 2. transcribe_voice rejects Thai, retries once, and accepts Khmer (or English fallback).
+    responses.extend(
+        [
+            '{"transcript": "หลุมขนาดใหญ่บนถนน", "category": "pothole"}',
+            '{"transcript": "មានរណ្តៅផ្លូវជ្រៅនៅកណ្តាលផ្លូវ", "category": "pothole"}',
+        ]
+    )
+    tr_km_ok = await proxy.transcribe_voice(
+        TranscribeVoiceRequest(audio_base64=sample_b64, mime_type="audio/aac", language="km")
+    )
+    assert tr_km_ok.transcript == "មានរណ្តៅផ្លូវជ្រៅនៅកណ្តាលផ្លូវ"
+
+    # When language == "km", English fallback is allowed if audio is spoken in English.
+    responses.append('{"transcript": "Deep pothole near school", "category": "pothole"}')
+    tr_en_fallback = await proxy.transcribe_voice(
+        TranscribeVoiceRequest(audio_base64=sample_b64, mime_type="audio/aac", language="km")
+    )
+    assert tr_en_fallback.transcript == "Deep pothole near school"
+
+    # When language == "en", Khmer script fails & retries; if retry still Khmer/Thai -> 502.
+    responses.extend(
+        [
+            '{"transcript": "មានរណ្តៅផ្លូវ", "category": "pothole"}',
+            '{"transcript": "ยังมีหลุม", "category": "pothole"}',
+        ]
+    )
+    with pytest.raises(AiUpstreamResponseError):
+        await proxy.transcribe_voice(
+            TranscribeVoiceRequest(audio_base64=sample_b64, mime_type="audio/aac", language="en")
+        )
+
+    # 3. translate_text rejects Khmer/Thai for targetLang="en" & retries into clean English.
+    responses.extend(
+        [
+            '{"translated_text": "នេះជាការបកប្រែ", "source_lang": "km"}',
+            '{"translated_text": "This is a deep pothole", "source_lang": "km"}',
+        ]
+    )
+    tl_en = await proxy.translate_text(TranslateRequest(text="នេះជារណ្តៅផ្លូវជ្រៅ", targetLang="en"))
+    assert tl_en.translated_text == "This is a deep pothole"
+
+    # translate_text targetLang="km" rejects Chinese and fails cleanly if retry stays invalid.
+    responses.extend(
+        [
+            '{"translated_text": "路上有坑洞", "source_lang": "en"}',
+            '{"translated_text": "路上大坑", "source_lang": "en"}',
+        ]
+    )
+    with pytest.raises(AiUpstreamResponseError):
+        await proxy.translate_text(TranslateRequest(text="Deep pothole", targetLang="km"))
