@@ -1652,7 +1652,7 @@ class ReportRepository extends ChangeNotifier {
     final remoteAlerts = await apiService.fetchAlerts();
     var changed = false;
 
-    if (remoteReports != null && remoteReports.isNotEmpty) {
+    if (remoteReports != null) {
       final pending = _reports
           .where((r) => r.syncStatus == SyncStatus.pendingSync)
           .toList(growable: false);
