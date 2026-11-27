@@ -13,6 +13,7 @@ import 'package:srolanhcity/data/services/photo_media_types.dart';
 import 'package:srolanhcity/data/services/reverse_geocoding_service.dart';
 import 'package:srolanhcity/data/services/voice_input_service.dart';
 import 'package:srolanhcity/domain/models/report_models.dart';
+import 'package:srolanhcity/domain/models/routing_result.dart';
 import 'package:srolanhcity/domain/services/report_location_eligibility_service.dart';
 import 'package:srolanhcity/main.dart';
 import 'package:srolanhcity/ui/core/report_scope.dart';
@@ -29,6 +30,7 @@ import 'package:srolanhcity/ui/features/profile/edit_profile_page.dart';
 import 'package:srolanhcity/ui/features/profile/my_reports_page.dart';
 import 'package:srolanhcity/ui/features/profile/profile_page.dart';
 import 'package:srolanhcity/ui/features/report/views/fake_gps_page.dart';
+import 'package:srolanhcity/ui/features/report/views/report_submitted_page.dart';
 import 'package:srolanhcity/ui/features/report/views/report_wizard_page.dart';
 import 'package:srolanhcity/ui/features/shell/main_shell.dart';
 import 'package:srolanhcity/ui/features/tracking/tracking_page.dart';
@@ -3437,6 +3439,7 @@ void main() {
           ReportScope(
             repository: repo,
             child: MaterialApp(
+              key: const ValueKey('home-draft-step3-verify-app'),
               home: ReportWizardPage(
                 initialDraft: activeDraft,
                 locationService: const _FakeLocationService(
@@ -3465,6 +3468,455 @@ void main() {
           find.byKey(const Key('step3-nearby-draft-warning')),
           findsOneWidget,
         );
+      },
+    );
+
+    testWidgets(
+      'Step 2 shows Save draft CTA when AI quota is rateLimited and blocks Next',
+      (tester) async {
+        final repo = ReportRepository(
+          initialReports: const [],
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        final draft = ReportDraft(
+          id: 'd-rate-limit',
+          category: IssueCategory.pothole,
+          severity: 3,
+          description: 'Quota test',
+          isAnonymous: false,
+          localPhotoPaths: const ['data:image/jpeg;base64,/9j/4AAQ'],
+        );
+
+        await tester.pumpWidget(
+          ReportScope(
+            repository: repo,
+            child: MaterialApp(
+              home: Scaffold(
+                body: Builder(
+                  builder: (ctx) => Center(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.push(
+                        ctx,
+                        MaterialPageRoute<void>(
+                          builder: (_) => ReportWizardPage(
+                            initialDraft: draft,
+                            civicAiService: _RateLimitedTestAiService(),
+                          ),
+                        ),
+                      ),
+                      child: const Text('Open'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+
+        final nextBtn = tester.widget<FilledButton>(
+          find.byKey(const Key('step2-confirm-location-btn')),
+        );
+        expect(nextBtn.onPressed, isNull);
+        expect(
+          find.byKey(const Key('step2-footer-save-draft-btn')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.byKey(const Key('step2-footer-save-draft-btn')));
+        await tester.pumpAndSettle();
+        expect(repo.draftCount, equals(1));
+        expect(repo.drafts.first.id, equals('d-rate-limit'));
+      },
+    );
+
+    testWidgets(
+      'Step 3 hides different-category reports & drafts by default, excludes rejectedByAi, and toggles via filter pill',
+      (tester) async {
+        final base = ReportRepository().findById('#SC-20481')!;
+        final potholeReport = CivicReport.fromJson({
+          ...base.toJson(),
+          'id': '#SC-POT1',
+          'category': IssueCategory.pothole.name,
+          'lat': 11.55642,
+          'lng': 104.92822,
+          'status': ReportStatus.submitted.name,
+          'syncStatus': SyncStatus.synced.name,
+          'isMine': false,
+          'createdByCurrentUser': false,
+          'joinedByCurrentUser': false,
+        });
+        final trashReport = CivicReport.fromJson({
+          ...base.toJson(),
+          'id': '#SC-TRH1',
+          'category': IssueCategory.trash.name,
+          'lat': 11.55655,
+          'lng': 104.92835,
+          'status': ReportStatus.submitted.name,
+          'syncStatus': SyncStatus.synced.name,
+          'isMine': false,
+          'createdByCurrentUser': false,
+          'joinedByCurrentUser': false,
+        });
+        final rejectedPothole = CivicReport.fromJson({
+          ...base.toJson(),
+          'id': '#SC-REJ-POT',
+          'category': IssueCategory.pothole.name,
+          'lat': 11.55644,
+          'lng': 104.92824,
+          'status': ReportStatus.submitted.name,
+          'syncStatus': SyncStatus.rejectedByAi.name,
+          'isMine': true,
+          'createdByCurrentUser': true,
+          'joinedByCurrentUser': true,
+        });
+        final repo = ReportRepository(
+          initialReports: [potholeReport, trashReport, rejectedPothole],
+          initialSettings: const AppSettings(englishFirst: true),
+        );
+        repo.saveDraft(
+          ReportDraft(
+            id: 'd-pot',
+            category: IssueCategory.pothole,
+            severity: 3,
+            description: 'Pothole draft',
+            isAnonymous: false,
+            localPhotoPaths: const [],
+            pinLat: 11.55648,
+            pinLng: 104.92828,
+          ),
+        );
+        repo.saveDraft(
+          ReportDraft(
+            id: 'd-drn',
+            category: IssueCategory.drain,
+            severity: 4,
+            description: 'Drain draft',
+            isAnonymous: false,
+            localPhotoPaths: const [],
+            pinLat: 11.55660,
+            pinLng: 104.92840,
+          ),
+        );
+
+        final activeDraft = ReportDraft(
+          id: 'd-active',
+          category: IssueCategory.pothole,
+          severity: 3,
+          description: 'Active pothole report',
+          isAnonymous: false,
+          localPhotoPaths: const ['sample-photo.jpg'],
+          photoAnchorLat: 11.55645,
+          photoAnchorLng: 104.92825,
+          photoAnchorSource: 'liveCameraCapture',
+          photoAnchorCapturedAt: DateTime.now(),
+        );
+
+        await tester.pumpWidget(
+          ReportScope(
+            repository: repo,
+            child: MaterialApp(
+              key: const ValueKey('home-draft-step3-verify-app'),
+              home: ReportWizardPage(
+                initialDraft: activeDraft,
+                locationService: const _FakeLocationService(
+                  LocationSuccess(
+                    point: LatLng(11.55645, 104.92825),
+                    accuracyMeters: 10,
+                    isOutsideCambodia: false,
+                  ),
+                ),
+                civicAiService: _UnconfiguredTestAiService(),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('step2-confirm-location-btn')));
+        await tester.pumpAndSettle();
+
+        // Category-only default hides trash report, drain draft, and rejectedByAi pothole.
+        expect(
+          find.byKey(const Key('step3-report-pin-#SC-POT1')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('step3-report-pin-#SC-TRH1')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('step3-report-pin-#SC-REJ-POT')),
+          findsNothing,
+        );
+        expect(find.byKey(const Key('step3-draft-pin-d-pot')), findsOneWidget);
+        expect(find.byKey(const Key('step3-draft-pin-d-drn')), findsNothing);
+        expect(
+          find.byKey(const Key('step3-category-filter-pill')),
+          findsOneWidget,
+        );
+        expect(find.text('Pothole only'), findsOneWidget);
+
+        // Tapping pill reveals other-category pins/drafts while keeping rejectedByAi hidden.
+        await tester.tap(find.byKey(const Key('step3-category-filter-pill')));
+        await tester.pumpAndSettle();
+        expect(find.text('All types'), findsOneWidget);
+        expect(
+          find.byKey(const Key('step3-report-pin-#SC-TRH1')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('step3-draft-pin-d-drn')), findsOneWidget);
+        expect(
+          find.byKey(const Key('step3-report-pin-#SC-REJ-POT')),
+          findsNothing,
+        );
+
+        // Tapping again hides different-category pins/drafts.
+        await tester.tap(find.byKey(const Key('step3-category-filter-pill')));
+        await tester.pumpAndSettle();
+        expect(find.text('Pothole only'), findsOneWidget);
+        expect(
+          find.byKey(const Key('step3-report-pin-#SC-TRH1')),
+          findsNothing,
+        );
+        expect(find.byKey(const Key('step3-draft-pin-d-drn')), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'Multi-drafts, Step 2 quota fallback, Step 3 filter/pins, and ReportSubmittedPage meet WCAG 2.1 AA and 2.0x text scaling',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        try {
+          final base = ReportRepository().findById('#SC-20481')!;
+          final potholeReport = CivicReport.fromJson({
+            ...base.toJson(),
+            'id': '#SC-WCAG-POT',
+            'category': IssueCategory.pothole.name,
+            'lat': 11.55642,
+            'lng': 104.92822,
+            'status': ReportStatus.submitted.name,
+            'syncStatus': SyncStatus.synced.name,
+            'isMine': false,
+            'createdByCurrentUser': false,
+            'joinedByCurrentUser': false,
+          });
+          final trashReport = CivicReport.fromJson({
+            ...base.toJson(),
+            'id': '#SC-WCAG-TRH',
+            'category': IssueCategory.trash.name,
+            'lat': 11.55660,
+            'lng': 104.92840,
+            'status': ReportStatus.submitted.name,
+            'syncStatus': SyncStatus.synced.name,
+            'isMine': false,
+            'createdByCurrentUser': false,
+            'joinedByCurrentUser': false,
+          });
+          final repo = ReportRepository(
+            initialReports: [potholeReport, trashReport],
+            initialSettings: const AppSettings(englishFirst: true),
+          );
+          final d1 = ReportDraft(
+            id: 'wcag-d1',
+            category: IssueCategory.pothole,
+            severity: 3,
+            description: 'Corner pothole draft',
+            isAnonymous: false,
+            localPhotoPaths: const [],
+            pinLat: 11.55646,
+            pinLng: 104.92826,
+          );
+          final d2 = ReportDraft(
+            id: 'wcag-d2',
+            category: IssueCategory.drain,
+            severity: 4,
+            description: 'Blocked drain draft',
+            isAnonymous: false,
+            localPhotoPaths: const [],
+            pinLat: 11.55670,
+            pinLng: 104.92850,
+          );
+          repo.saveDraft(d1);
+          repo.saveDraft(d2);
+
+          // 1. MainShell (HomePage multi-drafts + OfflineSyncBanner) at 2.0x text scale.
+          await tester.pumpWidget(
+            ReportScope(
+              repository: repo,
+              child: MaterialApp(
+                theme: buildSrolanhCityTheme(),
+                home: MediaQuery.withClampedTextScaling(
+                  minScaleFactor: 2.0,
+                  maxScaleFactor: 2.0,
+                  child: const MainShell(),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const Key('banner-resume-draft-btn')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const Key('home-draft-card-wcag-d1')),
+            findsOneWidget,
+          );
+          await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+          // Verify Discard + Undo snackbar restores draft.
+          await tester.ensureVisible(
+            find.byKey(const Key('home-draft-discard-wcag-d2')),
+          );
+          await tester.tap(find.byKey(const Key('home-draft-discard-wcag-d2')));
+          await tester.pumpAndSettle();
+          expect(repo.draftCount, equals(1));
+          await tester.tap(find.text('Undo'));
+          await tester.pumpAndSettle();
+          expect(repo.draftCount, equals(2));
+
+          // 2. Step 2 AI quota exhausted footer at 2.0x text scale.
+          final quotaDraft = ReportDraft(
+            id: 'wcag-quota',
+            category: IssueCategory.pothole,
+            severity: 3,
+            description: 'Quota fallback check',
+            isAnonymous: false,
+            localPhotoPaths: const ['data:image/jpeg;base64,/9j/4AAQ'],
+          );
+          await tester.pumpWidget(
+            ReportScope(
+              repository: repo,
+              child: MaterialApp(
+                key: const ValueKey('wcag-quota-app'),
+                theme: buildSrolanhCityTheme(),
+                home: MediaQuery.withClampedTextScaling(
+                  minScaleFactor: 2.0,
+                  maxScaleFactor: 2.0,
+                  child: ReportWizardPage(
+                    initialDraft: quotaDraft,
+                    civicAiService: _RateLimitedTestAiService(),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const Key('step2-footer-retry-ai-btn')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const Key('step2-footer-save-draft-btn')),
+            findsOneWidget,
+          );
+          await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+          // 3. Step 3 category filter pill + draft pins + nearby warning (filtered, All types, & collapsed at 2.0x).
+          final activeDraft = ReportDraft(
+            id: 'wcag-step3',
+            category: IssueCategory.pothole,
+            severity: 3,
+            description: 'Step 3 check',
+            isAnonymous: false,
+            localPhotoPaths: const ['sample-photo.jpg'],
+            photoAnchorLat: 11.55645,
+            photoAnchorLng: 104.92825,
+            photoAnchorSource: 'liveCameraCapture',
+            photoAnchorCapturedAt: DateTime.now(),
+          );
+          await tester.pumpWidget(
+            ReportScope(
+              repository: repo,
+              child: MaterialApp(
+                key: const ValueKey('wcag-step3-app'),
+                theme: buildSrolanhCityTheme(),
+                home: MediaQuery.withClampedTextScaling(
+                  minScaleFactor: 2.0,
+                  maxScaleFactor: 2.0,
+                  child: ReportWizardPage(
+                    initialDraft: activeDraft,
+                    locationService: const _FakeLocationService(
+                      LocationSuccess(
+                        point: LatLng(11.55645, 104.92825),
+                        accuracyMeters: 10,
+                        isOutsideCambodia: false,
+                      ),
+                    ),
+                    civicAiService: _UnconfiguredTestAiService(),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const Key('step2-confirm-location-btn')));
+          await tester.pumpAndSettle();
+
+          expect(
+            find.byKey(const Key('step3-nearby-draft-warning')),
+            findsOneWidget,
+          );
+          await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+          // Toggle to All types -> dimmed draft pin (d2) stays WCAG AA compliant.
+          await tester.tap(find.byKey(const Key('step3-category-filter-pill')));
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const Key('step3-draft-pin-wcag-d2')),
+            findsOneWidget,
+          );
+          await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+          // Collapse Step 3 bottom sheet at 2.0x text scale -> zero overflow.
+          await tester.tap(find.byKey(const Key('step3-sheet-toggle')));
+          await tester.pumpAndSettle();
+
+          // 4. ReportSubmittedPage with remaining drafts at 2.0x text scale.
+          final submission = ReportSubmissionResult(
+            report: potholeReport,
+            mergedIntoExisting: false,
+          );
+          await tester.pumpWidget(
+            ReportScope(
+              repository: repo,
+              child: MaterialApp(
+                key: const ValueKey('wcag-submitted-app'),
+                theme: buildSrolanhCityTheme(),
+                home: MediaQuery.withClampedTextScaling(
+                  minScaleFactor: 2.0,
+                  maxScaleFactor: 2.0,
+                  child: ReportSubmittedPage(result: submission),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const Key('submitted-continue-next-draft-btn')),
+            findsOneWidget,
+          );
+          await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+          await expectLater(tester, meetsGuideline(textContrastGuideline));
+        } finally {
+          handle.dispose();
+        }
       },
     );
   });
@@ -3518,6 +3970,36 @@ class _UnavailableTestVoiceService implements VoiceInputService {
 
   @override
   Future<void> cancel() async {}
+}
+
+class _RateLimitedTestAiService implements CivicAiService {
+  @override
+  bool get isBackendConfigured => true;
+
+  @override
+  Future<PhotoAiAnalysis> analyzeIssuePhoto({
+    required String imagePath,
+    required bool englishFirst,
+    String? descriptionHint,
+    bool forceRefresh = false,
+  }) async => const PhotoAiAnalysis(
+    status: PhotoAiStatus.rateLimited,
+    errorMessage: 'Quota exhausted',
+  );
+
+  @override
+  Future<AudioTranscriptionResult> transcribeVoiceAudio({
+    required String audioPath,
+    required bool englishFirst,
+  }) async => const AudioTranscriptionResult(success: false);
+
+  @override
+  Future<HelpChatReply> askHelpAssistant({
+    required String message,
+    required List<HelpChatTurn> history,
+    required bool englishFirst,
+    Map<String, dynamic>? citizenContext,
+  }) async => const HelpChatReply(success: false, text: '');
 }
 
 class _UnconfiguredTestAiService implements CivicAiService {

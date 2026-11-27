@@ -175,15 +175,18 @@ class _HomePageState extends State<HomePage> {
                     if (repo.drafts.length > 1) ...[
                       Padding(
                         padding: const EdgeInsets.only(bottom: 6),
-                        child: Text(
-                          tr.primary(
-                            'សេចក្តីព្រាងបានរក្សាទុក (${repo.drafts.length})',
-                            'Saved drafts (${repo.drafts.length})',
-                          ),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.saffronInk,
+                        child: Semantics(
+                          header: true,
+                          child: Text(
+                            tr.primary(
+                              'សេចក្តីព្រាងបានរក្សាទុក (${repo.drafts.length})',
+                              'Saved drafts (${repo.drafts.length})',
+                            ),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.saffronInk,
+                            ),
                           ),
                         ),
                       ),
@@ -200,93 +203,165 @@ class _HomePageState extends State<HomePage> {
                           color: AppColors.saffronSoft,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: AppColors.saffron.withValues(alpha: 0.6),
+                            color: AppColors.saffronInk.withValues(alpha: 0.55),
                           ),
                         ),
-                        child: Row(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (savedDraft.localPhotoPaths.isNotEmpty)
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
-                                child: ReportPhoto(
-                                  category: savedDraft.category,
-                                  localPhotoPath:
-                                      savedDraft.localPhotoPaths.first,
-                                  width: 40,
-                                  height: 40,
-                                  borderRadius: 10,
-                                  bilingual: tr,
+                            Row(
+                              children: [
+                                ExcludeSemantics(
+                                  child: savedDraft.localPhotoPaths.isNotEmpty
+                                      ? ReportPhoto(
+                                          category: savedDraft.category,
+                                          localPhotoPath:
+                                              savedDraft.localPhotoPaths.first,
+                                          width: 40,
+                                          height: 40,
+                                          borderRadius: 10,
+                                          bilingual: tr,
+                                        )
+                                      : const Icon(
+                                          Icons.edit_note_rounded,
+                                          color: AppColors.saffronInk,
+                                        ),
                                 ),
-                              )
-                            else
-                              const Icon(
-                                Icons.edit_note_rounded,
-                                color: AppColors.saffronInk,
-                              ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  BilingualText(
-                                    bilingual: tr,
-                                    khmer:
-                                        'បន្តសេចក្តីព្រាង · ${savedDraft.category.khmerName}',
-                                    english:
-                                        'Resume draft · ${savedDraft.category.englishName}',
-                                    fontSize: 13,
-                                    color: AppColors.saffronInk,
-                                    maxLines: 1,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      BilingualText(
+                                        bilingual: tr,
+                                        khmer:
+                                            'បន្តសេចក្តីព្រាង · ${savedDraft.category.khmerName}',
+                                        english:
+                                            'Resume draft · ${savedDraft.category.englishName}',
+                                        fontSize: 13,
+                                        color: AppColors.saffronInk,
+                                        maxLines: 2,
+                                      ),
+                                      if (savedDraft.description
+                                              .trim()
+                                              .isNotEmpty ||
+                                          savedDraft.savedAt != null)
+                                        Text(
+                                          savedDraft.description
+                                                  .trim()
+                                                  .isNotEmpty
+                                              ? savedDraft.description.trim()
+                                              : RelativeTimeFormatter.formatRelative(
+                                                  savedDraft.savedAt!,
+                                                  englishFirst: tr.englishFirst,
+                                                ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: AppColors.saffronInk,
+                                          ),
+                                        ),
+                                    ],
                                   ),
-                                  if (savedDraft.description
-                                          .trim()
-                                          .isNotEmpty ||
-                                      savedDraft.savedAt != null)
-                                    Text(
-                                      savedDraft.description.trim().isNotEmpty
-                                          ? savedDraft.description.trim()
-                                          : RelativeTimeFormatter.formatRelative(
-                                              savedDraft.savedAt!,
-                                              englishFirst: tr.englishFirst,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                alignment: WrapAlignment.end,
+                                children: [
+                                  Semantics(
+                                    button: true,
+                                    excludeSemantics: true,
+                                    label: tr.primary(
+                                      'លុបសេចក្តីព្រាង ${savedDraft.category.khmerName}',
+                                      'Discard ${savedDraft.category.englishName} draft',
+                                    ),
+                                    child: TextButton(
+                                      key: Key(
+                                        'home-draft-discard-${savedDraft.id}',
+                                      ),
+                                      style: TextButton.styleFrom(
+                                        minimumSize: const Size(48, 48),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.padded,
+                                        foregroundColor: AppColors.saffronInk,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 10,
+                                        ),
+                                      ),
+                                      onPressed: () {
+                                        repo.deleteDraft(savedDraft.id);
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              tr.primary(
+                                                'បានលុបសេចក្តីព្រាង ${savedDraft.category.khmerName}',
+                                                'Discarded ${savedDraft.category.englishName} draft',
+                                              ),
                                             ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        color: AppColors.muted,
+                                            action: SnackBarAction(
+                                              label: tr.primary(
+                                                'ត្រឡប់វិញ',
+                                                'Undo',
+                                              ),
+                                              onPressed: () =>
+                                                  repo.saveDraft(savedDraft),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      child: Text(
+                                        tr.primary('លុប', 'Discard'),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                     ),
+                                  ),
+                                  Semantics(
+                                    button: true,
+                                    excludeSemantics: true,
+                                    label: tr.primary(
+                                      'បន្តសេចក្តីព្រាង ${savedDraft.category.khmerName}',
+                                      'Resume ${savedDraft.category.englishName} draft',
+                                    ),
+                                    child: FilledButton(
+                                      key: Key(
+                                        'home-draft-resume-${savedDraft.id}',
+                                      ),
+                                      onPressed: () {
+                                        HapticFeedback.selectionClick();
+                                        widget.onResumeDraft?.call(savedDraft);
+                                      },
+                                      style: FilledButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 10,
+                                        ),
+                                        minimumSize: const Size(48, 48),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.padded,
+                                      ),
+                                      child: Text(
+                                        tr.primary('បន្ត', 'Resume'),
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                    ),
+                                  ),
                                 ],
-                              ),
-                            ),
-                            TextButton(
-                              key: Key('home-draft-discard-${savedDraft.id}'),
-                              onPressed: () => repo.deleteDraft(savedDraft.id),
-                              child: Text(
-                                tr.primary('លុប', 'Discard'),
-                                style: const TextStyle(
-                                  color: AppColors.muted,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                            FilledButton(
-                              key: Key('home-draft-resume-${savedDraft.id}'),
-                              onPressed: () {
-                                HapticFeedback.selectionClick();
-                                widget.onResumeDraft?.call(savedDraft);
-                              },
-                              style: FilledButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                minimumSize: const Size(0, 36),
-                              ),
-                              child: Text(
-                                tr.primary('បន្ត', 'Resume'),
-                                style: const TextStyle(fontSize: 12),
                               ),
                             ),
                           ],

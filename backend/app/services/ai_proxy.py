@@ -225,6 +225,24 @@ class AiProxyService:
             )
         return value
 
+    @staticmethod
+    def _is_quota_or_rate_limit_error(exc: Exception) -> bool:
+        code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+        if code == 429:
+            return True
+        text = str(exc)
+        upper = text.upper()
+        return "429" in text or "RESOURCE_EXHAUSTED" in upper or "QUOTA" in upper
+
+    def _candidate_models(self, primary: str | None) -> list[str]:
+        head = (primary or self.settings.gemini_model).strip() or self.settings.gemini_model
+        seen = [head]
+        for raw in self.settings.gemini_fallback_models.split(","):
+            candidate = raw.strip()
+            if candidate and candidate not in seen:
+                seen.append(candidate)
+        return seen
+
     async def _generate_json(
         self,
         client: genai.Client,
@@ -232,18 +250,31 @@ class AiProxyService:
         *,
         model: str | None = None,
     ) -> dict[str, Any]:
-        selected_model = (model or self.settings.gemini_model).strip() or self.settings.gemini_model
-        try:
-            response = await client.aio.models.generate_content(
-                model=selected_model,
-                contents=contents,
-                config=types.GenerateContentConfig(response_mime_type="application/json"),
-            )
-        except Exception as exc:
-            raise AiUpstreamResponseError(
-                f"Upstream AI error ({selected_model}): {exc}"
-            ) from exc
-        return self._parse_json_dict(response.text)
+        candidates = self._candidate_models(model)
+        last_exc: Exception | None = None
+        for idx, selected_model in enumerate(candidates):
+            try:
+                response = await client.aio.models.generate_content(
+                    model=selected_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(response_mime_type="application/json"),
+                )
+                return self._parse_json_dict(response.text)
+            except Exception as exc:
+                last_exc = exc
+                if self._is_quota_or_rate_limit_error(exc):
+                    if idx + 1 < len(candidates):
+                        continue
+                    raise AiRateLimitError(
+                        "Upstream AI quota temporarily exhausted. "
+                        "Please save as draft and retry shortly."
+                    ) from exc
+                raise AiUpstreamResponseError(
+                    f"Upstream AI error ({selected_model}): {exc}"
+                ) from exc
+        raise AiUpstreamResponseError(
+            f"Upstream AI error ({candidates[-1]}): {last_exc}"
+        )
 
     async def classify_issue(
         self,

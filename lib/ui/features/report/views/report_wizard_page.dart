@@ -1740,12 +1740,16 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                     onTap: () => _showPhotoSourceSheet(tr),
                                     borderRadius: BorderRadius.circular(18),
                                     child: Container(
-                                      width: vm.localPhotoPaths.isEmpty
-                                          ? 156
-                                          : 84,
-                                      height: 84,
+                                      constraints: BoxConstraints(
+                                        minWidth: vm.localPhotoPaths.isEmpty
+                                            ? 156
+                                            : 84,
+                                        maxWidth: 180,
+                                        minHeight: 84,
+                                      ),
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 10,
+                                        vertical: 10,
                                       ),
                                       decoration: BoxDecoration(
                                         color: vm.localPhotoPaths.isEmpty
@@ -2018,60 +2022,139 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             if (isAnalyzingPhoto) ...[
-                              Text(
-                                tr.primary(
-                                  'កំពុងពិនិត្យរូបភាពដោយ AI...',
-                                  'Verifying photo with AI...',
-                                ),
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: AppColors.muted,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
+                              Semantics(
+                                container: true,
+                                liveRegion: true,
+                                child: Text(
+                                  tr.primary(
+                                    'កំពុងពិនិត្យរូបភាពដោយ AI...',
+                                    'Verifying photo with AI...',
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: AppColors.muted,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 8),
                             ] else if (isNonCivicBlocked) ...[
-                              Text(
-                                tr.primary(
-                                  'សូមថត ឬជ្រើសរូបបញ្ហាផ្លូវពិតប្រាកដមុនបន្តទៅជំហានទី ៣',
-                                  'Please retake or choose a real street-issue photo before continuing to Step 3.',
-                                ),
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: AppColors.saffronInk,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
+                              Semantics(
+                                container: true,
+                                liveRegion: true,
+                                child: Text(
+                                  tr.primary(
+                                    'សូមថត ឬជ្រើសរូបបញ្ហាផ្លូវពិតប្រាកដមុនបន្តទៅជំហានទី ៣',
+                                    'Please retake or choose a real street-issue photo before continuing to Step 3.',
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: AppColors.saffronInk,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 8),
                             ] else if (isTransientAiFailure) ...[
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      tr.primary(
-                                        'មិនទាន់អាចពិនិត្យរូបភាពដោយ AI បានទេ',
-                                        'Could not verify photo with AI',
-                                      ),
-                                      style: const TextStyle(
-                                        color: AppColors.muted,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                              Semantics(
+                                container: true,
+                                liveRegion: true,
+                                child: Text(
+                                  vm.photoAi.status == PhotoAiStatus.rateLimited
+                                      ? tr.primary(
+                                          'AI កំពុងពេញកូតាបណ្តោះអាសន្ន — សូមសាកល្បងម្តងទៀត ឬរក្សាទុកសេចក្តីព្រាង',
+                                          'AI quota is temporarily full — retry or save as a draft for later.',
+                                        )
+                                      : tr.primary(
+                                          'មិនទាន់អាចពិនិត្យរូបភាពដោយ AI បានទេ — សូមសាកល្បងម្តងទៀត ឬរក្សាទុកសេចក្តីព្រាង',
+                                          'Could not verify photo with AI — retry or save as a draft.',
+                                        ),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: AppColors.saffronInk,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
                                   ),
-                                  TextButton(
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  TextButton.icon(
                                     key: const Key('step2-footer-retry-ai-btn'),
                                     onPressed: () => unawaited(
                                       vm.analyzeLatestPhoto(forceRefresh: true),
                                     ),
                                     style: TextButton.styleFrom(
-                                      visualDensity: VisualDensity.compact,
+                                      minimumSize: const Size(48, 48),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.padded,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
+                                      ),
                                     ),
-                                    child: Text(
+                                    icon: const Icon(
+                                      Icons.refresh_rounded,
+                                      size: 16,
+                                    ),
+                                    label: Text(
                                       tr.primary('ពិនិត្យម្តងទៀត', 'Retry'),
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  OutlinedButton.icon(
+                                    key: const Key(
+                                      'step2-footer-save-draft-btn',
+                                    ),
+                                    onPressed: () {
+                                      HapticFeedback.selectionClick();
+                                      vm.saveDraft();
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                tr.primary(
+                                                  'បានរក្សាទុកសេចក្តីព្រាង! សូមបន្តផ្ញើពីទំព័រដើមពេលក្រោយ។',
+                                                  'Draft saved! Resume from Home when AI is available.',
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                      Navigator.pop(context);
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      minimumSize: const Size(48, 48),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.padded,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
+                                      ),
+                                      foregroundColor: AppColors.saffronInk,
+                                      side: BorderSide(
+                                        color: AppColors.saffronInk.withValues(
+                                          alpha: 0.55,
+                                        ),
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.save_outlined,
+                                      size: 16,
+                                    ),
+                                    label: Text(
+                                      tr.primary(
+                                        'រក្សាទុកសេចក្តីព្រាង',
+                                        'Save draft',
+                                      ),
                                       style: const TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w700,
@@ -2080,13 +2163,19 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 6),
                             ],
                             SizedBox(
                               width: double.infinity,
-                              height: 54,
                               child: FilledButton(
                                 key: const Key('step2-confirm-location-btn'),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(54),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                ),
                                 onPressed: canProceedToStep3
                                     ? () async {
                                         HapticFeedback.selectionClick();
@@ -2108,6 +2197,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                     'បន្ទាប់ · បញ្ជាក់ទីតាំង',
                                     'Next · Confirm location',
                                   ),
+                                  textAlign: TextAlign.center,
                                 ),
                               ),
                             ),
@@ -2138,7 +2228,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
 
     final cardColor = isWarning ? AppColors.saffronSoft : AppColors.tealSoft;
     final borderColor = isWarning
-        ? AppColors.saffron.withValues(alpha: 0.6)
+        ? AppColors.saffronInk.withValues(alpha: 0.55)
         : AppColors.teal.withValues(alpha: 0.25);
 
     Widget buildEyebrow() {
@@ -2394,6 +2484,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                 if (photoAi.status == PhotoAiStatus.notCivicIssue)
                   ActionChip(
                     key: const Key('step2-retake-photo-chip'),
+                    materialTapTargetSize: MaterialTapTargetSize.padded,
                     avatar: const Icon(
                       Icons.add_a_photo_outlined,
                       size: 14,
@@ -2414,6 +2505,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                   ),
                 ActionChip(
                   key: const Key('step2-rescan-ai-chip'),
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
                   avatar: const Icon(
                     Icons.refresh_rounded,
                     size: 14,
@@ -2815,6 +2907,10 @@ class _ReportWizardPageState extends State<ReportWizardPage>
     final activeZone = vm.activeZoneAnchor;
     final isOutOfZone = vm.isOutside150mZone;
     final matchingIds = {for (final m in similarMatches) m.masterReport.id};
+    final categoryLabel = tr.primary(
+      vm.category.khmerName,
+      vm.category.englishName,
+    );
     final outOfZoneDistLabel = vm.distanceOutsideZoneMeters != null
         ? SupportEligibilityService.formatDistance(
             vm.distanceOutsideZoneMeters!,
@@ -2838,7 +2934,19 @@ class _ReportWizardPageState extends State<ReportWizardPage>
         selectedMatch != null &&
         selectedMatch.masterReport.isContributedByCurrentUser &&
         vm.isHardSelfBlockedAtPin;
-    final collapsedHeight = 122.0 + bottomInset;
+    final textScale = MediaQuery.textScalerOf(context)
+        .scale(1.0)
+        .clamp(1.0, 2.0);
+    final extraOfflineCaption = vm.requiresOfflineDraftOnly
+        ? 36.0 * textScale
+        : 0.0;
+    final maxCollapsed = math.max(122.0, screenHeight * 0.42);
+    final collapsedHeight =
+        (122.0 * (1.0 + (textScale - 1.0) * 0.45) + extraOfflineCaption).clamp(
+          122.0,
+          maxCollapsed,
+        ) +
+        bottomInset;
     final double baseExpandedHeight = hasSimilar
         ? (screenHeight * (hasSecondarySelfBtn ? 0.48 : 0.44)).clamp(
             hasSecondarySelfBtn ? 310.0 : 275.0,
@@ -2847,50 +2955,57 @@ class _ReportWizardPageState extends State<ReportWizardPage>
         : (vm.locationEligibility is! ReportLocationEligible
               ? (screenHeight * 0.38).clamp(254.0, 326.0)
               : (screenHeight * 0.30).clamp(218.0, 266.0));
-    final expandedHeight = baseExpandedHeight + bottomInset;
+    final maxExpanded = math.max(collapsedHeight + 48.0, screenHeight * 0.68);
+    final expandedHeight =
+        (baseExpandedHeight * (1.0 + (textScale - 1.0) * 0.25) +
+                extraOfflineCaption)
+            .clamp(collapsedHeight + 48.0, maxExpanded) +
+        bottomInset;
 
     // Built once and passed via AnimatedBuilder.child so map tiles never
     // rebuild while the collapsible bottom sheet glides smoothly at 60 FPS.
     final Widget mapViewport = Stack(
       children: [
-        MergeSemantics(
-          child: Semantics(
-            label: tr.primary(
-              'ផែនទីកំណត់ទីតាំងបញ្ហា · អូសដើម្បីផ្លាស់ទីម្ជុលក្នុងរង្វង់ 150m',
-              'Issue location map, drag to position pin within 150 m zone',
-            ),
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: vm.pinLocation,
-                initialZoom: MapTileConfig.streetFocusZoom,
-                minZoom: LocationService.minMapZoom,
-                maxZoom: LocationService.maxMapZoom,
-                backgroundColor: MapTileConfig.mapBackgroundColor,
-                cameraConstraint: CameraConstraint.contain(
-                  bounds: LocationService.cambodiaMapBounds,
-                ),
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                ),
-                onMapReady: () => _mapReady = true,
-                onPositionChanged: (camera, hasGesture) {
-                  if (hasGesture) {
-                    _onMapDragged(camera.center);
-                  }
-                },
-                onTap: (_, point) {
-                  HapticFeedback.selectionClick();
-                  if (_mapReady) {
-                    _mapController.move(point, _mapController.camera.zoom);
-                  }
-                  vm.setPinLocation(point, verified: true, fromLiveGps: false);
-                  _reverseGeocodeCurrentPin(point);
-                },
+        Semantics(
+          container: true,
+          explicitChildNodes: true,
+          label: tr.primary(
+            'ផែនទីកំណត់ទីតាំងបញ្ហា · អូសដើម្បីផ្លាស់ទីម្ជុលក្នុងរង្វង់ 150m',
+            'Issue location map, drag to position pin within 150 m zone',
+          ),
+          child: FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: vm.pinLocation,
+              initialZoom: MapTileConfig.streetFocusZoom,
+              minZoom: LocationService.minMapZoom,
+              maxZoom: LocationService.maxMapZoom,
+              backgroundColor: MapTileConfig.mapBackgroundColor,
+              cameraConstraint: CameraConstraint.contain(
+                bounds: LocationService.cambodiaMapBounds,
               ),
-              children: [
-                MapTileConfig.buildTileLayer(),
-                CircleLayer(
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
+              onMapReady: () => _mapReady = true,
+              onPositionChanged: (camera, hasGesture) {
+                if (hasGesture) {
+                  _onMapDragged(camera.center);
+                }
+              },
+              onTap: (_, point) {
+                HapticFeedback.selectionClick();
+                if (_mapReady) {
+                  _mapController.move(point, _mapController.camera.zoom);
+                }
+                vm.setPinLocation(point, verified: true, fromLiveGps: false);
+                _reverseGeocodeCurrentPin(point);
+              },
+            ),
+            children: [
+              ExcludeSemantics(child: MapTileConfig.buildTileLayer()),
+              ExcludeSemantics(
+                child: CircleLayer(
                   circles: [
                     if (activeZone != null)
                       CircleMarker(
@@ -2908,146 +3023,180 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                       ),
                   ],
                 ),
-                MarkerLayer(
-                  markers: allReports
-                      .where((r) => r.status != ReportStatus.resolved)
-                      .map((existing) {
-                        final isCandidate = matchingIds.contains(existing.id);
-                        final isSelectedCandidate =
-                            selectedMatch?.masterReport.id == existing.id;
-                        final markerWidget = Container(
-                          width: isSelectedCandidate
-                              ? 38
-                              : isCandidate
-                              ? 34
-                              : 30,
-                          height: isSelectedCandidate
-                              ? 38
-                              : isCandidate
-                              ? 34
-                              : 30,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: AppColors.priorityColor(
-                              existing.priority.level,
-                            ),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: isSelectedCandidate
-                                  ? AppColors.tealDark
-                                  : Colors.white,
-                              width: isSelectedCandidate ? 3 : 2,
-                            ),
-                            boxShadow: isCandidate
-                                ? AppColors.cardShadow
-                                : null,
+              ),
+              MarkerLayer(
+                markers: allReports
+                    .where(
+                      (r) =>
+                          r.status != ReportStatus.resolved &&
+                          r.syncStatus != SyncStatus.rejectedByAi &&
+                          (vm.showAllCategoriesOnStep3 ||
+                              r.category == vm.category),
+                    )
+                    .map((existing) {
+                      final isCandidate = matchingIds.contains(existing.id);
+                      final isSelectedCandidate =
+                          selectedMatch?.masterReport.id == existing.id;
+                      final markerDiameter = isSelectedCandidate
+                          ? 38.0
+                          : isCandidate
+                          ? 34.0
+                          : 24.0;
+                      final markerWidget = Container(
+                        key: Key('step3-report-pin-${existing.id}'),
+                        width: markerDiameter,
+                        height: markerDiameter,
+                        padding: const EdgeInsets.all(2),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppColors.priorityColor(
+                            existing.priority.level,
                           ),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isSelectedCandidate
+                                ? AppColors.tealDark
+                                : Colors.white,
+                            width: isSelectedCandidate
+                                ? 3
+                                : isCandidate
+                                ? 2
+                                : 1.5,
+                          ),
+                          boxShadow: isCandidate ? AppColors.cardShadow : null,
+                        ),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
                           child: Text(
                             '${existing.affectedCitizens}',
                             style: AppFonts.displayStyle(
                               color: AppColors.priorityForeground(
                                 existing.priority.level,
                               ),
-                              fontSize: isSelectedCandidate ? 11 : 10,
+                              fontSize: isSelectedCandidate
+                                  ? 11
+                                  : isCandidate
+                                  ? 10
+                                  : 9,
                             ),
                           ),
-                        );
+                        ),
+                      );
 
+                      return Marker(
+                        point: existing.coordinates,
+                        width: isCandidate ? 48 : 28,
+                        height: isCandidate ? 48 : 28,
+                        child: isCandidate
+                            ? Semantics(
+                                button: true,
+                                selected: isSelectedCandidate,
+                                excludeSemantics: true,
+                                label: tr.primary(
+                                  'ជ្រើសរបាយការណ៍ ${existing.id} · ${existing.category.khmerName} · P${existing.priority.level} · ${existing.affectedCitizens} នាក់',
+                                  'Select similar report ${existing.id}, ${existing.category.englishName}, P${existing.priority.level}, ${existing.affectedCitizens} citizens',
+                                ),
+                                hint: tr.primary(
+                                  'ចុចដើម្បីជ្រើសរើស',
+                                  'Tap to select',
+                                ),
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () {
+                                    HapticFeedback.selectionClick();
+                                    vm.selectMasterReport(existing.id);
+                                    if (_step3SheetController.value < 0.5) {
+                                      _setStep3SheetExpanded(true);
+                                    }
+                                  },
+                                  child: Center(child: markerWidget),
+                                ),
+                              )
+                            : ExcludeSemantics(
+                                child: Center(
+                                  child: Opacity(
+                                    opacity: 0.55,
+                                    child: markerWidget,
+                                  ),
+                                ),
+                              ),
+                      );
+                    })
+                    .toList(growable: false),
+              ),
+              if (vm.otherSavedDraftsWithPin.isNotEmpty)
+                MarkerLayer(
+                  markers: vm.otherSavedDraftsWithPin
+                      .map((savedDraft) {
+                        final point = savedDraft.effectivePinLocation!;
+                        final isSameCategory =
+                            savedDraft.category == vm.category;
+                        final note = savedDraft.description.trim();
+                        final noteSuffix = note.isNotEmpty ? ' · $note' : '';
+                        final pinBadge = Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: isSameCategory
+                                ? AppColors.saffron
+                                : AppColors.saffronSoft,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSameCategory
+                                  ? Colors.white
+                                  : AppColors.saffronInk,
+                              width: isSameCategory ? 2.5 : 1.8,
+                            ),
+                            boxShadow: AppColors.cardShadow,
+                          ),
+                          child: const Icon(
+                            Icons.edit_note_rounded,
+                            size: 18,
+                            color: AppColors.saffronInk,
+                          ),
+                        );
                         return Marker(
-                          point: existing.coordinates,
-                          width: isCandidate ? 48 : 32,
-                          height: isCandidate ? 48 : 32,
-                          child: isCandidate
-                              ? Semantics(
-                                  button: true,
-                                  selected: isSelectedCandidate,
-                                  label: tr.primary(
-                                    'ជ្រើសរបាយការណ៍ ${existing.id}',
-                                    'Select similar report ${existing.id}',
+                          point: point,
+                          width: 48,
+                          height: 48,
+                          child: Semantics(
+                            button: true,
+                            excludeSemantics: true,
+                            label: tr.primary(
+                              'សេចក្តីព្រាងបានរក្សាទុក · ${savedDraft.category.khmerName}$noteSuffix',
+                              'Saved draft · ${savedDraft.category.englishName}$noteSuffix',
+                            ),
+                            hint: tr.primary(
+                              'ចុចដើម្បីមើលព័ត៌មានសេចក្តីព្រាង',
+                              'Tap to preview saved draft',
+                            ),
+                            child: GestureDetector(
+                              key: Key('step3-draft-pin-${savedDraft.id}'),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      tr.primary(
+                                        'សេចក្តីព្រាងបានរក្សាទុក · ${savedDraft.category.khmerName}$noteSuffix',
+                                        'Saved draft · ${savedDraft.category.englishName}$noteSuffix',
+                                      ),
+                                    ),
                                   ),
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTap: () {
-                                      HapticFeedback.selectionClick();
-                                      vm.selectMasterReport(existing.id);
-                                      if (_step3SheetController.value < 0.5) {
-                                        _setStep3SheetExpanded(true);
-                                      }
-                                    },
-                                    child: Center(child: markerWidget),
-                                  ),
-                                )
-                              : Center(child: markerWidget),
+                                );
+                              },
+                              child: Center(child: pinBadge),
+                            ),
+                          ),
                         );
                       })
                       .toList(growable: false),
                 ),
-                if (vm.otherSavedDraftsWithPin.isNotEmpty)
-                  MarkerLayer(
-                    markers: vm.otherSavedDraftsWithPin
-                        .map((savedDraft) {
-                          final point = savedDraft.effectivePinLocation!;
-                          return Marker(
-                            point: point,
-                            width: 44,
-                            height: 44,
-                            child: Semantics(
-                              button: true,
-                              label: tr.primary(
-                                'សេចក្តីព្រាងបានរក្សាទុក · ${savedDraft.category.khmerName}',
-                                'Saved draft · ${savedDraft.category.englishName}',
-                              ),
-                              child: GestureDetector(
-                                key: Key('step3-draft-pin-${savedDraft.id}'),
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () {
-                                  HapticFeedback.selectionClick();
-                                  final note = savedDraft.description.trim();
-                                  final suffix = note.isNotEmpty
-                                      ? ' · $note'
-                                      : '';
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        tr.primary(
-                                          'សេចក្តីព្រាងបានរក្សាទុក · ${savedDraft.category.khmerName}$suffix',
-                                          'Saved draft · ${savedDraft.category.englishName}$suffix',
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                                child: Center(
-                                  child: Container(
-                                    width: 34,
-                                    height: 34,
-                                    decoration: BoxDecoration(
-                                      color: AppColors.saffron,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: Colors.white,
-                                        width: 2.5,
-                                      ),
-                                      boxShadow: AppColors.cardShadow,
-                                    ),
-                                    child: const Icon(
-                                      Icons.edit_note_rounded,
-                                      size: 18,
-                                      color: AppColors.saffronInk,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        })
-                        .toList(growable: false),
-                  ),
-                MapTileConfig.buildAttributionBadge(
-                  bottomPadding: sheetCornerRadius + 6,
-                ),
-              ],
-            ),
+              MapTileConfig.buildAttributionBadge(
+                bottomPadding: sheetCornerRadius + 6,
+              ),
+            ],
           ),
         ),
 
@@ -3147,53 +3296,58 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                 color: AppColors.ink,
                               ),
                             ),
-                            Row(
-                              children: [
-                                Icon(
-                                  isOutOfZone
-                                      ? Icons.wrong_location_outlined
-                                      : activeZone != null
-                                      ? Icons.verified_rounded
-                                      : Icons.gps_not_fixed_rounded,
-                                  size: 13,
-                                  color: isOutOfZone
-                                      ? AppColors.danger
-                                      : AppColors.teal,
-                                ),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
+                            Semantics(
+                              container: true,
+                              liveRegion: true,
+                              child: Row(
+                                children: [
+                                  Icon(
                                     isOutOfZone
-                                        ? tr.primary(
-                                            'នៅក្រៅរង្វង់ 150m (${outOfZoneDistLabel ?? ''})',
-                                            'Outside 150 m zone (${outOfZoneDistLabel ?? ''})',
-                                          )
+                                        ? Icons.wrong_location_outlined
                                         : activeZone != null
-                                        ? (hasSimilar
-                                              ? tr.primary(
-                                                  'រង្វង់ពិនិត្យ 150m · រកឃើញ ${similarMatches.length} របាយការណ៍ស្រដៀង',
-                                                  '150 m zone · ${similarMatches.length} similar report(s) found',
-                                                )
-                                              : tr.primary(
-                                                  'រង្វង់ពិនិត្យ 150m · មិនមានរបាយការណ៍ស្ទួនទេ',
-                                                  '150 m zone · No similar reports nearby',
-                                                ))
-                                        : tr.primary(
-                                            'ត្រូវការ GPS ដើម្បីបើករង្វង់ 150m',
-                                            'GPS required to unlock 150 m zone',
-                                          ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      color: isOutOfZone
-                                          ? AppColors.danger
-                                          : AppColors.teal,
-                                      fontWeight: FontWeight.w600,
+                                        ? Icons.verified_rounded
+                                        : Icons.gps_not_fixed_rounded,
+                                    size: 13,
+                                    color: isOutOfZone
+                                        ? AppColors.danger
+                                        : AppColors.teal,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      isOutOfZone
+                                          ? tr.primary(
+                                              'នៅក្រៅរង្វង់ 150m (${outOfZoneDistLabel ?? ''})',
+                                              'Outside 150 m zone (${outOfZoneDistLabel ?? ''})',
+                                            )
+                                          : activeZone != null
+                                          ? (hasSimilar
+                                                ? tr.primary(
+                                                    'រង្វង់ 150m · រកឃើញ ${similarMatches.length} របាយការណ៍ $categoryLabel',
+                                                    '150 m zone · ${similarMatches.length} $categoryLabel report(s) nearby',
+                                                  )
+                                                : tr.primary(
+                                                    'រង្វង់ 150m · មិនមានរបាយការណ៍ $categoryLabel នៅក្បែរទេ',
+                                                    '150 m zone · No $categoryLabel reports nearby',
+                                                  ))
+                                          : tr.primary(
+                                              'ត្រូវការ GPS ដើម្បីបើករង្វង់ 150m',
+                                              'GPS required to unlock 150 m zone',
+                                            ),
+                                      maxLines: 2,
+                                      softWrap: true,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        color: isOutOfZone
+                                            ? AppColors.danger
+                                            : AppColors.teal,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ],
                         ),
@@ -3235,48 +3389,160 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                     ),
                   ],
                 ),
-                if (vm.otherSavedDraftsWithPin.isNotEmpty)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      key: const Key('step3-draft-pins-legend'),
-                      margin: const EdgeInsets.only(top: 8),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.saffronSoft,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: AppColors.saffron.withValues(alpha: 0.7),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Semantics(
+                          button: true,
+                          toggled: vm.showAllCategoriesOnStep3,
+                          excludeSemantics: true,
+                          label: vm.showAllCategoriesOnStep3
+                              ? tr.primary(
+                                  'កំពុងបង្ហាញគ្រប់ប្រភេទ · ចុចដើម្បីបង្ហាញតែ $categoryLabel',
+                                  'Showing all types, tap to show $categoryLabel only',
+                                )
+                              : tr.primary(
+                                  'កំពុងបង្ហាញតែ $categoryLabel · ចុចដើម្បីបង្ហាញគ្រប់ប្រភេទ',
+                                  'Showing $categoryLabel only, tap to show all types',
+                                ),
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              key: const Key('step3-category-filter-pill'),
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                vm.toggleShowAllCategoriesOnStep3();
+                              },
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  minHeight: 48,
+                                  minWidth: 48,
+                                ),
+                                child: Center(
+                                  widthFactor: 1,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 11,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: vm.showAllCategoriesOnStep3
+                                          ? AppColors.tealDark
+                                          : Colors.white,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: vm.showAllCategoriesOnStep3
+                                            ? AppColors.tealDark
+                                            : AppColors.teal,
+                                      ),
+                                      boxShadow: AppColors.cardShadow,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          vm.showAllCategoriesOnStep3
+                                              ? Icons.layers_rounded
+                                              : Bilingual.categoryIcon(
+                                                  vm.category,
+                                                ),
+                                          size: 14,
+                                          color: vm.showAllCategoriesOnStep3
+                                              ? Colors.white
+                                              : AppColors.tealDark,
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Flexible(
+                                          child: Text(
+                                            vm.showAllCategoriesOnStep3
+                                                ? tr.primary(
+                                                    'គ្រប់ប្រភេទ',
+                                                    'All types',
+                                                  )
+                                                : tr.primary(
+                                                    'បង្ហាញតែ៖ $categoryLabel',
+                                                    '$categoryLabel only',
+                                                  ),
+                                            softWrap: true,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: vm.showAllCategoriesOnStep3
+                                                  ? Colors.white
+                                                  : AppColors.tealDark,
+                                            ),
+                                          ),
+                                        ),
+                                        if (!vm.showAllCategoriesOnStep3) ...[
+                                          const SizedBox(width: 4),
+                                          const Icon(
+                                            Icons.layers_outlined,
+                                            size: 13,
+                                            color: AppColors.tealDark,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
-                        boxShadow: AppColors.cardShadow,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.edit_note_rounded,
-                            size: 14,
-                            color: AppColors.saffronInk,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            tr.primary(
-                              '${vm.otherSavedDraftsWithPin.length} សេចក្តីព្រាងបានរក្សាទុក',
-                              '${vm.otherSavedDraftsWithPin.length} saved draft pin(s)',
+                        if (vm.otherSavedDraftsWithPin.isNotEmpty)
+                          Container(
+                            key: const Key('step3-draft-pins-legend'),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 11,
+                              vertical: 5,
                             ),
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.saffronInk,
+                            decoration: BoxDecoration(
+                              color: AppColors.saffronSoft,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: AppColors.saffronInk.withValues(
+                                  alpha: 0.55,
+                                ),
+                              ),
+                              boxShadow: AppColors.cardShadow,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.edit_note_rounded,
+                                  size: 14,
+                                  color: AppColors.saffronInk,
+                                ),
+                                const SizedBox(width: 5),
+                                Flexible(
+                                  child: Text(
+                                    tr.primary(
+                                      '${vm.otherSavedDraftsWithPin.length} សេចក្តីព្រាងបានរក្សាទុក',
+                                      '${vm.otherSavedDraftsWithPin.length} saved draft pin(s)',
+                                    ),
+                                    softWrap: true,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.saffronInk,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
+                      ],
                     ),
                   ),
+                ),
                 if (!vm.repository.isOnline)
                   Container(
                     margin: const EdgeInsets.only(top: 10),
@@ -3490,7 +3756,7 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                 expanded: isExpanded,
                                 excludeSemantics: true,
                                 label:
-                                    '${hasSimilar ? tr.primary('រកឃើញរបាយការណ៍ស្រដៀងក្នុង 150m (${similarMatches.length})', 'Similar reports within 150 m (${similarMatches.length})') : tr.primary(routing.khmerAgency, routing.englishAgency)} · ${isExpanded ? tr.primary('បង្រួមផ្ទាំងដើម្បីមើលផែនទីពេញ', 'Collapse panel to view more map') : tr.primary('បង្ហាញព័ត៌មានទីតាំង និងជម្រើសបញ្ជូន', 'Expand location panel')}',
+                                    '${hasSimilar ? tr.primary('របាយការណ៍ $categoryLabel ក្នុង 150m (${similarMatches.length})', 'Nearby $categoryLabel reports (${similarMatches.length})') : tr.primary(routing.khmerAgency, routing.englishAgency)} · ${isExpanded ? tr.primary('បង្រួមផ្ទាំងដើម្បីមើលផែនទីពេញ', 'Collapse panel to view more map') : tr.primary('បង្ហាញព័ត៌មានទីតាំង និងជម្រើសបញ្ជូន', 'Expand location panel')}',
                                 child: InkWell(
                                   key: const Key('step3-sheet-toggle'),
                                   borderRadius: const BorderRadius.vertical(
@@ -3544,8 +3810,8 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                                               Expanded(
                                                 child: Text(
                                                   tr.primary(
-                                                    'រកឃើញរបាយការណ៍ស្រដៀងក្នុង 150m (${similarMatches.length})',
-                                                    'Similar reports within 150 m (${similarMatches.length})',
+                                                    'របាយការណ៍ $categoryLabel ក្នុង 150m (${similarMatches.length})',
+                                                    'Nearby $categoryLabel reports (${similarMatches.length})',
                                                   ),
                                                   maxLines: 1,
                                                   overflow:
@@ -3632,101 +3898,127 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                               child: ClipRect(
                                 child: ExcludeSemantics(
                                   excluding: t < 0.5,
-                                  child: IgnorePointer(
-                                    ignoring: t < 0.35,
-                                    child: Opacity(
-                                      opacity: contentOpacity,
-                                      child: SingleChildScrollView(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          16,
-                                          2,
-                                          16,
-                                          8,
-                                        ),
-                                        child: hasSimilar
-                                            ? _buildStep3SimilarReportsList(
-                                                vm: vm,
-                                                matches: similarMatches,
-                                                selectedMatch: selectedMatch,
-                                                tr: tr,
-                                              )
-                                            : Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    '${tr.primary(routing.fullKhmerLocation, routing.fullEnglishLocation)} · ${tr.roadClassLabel(routing.roadClass)} · ODC GIS',
-                                                    maxLines: 2,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: const TextStyle(
-                                                      color: AppColors.muted,
-                                                      fontSize: 11.5,
+                                  child: ExcludeFocus(
+                                    excluding: t < 0.5,
+                                    child: IgnorePointer(
+                                      ignoring: t < 0.35,
+                                      child: Opacity(
+                                        opacity: contentOpacity,
+                                        child: SingleChildScrollView(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            16,
+                                            2,
+                                            16,
+                                            8,
+                                          ),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              if (vm.nearbySimilarSavedDraft !=
+                                                  null) ...[
+                                                Semantics(
+                                                  container: true,
+                                                  liveRegion: true,
+                                                  child: Container(
+                                                    key: const Key(
+                                                      'step3-nearby-draft-warning',
+                                                    ),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 12,
+                                                          vertical: 8,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          AppColors.saffronSoft,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            14,
+                                                          ),
+                                                      border: Border.all(
+                                                        color: AppColors
+                                                            .saffronInk
+                                                            .withValues(
+                                                              alpha: 0.55,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                    child: Row(
+                                                      children: [
+                                                        const Icon(
+                                                          Icons
+                                                              .edit_note_rounded,
+                                                          size: 16,
+                                                          color: AppColors
+                                                              .saffronInk,
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 8,
+                                                        ),
+                                                        Expanded(
+                                                          child: Text(
+                                                            tr.primary(
+                                                              'អ្នកមានសេចក្តីព្រាង ${vm.nearbySimilarSavedDraft!.draft.category.khmerName} នៅក្បែរនេះ (${vm.nearbySimilarSavedDraft!.distanceMeters.round()} ម៉ែត្រ)',
+                                                              'You already saved a ${vm.nearbySimilarSavedDraft!.draft.category.englishName} draft nearby (${vm.nearbySimilarSavedDraft!.distanceMeters.round()} m away)',
+                                                            ),
+                                                            style: const TextStyle(
+                                                              fontSize: 11.5,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                              color: AppColors
+                                                                  .saffronInk,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
                                                   ),
-                                                  const SizedBox(height: 8),
-                                                  _buildLocationEligibilitySection(
-                                                    vm,
-                                                    tr,
-                                                  ),
-                                                ],
-                                              ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                              ],
+                                              if (hasSimilar)
+                                                _buildStep3SimilarReportsList(
+                                                  vm: vm,
+                                                  matches: similarMatches,
+                                                  selectedMatch: selectedMatch,
+                                                  tr: tr,
+                                                )
+                                              else
+                                                Column(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      '${tr.primary(routing.fullKhmerLocation, routing.fullEnglishLocation)} · ${tr.roadClassLabel(routing.roadClass)} · ODC GIS',
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: const TextStyle(
+                                                        color: AppColors.muted,
+                                                        fontSize: 11.5,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 8),
+                                                    _buildLocationEligibilitySection(
+                                                      vm,
+                                                      tr,
+                                                    ),
+                                                  ],
+                                                ),
+                                            ],
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-
-                            if (vm.nearbySimilarSavedDraft != null)
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  4,
-                                  16,
-                                  4,
-                                ),
-                                child: Container(
-                                  key: const Key('step3-nearby-draft-warning'),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.saffronSoft,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: AppColors.saffron.withValues(
-                                        alpha: 0.6,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.edit_note_rounded,
-                                        size: 16,
-                                        color: AppColors.saffronInk,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          tr.primary(
-                                            'អ្នកមានសេចក្តីព្រាង ${vm.nearbySimilarSavedDraft!.draft.category.khmerName} នៅក្បែរនេះ (${vm.nearbySimilarSavedDraft!.distanceMeters.round()} ម៉ែត្រ)',
-                                            'You already saved a ${vm.nearbySimilarSavedDraft!.draft.category.englishName} draft nearby (${vm.nearbySimilarSavedDraft!.distanceMeters.round()} m away)',
-                                          ),
-                                          style: const TextStyle(
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.saffronInk,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
 
                             // Pinned Primary CTA Footer
                             Padding(
@@ -4203,34 +4495,37 @@ class _ReportWizardPageState extends State<ReportWizardPage>
                 heightFactor: expandFactor.clamp(0.0, 1.0),
                 child: ExcludeSemantics(
                   excluding: expandFactor < 0.5,
-                  child: Opacity(
-                    opacity: expandFactor.clamp(0.0, 1.0),
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: TextButton(
-                          key: const Key('different-problem-btn'),
-                          style: TextButton.styleFrom(
-                            minimumSize: const Size.fromHeight(48),
-                          ),
-                          onPressed: vm.canSubmitAtCurrentPin
-                              ? () => _openDifferentProblemSheet(
-                                  vm,
-                                  selectedMatch.masterReport,
-                                  tr,
-                                )
-                              : null,
-                          child: Text(
-                            tr.paired(
-                              'ជាបញ្ហាប្រភេទផ្សេង',
-                              'Report a different category',
+                  child: ExcludeFocus(
+                    excluding: expandFactor < 0.5,
+                    child: Opacity(
+                      opacity: expandFactor.clamp(0.0, 1.0),
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: TextButton(
+                            key: const Key('different-problem-btn'),
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size.fromHeight(48),
                             ),
-                            style: TextStyle(
-                              color: vm.canSubmitAtCurrentPin
-                                  ? AppColors.tealDark
-                                  : AppColors.muted,
-                              fontWeight: FontWeight.w700,
+                            onPressed: vm.canSubmitAtCurrentPin
+                                ? () => _openDifferentProblemSheet(
+                                    vm,
+                                    selectedMatch.masterReport,
+                                    tr,
+                                  )
+                                : null,
+                            child: Text(
+                              tr.paired(
+                                'ជាបញ្ហាប្រភេទផ្សេង',
+                                'Report a different category',
+                              ),
+                              style: TextStyle(
+                                color: vm.canSubmitAtCurrentPin
+                                    ? AppColors.tealDark
+                                    : AppColors.muted,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
                         ),

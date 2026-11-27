@@ -186,6 +186,7 @@ class ReportWizardViewModel extends ChangeNotifier {
 
   String? _selectedMasterReportId;
   bool _preferCreateNewReport = false;
+  bool _showAllCategoriesOnStep3 = false;
 
   bool _isInitializingVoice = false;
   bool _isRecordingVoice = false;
@@ -566,14 +567,26 @@ class ReportWizardViewModel extends ChangeNotifier {
     );
   }
 
+  bool get showAllCategoriesOnStep3 => _showAllCategoriesOnStep3;
+
+  void toggleShowAllCategoriesOnStep3() {
+    _showAllCategoriesOnStep3 = !_showAllCategoriesOnStep3;
+    notifyListeners();
+  }
+
   List<ReportDraft> get otherSavedDraftsWithPin => repository.drafts
-      .where((d) => d.id != _draftId && d.effectivePinLocation != null)
+      .where(
+        (d) =>
+            d.id != _draftId &&
+            d.effectivePinLocation != null &&
+            (_showAllCategoriesOnStep3 || d.category == _category),
+      )
       .toList(growable: false);
 
   ({ReportDraft draft, double distanceMeters})? get nearbySimilarSavedDraft {
     ({ReportDraft draft, double distanceMeters})? closest;
-    for (final d in otherSavedDraftsWithPin) {
-      if (d.category != _category) continue;
+    for (final d in repository.drafts) {
+      if (d.id == _draftId || d.category != _category) continue;
       final pt = d.effectivePinLocation;
       if (pt == null) continue;
       final dist = SpatialClusteringService.distanceMeters(_pinLocation, pt);
@@ -623,6 +636,7 @@ class ReportWizardViewModel extends ChangeNotifier {
     if (_step == 1 && isPhotoAiBlockedForNextStep) return;
     if (_step < 2) {
       _step++;
+      _showAllCategoriesOnStep3 = false;
       if (_localPhotoPaths.isNotEmpty) {
         saveDraft();
       }
@@ -636,6 +650,7 @@ class ReportWizardViewModel extends ChangeNotifier {
   void previousStep() {
     if (_step > 0) {
       _step--;
+      _showAllCategoriesOnStep3 = false;
       notifyListeners();
     }
   }
@@ -646,6 +661,7 @@ class ReportWizardViewModel extends ChangeNotifier {
     _categoryLockedByUser = true;
     _selectedMasterReportId = null;
     _preferCreateNewReport = false;
+    _showAllCategoriesOnStep3 = false;
     notifyListeners();
   }
 

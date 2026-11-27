@@ -2633,6 +2633,49 @@ void main() {
       expect(vm.selectedMasterMatch?.masterReport.id, equals('#SC-20540'));
       vm.dispose();
     });
+
+    test('Excludes SyncStatus.rejectedByAi reports from spatial clustering and <= 50 m self-duplicate hard block', () {
+      const spot = LatLng(11.5620, 104.9228);
+      final base = ReportRepository().findById('#SC-20519')!;
+      final rejectedReport = CivicReport.fromJson({
+        ...base.toJson(),
+        'id': '#SC-REJ-CLUSTER',
+        'lat': spot.latitude,
+        'lng': spot.longitude,
+        'isMine': true,
+        'createdByCurrentUser': true,
+        'joinedByCurrentUser': true,
+        'syncStatus': SyncStatus.rejectedByAi.name,
+      });
+
+      final matches = SpatialClusteringService.findSimilarReportsInRadius(
+        point: spot,
+        category: IssueCategory.pothole,
+        existingReports: [rejectedReport],
+      );
+      expect(matches, isEmpty);
+
+      final repo = ReportRepository(initialReports: [rejectedReport]);
+      final vm = ReportWizardViewModel(
+        repository: repo,
+        initialCategory: IssueCategory.pothole,
+        initialCoordinates: spot,
+        initialPhotoPaths: const ['data:image/png;base64,AAA'],
+        civicAiService: _UnconfiguredFakeCivicAiService(),
+        ipGeolocationService: const _FakeIpGeoService(null),
+      );
+      vm.recordLiveGpsResult(
+        const LocationSuccess(
+          point: spot,
+          accuracyMeters: 8,
+          isOutsideCambodia: false,
+        ),
+      );
+      expect(vm.nearbySimilarReports, isEmpty);
+      expect(vm.isHardSelfBlockedAtPin, isFalse);
+      vm.dispose();
+      repo.dispose();
+    });
   });
 
   group('R1–R4 Comment GPS Tags, Real Author Names & Deletable Alerts', () {
@@ -3842,14 +3885,25 @@ void main() {
       await reopened.hydrate();
       expect(reopened.draftCount, equals(2));
 
-      // Third wizard near draft1 (within 50m, same category) sees draft1 & draft2 pins and nearby warning.
+      // Third wizard near draft1 defaults to hiding different-category drafts (draft-2 trash),
+      // shows matching draft-1 (pothole), toggles All types, and resets when switching category.
       final vm = ReportWizardViewModel(
         repository: reopened,
         initialCoordinates: const LatLng(11.55645, 104.92825),
       );
-      expect(vm.otherSavedDraftsWithPin.length, equals(2));
+      expect(vm.showAllCategoriesOnStep3, isFalse);
+      expect(vm.otherSavedDraftsWithPin.map((d) => d.id), equals(['draft-1']));
       expect(vm.nearbySimilarSavedDraft, isNotNull);
       expect(vm.nearbySimilarSavedDraft!.draft.id, equals('draft-1'));
+
+      vm.toggleShowAllCategoriesOnStep3();
+      expect(vm.showAllCategoriesOnStep3, isTrue);
+      expect(vm.otherSavedDraftsWithPin.length, equals(2));
+      expect(vm.nearbySimilarSavedDraft!.draft.id, equals('draft-1'));
+
+      vm.selectCategory(IssueCategory.trash);
+      expect(vm.showAllCategoriesOnStep3, isFalse);
+      expect(vm.otherSavedDraftsWithPin.map((d) => d.id), equals(['draft-2']));
       vm.dispose();
 
       // Resuming and submitting draft-1 must keep draft-2 intact.

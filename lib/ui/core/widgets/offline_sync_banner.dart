@@ -71,168 +71,232 @@ class OfflineSyncBanner extends StatelessWidget {
                       horizontal: 16,
                       vertical: 9,
                     ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          showRejectedBanner
-                              ? Icons.warning_amber_rounded
-                              : showDraftsReadyBanner
-                              ? Icons.edit_note_rounded
-                              : (isOnline
-                                    ? Icons.cloud_upload_outlined
-                                    : Icons.wifi_off_rounded),
-                          size: 17,
-                          color: showRejectedBanner
-                              ? AppColors.danger
-                              : showDraftsReadyBanner
-                              ? AppColors.saffronInk
-                              : (isOnline ? AppColors.teal : AppColors.saffron),
-                        ),
-                        const SizedBox(width: 9),
-                        Expanded(
-                          child: Semantics(
-                            container: true,
-                            liveRegion: true,
-                            child: Text(
-                              showRejectedBanner
-                                  ? tr.primary(
-                                      'របាយការណ៍ក្រៅបណ្តាញ $rejectedCount ត្រូវបានបដិសេធដោយ AI — សូមលុប ហើយរាយការណ៍ម្តងទៀត',
-                                      '$rejectedCount offline report(s) rejected by AI — please delete & report again',
-                                    )
-                                  : showDraftsReadyBanner
-                                  ? tr.primary(
-                                      'មានសេចក្តីព្រាង $draftCount កំពុងរង់ចាំផ្ទៀងផ្ទាត់ និងផ្ញើ',
-                                      '$draftCount saved draft(s) ready to verify & submit',
-                                    )
-                                  : isOnline
-                                  ? tr.primary(
-                                      'មានរបាយការណ៍រង់ចាំផ្ញើ ($pendingCount) · ត្រៀមផ្ញើឡើងវិញ',
-                                      '$pendingCount offline report(s) ready to sync',
-                                    )
-                                  : tr.primary(
-                                      pendingCount > 0
-                                          ? 'គ្មានអ៊ីនធឺណិត · របាយការណ៍រង់ចាំផ្ញើ ($pendingCount)'
-                                          : 'គ្មានអ៊ីនធឺណិត — របាយការណ៍នឹងរក្សាទុកក្នុងឧបករណ៍',
-                                      pendingCount > 0
-                                          ? 'Offline · $pendingCount report(s) queued for auto-sync'
-                                          : 'Offline — reports save locally & auto-sync when online',
-                                    ),
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                                color: showRejectedBanner
-                                    ? AppColors.danger
-                                    : showDraftsReadyBanner
-                                    ? AppColors.saffronInk
-                                    : (isOnline
-                                          ? AppColors.tealDark
-                                          : AppColors.paper),
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (showRejectedBanner) ...[
-                          const SizedBox(width: 8),
-                          FilledButton(
-                            key: const Key('banner-review-rejected-btn'),
-                            onPressed: () {
-                              HapticFeedback.selectionClick();
-                              final rejected = repo.reports.firstWhere(
-                                (r) => r.syncStatus == SyncStatus.rejectedByAi,
-                              );
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      TrackingPage(reportId: rejected.id),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final textScale = MediaQuery.textScalerOf(context)
+                            .scale(1.0);
+                        final stackAction =
+                            constraints.maxWidth < 380 || textScale > 1.3;
+
+                        final Widget? actionButton = showRejectedBanner
+                            ? Semantics(
+                                button: true,
+                                excludeSemantics: true,
+                                label: tr.primary(
+                                  'ពិនិត្យរបាយការណ៍ដែលត្រូវបានបដិសេធដោយ AI',
+                                  'Review AI-rejected report',
                                 ),
-                              );
-                            },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.danger,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 8,
-                              ),
-                              minimumSize: const Size(48, 44),
-                            ),
-                            child: Text(
-                              tr.primary('ពិនិត្យ', 'Review'),
-                              style: const TextStyle(fontSize: 11.5),
-                            ),
-                          ),
-                        ] else if (showDraftsReadyBanner) ...[
-                          const SizedBox(width: 8),
-                          FilledButton(
-                            key: const Key('banner-resume-draft-btn'),
-                            onPressed: () {
-                              HapticFeedback.selectionClick();
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => ReportWizardPage(
-                                    initialDraft: repo.drafts.first,
-                                  ),
-                                ),
-                              );
-                            },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.saffronInk,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 8,
-                              ),
-                              minimumSize: const Size(48, 44),
-                            ),
-                            child: Text(
-                              tr.primary('បន្តផ្ញើ', 'Resume'),
-                              style: const TextStyle(fontSize: 11.5),
-                            ),
-                          ),
-                        ] else if (isOnline && pendingCount > 0) ...[
-                          const SizedBox(width: 8),
-                          FilledButton(
-                            key: const Key('banner-sync-now-btn'),
-                            onPressed: () {
-                              HapticFeedback.selectionClick();
-                              if (repo.apiService.isConfigured) {
-                                unawaited(repo.syncPendingWithBackend());
-                                return;
-                              }
-                              final synced = repo.syncPendingReports();
-                              if (synced > 0 && context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      tr.primary(
-                                        'បានផ្ញើរបាយការណ៍ $synced រួចរាល់!',
-                                        'Synced $synced queued report(s)!',
+                                child: FilledButton(
+                                  key: const Key('banner-review-rejected-btn'),
+                                  onPressed: () {
+                                    HapticFeedback.selectionClick();
+                                    final rejected = repo.reports.firstWhere(
+                                      (r) =>
+                                          r.syncStatus ==
+                                          SyncStatus.rejectedByAi,
+                                    );
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            TrackingPage(reportId: rejected.id),
                                       ),
+                                    );
+                                  },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppColors.danger,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 10,
                                     ),
+                                    minimumSize: const Size(48, 48),
+                                    tapTargetSize: MaterialTapTargetSize.padded,
                                   ),
-                                );
-                              }
-                            },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.teal,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 8,
+                                  child: Text(
+                                    tr.primary('ពិនិត្យ', 'Review'),
+                                    style: const TextStyle(fontSize: 11.5),
+                                  ),
+                                ),
+                              )
+                            : showDraftsReadyBanner
+                            ? Semantics(
+                                button: true,
+                                excludeSemantics: true,
+                                label: tr.primary(
+                                  'បន្តផ្ញើសេចក្តីព្រាងដែលបានរក្សាទុក',
+                                  'Resume saved draft',
+                                ),
+                                child: FilledButton(
+                                  key: const Key('banner-resume-draft-btn'),
+                                  onPressed: () {
+                                    HapticFeedback.selectionClick();
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ReportWizardPage(
+                                          initialDraft: repo.drafts.first,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppColors.saffronInk,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 10,
+                                    ),
+                                    minimumSize: const Size(48, 48),
+                                    tapTargetSize: MaterialTapTargetSize.padded,
+                                  ),
+                                  child: Text(
+                                    tr.primary('បន្តផ្ញើ', 'Resume'),
+                                    style: const TextStyle(fontSize: 11.5),
+                                  ),
+                                ),
+                              )
+                            : (isOnline && pendingCount > 0)
+                            ? Semantics(
+                                button: true,
+                                excludeSemantics: true,
+                                label: tr.primary(
+                                  'ផ្ញើរបាយការណ៍ក្រៅបណ្តាញឥឡូវ',
+                                  'Sync queued reports now',
+                                ),
+                                child: FilledButton(
+                                  key: const Key('banner-sync-now-btn'),
+                                  onPressed: () {
+                                    HapticFeedback.selectionClick();
+                                    if (repo.apiService.isConfigured) {
+                                      unawaited(repo.syncPendingWithBackend());
+                                      return;
+                                    }
+                                    final synced = repo.syncPendingReports();
+                                    if (synced > 0 && context.mounted) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            tr.primary(
+                                              'បានផ្ញើរបាយការណ៍ $synced រួចរាល់!',
+                                              'Synced $synced queued report(s)!',
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppColors.teal,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 10,
+                                    ),
+                                    minimumSize: const Size(48, 48),
+                                    tapTargetSize: MaterialTapTargetSize.padded,
+                                  ),
+                                  child: Text(
+                                    tr.primary('ផ្ញើឥឡូវ', 'Sync now'),
+                                    style: const TextStyle(fontSize: 11.5),
+                                  ),
+                                ),
+                              )
+                            : null;
+
+                        final messageContent = Row(
+                          children: [
+                            Icon(
+                              showRejectedBanner
+                                  ? Icons.warning_amber_rounded
+                                  : showDraftsReadyBanner
+                                  ? Icons.edit_note_rounded
+                                  : (isOnline
+                                        ? Icons.cloud_upload_outlined
+                                        : Icons.wifi_off_rounded),
+                              size: 17,
+                              color: showRejectedBanner
+                                  ? AppColors.danger
+                                  : showDraftsReadyBanner
+                                  ? AppColors.saffronInk
+                                  : (isOnline
+                                        ? AppColors.teal
+                                        : AppColors.saffron),
+                            ),
+                            const SizedBox(width: 9),
+                            Expanded(
+                              child: Semantics(
+                                container: true,
+                                liveRegion: true,
+                                child: Text(
+                                  showRejectedBanner
+                                      ? tr.primary(
+                                          'របាយការណ៍ក្រៅបណ្តាញ $rejectedCount ត្រូវបានបដិសេធដោយ AI — សូមលុប ហើយរាយការណ៍ម្តងទៀត',
+                                          '$rejectedCount offline report(s) rejected by AI — please delete & report again',
+                                        )
+                                      : showDraftsReadyBanner
+                                      ? tr.primary(
+                                          'មានសេចក្តីព្រាង $draftCount កំពុងរង់ចាំផ្ទៀងផ្ទាត់ និងផ្ញើ',
+                                          '$draftCount saved draft(s) ready to verify & submit',
+                                        )
+                                      : isOnline
+                                      ? tr.primary(
+                                          'មានរបាយការណ៍រង់ចាំផ្ញើ ($pendingCount) · ត្រៀមផ្ញើឡើងវិញ',
+                                          '$pendingCount offline report(s) ready to sync',
+                                        )
+                                      : tr.primary(
+                                          pendingCount > 0
+                                              ? 'គ្មានអ៊ីនធឺណិត · របាយការណ៍រង់ចាំផ្ញើ ($pendingCount)'
+                                              : 'គ្មានអ៊ីនធឺណិត — របាយការណ៍នឹងរក្សាទុកក្នុងឧបករណ៍',
+                                          pendingCount > 0
+                                              ? 'Offline · $pendingCount report(s) queued for auto-sync'
+                                              : 'Offline — reports save locally & auto-sync when online',
+                                        ),
+                                  softWrap: true,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: showRejectedBanner
+                                        ? AppColors.danger
+                                        : showDraftsReadyBanner
+                                        ? AppColors.saffronInk
+                                        : (isOnline
+                                              ? AppColors.tealDark
+                                              : AppColors.paper),
+                                  ),
+                                ),
                               ),
-                              minimumSize: const Size(48, 44),
                             ),
-                            child: Text(
-                              tr.primary('ផ្ញើឥឡូវ', 'Sync now'),
-                              style: const TextStyle(fontSize: 11.5),
-                            ),
-                          ),
-                        ],
-                      ],
+                          ],
+                        );
+
+                        if (stackAction && actionButton != null) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              messageContent,
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: actionButton,
+                              ),
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          children: [
+                            Expanded(child: messageContent),
+                            if (actionButton != null) ...[
+                              const SizedBox(width: 8),
+                              actionButton,
+                            ],
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),

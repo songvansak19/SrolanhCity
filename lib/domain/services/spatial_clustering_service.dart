@@ -35,7 +35,10 @@ abstract final class SpatialClusteringService {
     final matches = <DuplicateMatch>[];
 
     for (final report in existingReports) {
-      if (report.status == ReportStatus.resolved) continue;
+      if (report.status == ReportStatus.resolved ||
+          report.syncStatus == SyncStatus.rejectedByAi) {
+        continue;
+      }
       if (report.category != category) continue;
 
       final pinMeters = distanceMeters(point, report.coordinates);

@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     gemini_audio_model: str = ""
+    gemini_fallback_models: str = ""
 
     # Auth (PyJWT)
     jwt_secret_key: str = "change-me-in-production-use-32-plus-chars"

@@ -1140,3 +1140,58 @@ def test_create_report_enforces_photo_hmac_duplicate_and_rate_limits(
     finally:
         sqlite_app.dependency_overrides.pop(get_ai_proxy_service, None)
         sqlite_app.dependency_overrides.pop(get_report_create_limiter, None)
+
+
+def test_ai_proxy_fallback_model_and_429_quota_handling(stub_app: FastAPI) -> None:
+    """Fallback to secondary models on 429 quota errors, and return 429 when all models exhaust."""
+    sample_img = base64.b64encode(b"fake-image").decode("ascii")
+    req_body = {"image_base64": sample_img, "mime_type": "image/jpeg", "language": "en"}
+    called_models: list[str] = []
+    fail_all = False
+
+    proxy = AiProxyService(
+        settings=Settings(
+            gemini_api_key="fake-key",
+            gemini_model="gemini-primary",
+            gemini_fallback_models="gemini-fallback-1, gemini-fallback-2",
+            offline_stub_db=True,
+        )
+    )
+
+    async def _fake_generate(*, model: str, **_kwargs: object) -> SimpleNamespace:
+        called_models.append(model)
+        if fail_all or model == "gemini-primary":
+            raise RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
+        return SimpleNamespace(
+            text=(
+                '{"is_civic_issue": true, "is_public_space": true, '
+                '"category": "pothole", "confidence_percent": 90, "severity": 3}'
+            )
+        )
+
+    fake_client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=_fake_generate))
+    )
+    proxy._require_client = lambda: fake_client  # type: ignore[method-assign]
+    stub_app.dependency_overrides[get_ai_proxy_service] = lambda: proxy
+
+    try:
+        with TestClient(stub_app) as client:
+            # 1. Primary 429 -> seamlessly falls back to gemini-fallback-1 -> 200 OK
+            ok_resp = client.post("/api/v1/ai/classify-issue", json=req_body)
+            assert ok_resp.status_code == 200
+            assert ok_resp.json()["is_civic_issue"] is True
+            assert called_models == ["gemini-primary", "gemini-fallback-1"]
+
+            # 2. All models 429 -> clean HTTP 429 instead of 502
+            called_models.clear()
+            fail_all = True
+            exhausted_resp = client.post("/api/v1/ai/classify-issue", json=req_body)
+            assert exhausted_resp.status_code == 429
+            assert called_models == [
+                "gemini-primary",
+                "gemini-fallback-1",
+                "gemini-fallback-2",
+            ]
+    finally:
+        stub_app.dependency_overrides.pop(get_ai_proxy_service, None)

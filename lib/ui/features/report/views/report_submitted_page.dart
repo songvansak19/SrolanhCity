@@ -65,10 +65,14 @@ class ReportSubmittedPage extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                             crossAxisAlignment: CrossAxisAlignment.center,
                             textAlign: TextAlign.center,
+                            isHeader: true,
                           ),
                           const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 8,
+                            runSpacing: 6,
                             children: [
                               Text(
                                 report.id,
@@ -77,20 +81,16 @@ class ReportSubmittedPage extends StatelessWidget {
                                   color: AppColors.teal,
                                 ),
                               ),
-                              const SizedBox(width: 8),
                               PriorityBadge(
                                 breakdown: report.priority,
                                 bilingual: tr,
                                 compact: true,
                               ),
-                              if (report.syncStatus ==
-                                  SyncStatus.pendingSync) ...[
-                                const SizedBox(width: 6),
+                              if (report.syncStatus == SyncStatus.pendingSync)
                                 SyncStatusBadge(
                                   status: report.syncStatus,
                                   bilingual: tr,
                                 ),
-                              ],
                             ],
                           ),
                           const SizedBox(height: 22),
@@ -283,8 +283,15 @@ class ReportSubmittedPage extends StatelessWidget {
                   const SizedBox(height: 14),
                   SizedBox(
                     width: double.infinity,
-                    height: 54,
                     child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(54),
+                        tapTargetSize: MaterialTapTargetSize.padded,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
                       onPressed: () => Navigator.pushReplacement<void, void>(
                         context,
                         MaterialPageRoute<void>(
@@ -293,6 +300,7 @@ class ReportSubmittedPage extends StatelessWidget {
                       ),
                       child: Text(
                         tr.paired('តាមដានរបាយការណ៍', 'Track my report'),
+                        textAlign: TextAlign.center,
                       ),
                     ),
                   ),
@@ -300,9 +308,16 @@ class ReportSubmittedPage extends StatelessWidget {
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
-                      height: 50,
                       child: OutlinedButton.icon(
                         key: const Key('submitted-continue-next-draft-btn'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
+                          tapTargetSize: MaterialTapTargetSize.padded,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
                         onPressed: () => Navigator.pushReplacement<void, void>(
                           context,
                           MaterialPageRoute<void>(
@@ -317,16 +332,22 @@ class ReportSubmittedPage extends StatelessWidget {
                             'បន្តសេចក្តីព្រាងបន្ទាប់ (${repo.draftCount} នៅសល់)',
                             'Continue next draft (${repo.draftCount} left)',
                           ),
+                          textAlign: TextAlign.center,
                         ),
                       ),
                     ),
                   ],
                   const SizedBox(height: 6),
                   TextButton(
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(48, 48),
+                      tapTargetSize: MaterialTapTargetSize.padded,
+                    ),
                     onPressed: () => Navigator.pop(context),
                     child: Text(
                       tr.paired('ត្រឡប់ទៅទំព័រដើម', 'Back to home'),
                       style: const TextStyle(color: AppColors.muted),
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 ],
