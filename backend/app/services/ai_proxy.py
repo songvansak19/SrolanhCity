@@ -82,6 +82,7 @@ class AiProxyService:
 
     MAX_IMAGE_BYTES: int = 10 * 1024 * 1024  # 10 MiB
     MAX_AUDIO_BYTES: int = 20 * 1024 * 1024  # 20 MiB
+    MIN_CIVIC_CONFIDENCE: int = 75
 
     def __init__(
         self,
@@ -193,12 +194,21 @@ class AiProxyService:
         )
         client = self._require_client()
         prompt = (
-            "You are SrolanhCity's Cambodia civic infrastructure classifier. "
+            "You are SrolanhCity's strict Cambodia public civic infrastructure classifier. "
             "Inspect the image and respond ONLY with JSON containing keys: "
-            "is_civic_issue (bool), "
+            "is_civic_issue (bool), is_public_space (bool), "
             "category ('pothole'|'streetlight'|'drain'|'trash'|'other'|null), "
             "confidence_percent (1..99), severity (2, 3, or 5), "
             "khmer_summary, english_summary, khmer_reason, english_reason. "
+            "Rules: "
+            "1) Set is_civic_issue=true AND is_public_space=true ONLY when the photo clearly "
+            "shows a real PUBLIC civic infrastructure problem (public road pothole/crack, "
+            "broken public streetlight, clogged/flooded public street drain, significant illegal "
+            "garbage dumping on a public street/sidewalk/public lot, or damaged public utility). "
+            "2) Set is_civic_issue=false, is_public_space=false, and category=null for private "
+            "backyards, residential gardens/yards, indoor rooms, desks, selfies, people, pets, "
+            "normal vehicles, or minor household clutter/items. "
+            "3) When unsure whether it is a real public civic issue, set is_civic_issue=false. "
             f"Preferred language: {payload.language}. "
             f"User hint: {payload.description_hint or 'none'}."
         )
@@ -212,6 +222,13 @@ class AiProxyService:
         try:
             is_civic_issue = self._require_strict_bool(
                 data.get("is_civic_issue", False), field_name="is_civic_issue"
+            )
+            is_public_space = (
+                self._require_strict_bool(
+                    data["is_public_space"], field_name="is_public_space"
+                )
+                if "is_public_space" in data
+                else True
             )
             raw_cat = self._require_optional_str(data.get("category"), field_name="category")
             valid_cats = {c.value for c in IssueCategoryEnum}
@@ -230,6 +247,28 @@ class AiProxyService:
                     ),
                 ),
             )
+            english_reason = self._require_optional_str(
+                data.get("english_reason"), field_name="english_reason"
+            )
+            khmer_reason = self._require_optional_str(
+                data.get("khmer_reason"), field_name="khmer_reason"
+            )
+            if (
+                not is_civic_issue
+                or not is_public_space
+                or category is None
+                or confidence < self.MIN_CIVIC_CONFIDENCE
+            ):
+                is_civic_issue = False
+                category = None
+                if not (english_reason or "").strip():
+                    english_reason = (
+                        "Photo does not clearly show a public civic infrastructure issue."
+                    )
+                if not (khmer_reason or "").strip():
+                    khmer_reason = (
+                        "រូបភាពនេះមិនបង្ហាញច្បាស់ពីបញ្ហាហេដ្ឋារចនាសម្ព័ន្ធសាធារណៈទេ។"
+                    )
             return ClassifyIssueResponse(
                 is_civic_issue=is_civic_issue,
                 category=category,
@@ -237,8 +276,8 @@ class AiProxyService:
                 severity=normalized_sev,
                 khmer_summary=data.get("khmer_summary"),
                 english_summary=data.get("english_summary"),
-                khmer_reason=data.get("khmer_reason"),
-                english_reason=data.get("english_reason"),
+                khmer_reason=khmer_reason,
+                english_reason=english_reason,
             )
         except (TypeError, ValueError, OverflowError, ValidationError) as exc:
             raise AiUpstreamResponseError(

@@ -933,3 +933,51 @@ async def test_ai_proxy_wrong_type_json_fields_reject_coercion_with_502(
             resp = _post_response_with_upstream(path, req_body, valid_fallback_json)
             assert resp.status_code == 200
             assert resp.json()["category"] is None
+
+
+@pytest.mark.asyncio
+async def test_classify_issue_public_space_and_confidence_guard() -> None:
+    """Reject non-public spaces and low-confidence detections even if Gemini flags an issue."""
+    sample_img = base64.b64encode(b"fake-image").decode("ascii")
+    req = ClassifyIssueRequest(image_base64=sample_img, mime_type="image/jpeg", language="en")
+
+    def _make_proxy(raw_json: str) -> AiProxyService:
+        proxy = AiProxyService(settings=Settings(gemini_api_key="fake-key", offline_stub_db=True))
+
+        async def _fake_generate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(text=raw_json)
+
+        fake_client = SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=_fake_generate))
+        )
+        proxy._require_client = lambda: fake_client  # type: ignore[method-assign]
+        return proxy
+
+    # 1. Private backyard (is_public_space=False) is downgraded to non-civic
+    backyard_res = await _make_proxy(
+        '{"is_civic_issue": true, "is_public_space": false, "category": "trash", '
+        '"confidence_percent": 90, "severity": 3}'
+    ).classify_issue(req)
+    assert backyard_res.is_civic_issue is False
+    assert backyard_res.category is None
+    assert backyard_res.english_reason
+
+    # 2. Low confidence (< 75) is downgraded to non-civic
+    low_conf_res = await _make_proxy(
+        '{"is_civic_issue": true, "is_public_space": true, "category": "trash", '
+        '"confidence_percent": 65, "severity": 3}'
+    ).classify_issue(req)
+    assert low_conf_res.is_civic_issue is False
+    assert low_conf_res.category is None
+    assert low_conf_res.khmer_reason
+
+    # 3. High-confidence public civic issue passes both gates
+    valid_res = await _make_proxy(
+        '{"is_civic_issue": true, "is_public_space": true, "category": "pothole", '
+        '"confidence_percent": 88, "severity": 5, '
+        '"english_summary": "Deep pothole", "khmer_summary": "រណ្តៅផ្លូវជ្រៅ"}'
+    ).classify_issue(req)
+    assert valid_res.is_civic_issue is True
+    assert valid_res.category is not None
+    assert valid_res.category.value == "pothole"
+    assert valid_res.confidence_percent == 88
