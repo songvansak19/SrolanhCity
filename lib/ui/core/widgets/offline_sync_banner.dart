@@ -55,9 +55,8 @@ class _OfflineSyncBannerState extends State<OfflineSyncBanner> {
   }
 
   Widget _buildDraftsDropdown(List<ReportDraft> drafts, Bilingual tr) {
-    return Container(
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.white,
         border: const Border(
           top: BorderSide(color: AppColors.border),
           bottom: BorderSide(color: AppColors.border),
@@ -70,16 +69,21 @@ class _OfflineSyncBannerState extends State<OfflineSyncBanner> {
           ),
         ],
       ),
-      constraints: const BoxConstraints(maxHeight: 280),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var i = 0; i < drafts.length; i++) ...[
-              if (i > 0) const Divider(height: 1, color: AppColors.border),
-              _buildDraftRow(drafts[i], tr),
-            ],
-          ],
+      child: Material(
+        color: Colors.white,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 280),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < drafts.length; i++) ...[
+                  if (i > 0) const Divider(height: 1, color: AppColors.border),
+                  _buildDraftRow(drafts[i], tr),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -263,6 +267,7 @@ class _OfflineSyncBannerState extends State<OfflineSyncBanner> {
             '$draftCount saved draft(s) ready',
           );
 
+    final topPadding = useSafeTop ? MediaQuery.paddingOf(context).top : 0.0;
     final content = InkWell(
       key: const Key('banner-drafts-toggle-btn'),
       onTap: () {
@@ -270,9 +275,9 @@ class _OfflineSyncBannerState extends State<OfflineSyncBanner> {
         setState(() => _draftsExpanded = !_draftsExpanded);
       },
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 48),
+        constraints: BoxConstraints(minHeight: 48 + topPadding),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: EdgeInsets.fromLTRB(16, 8 + topPadding, 16, 8),
           child: Row(
             children: [
               Icon(
@@ -350,7 +355,7 @@ class _OfflineSyncBannerState extends State<OfflineSyncBanner> {
               '$labelText · ចុចដើម្បីមើលបញ្ជីសេចក្តីព្រាង',
               '$labelText, tap to view saved drafts list',
             ),
-      child: useSafeTop ? SafeArea(bottom: false, child: content) : content,
+      child: content,
     );
   }
 
@@ -389,9 +394,7 @@ class _OfflineSyncBannerState extends State<OfflineSyncBanner> {
         child: !visible
             ? const SizedBox.shrink(key: ValueKey('offline-banner-hidden'))
             : Column(
-                key: ValueKey(
-                  'offline-banner-$isOnline-$pendingCount-$rejectedCount-$draftCount',
-                ),
+                key: const ValueKey('offline-banner-visible'),
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (showStandaloneDraftsBar)
@@ -644,7 +647,16 @@ class _OfflineSyncBannerState extends State<OfflineSyncBanner> {
                         ),
                       ),
                   ],
-                  if (showExpandedList) _buildDraftsDropdown(repo.drafts, tr),
+                  AnimatedSize(
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: showExpandedList
+                        ? _buildDraftsDropdown(repo.drafts, tr)
+                        : const SizedBox.shrink(),
+                  ),
                 ],
               ),
       ),

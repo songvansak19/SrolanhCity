@@ -3439,6 +3439,14 @@ void main() {
         );
         expect(find.byKey(const Key('banner-draft-item-d-two')), findsNothing);
 
+        // Tapping d-one resumes the wizard and collapses the dropdown.
+        await tester.tap(find.byKey(const Key('banner-draft-resume-d-one')));
+        await tester.pumpAndSettle();
+        expect(find.byType(ReportWizardPage), findsOneWidget);
+        Navigator.of(tester.element(find.byType(ReportWizardPage))).pop();
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('banner-draft-item-d-one')), findsNothing);
+
         // Open another wizard with a photo draft -> advance Step 2 -> Step 3 and verify d-one pin renders.
         final activeDraft = ReportDraft(
           id: 'd-current',
