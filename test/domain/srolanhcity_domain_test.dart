@@ -4026,6 +4026,343 @@ void main() {
       expect(vm.description, equals('Deep pothole near school'));
       vm.dispose();
     });
+
+    test('fetchAlerts reads FastAPI items key and refreshFromBackend preserves local operational alerts', () async {
+      final now = DateTime.now().toUtc();
+      final mockClient = MockClient((req) async {
+        if (req.url.path == '/api/v1/auth/guest') {
+          return http.Response(
+            jsonEncode({'access_token': 'tok-alerts', 'user_id': 'u-alerts'}),
+            200,
+          );
+        }
+        if (req.url.path == '/api/v1/reports' && req.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'tier': 'single',
+              'zoom': 15.0,
+              'total_matching': 0,
+              'provinces': const [],
+              'areas': const [],
+              'pins': const [],
+            }),
+            200,
+          );
+        }
+        if (req.url.path == '/api/v1/alerts' && req.method == 'GET') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'unread_count': 1,
+                'items': [
+                  {
+                    'id': 'alert-srv-1',
+                    'reportId': '#SC-SRV1',
+                    'khmerTitle': 'បានដោះស្រាយ',
+                    'englishTitle': 'Server resolved alert',
+                    'khmerSubtitle': 'ភ្នំពេញ',
+                    'englishSubtitle': 'Phnom Penh',
+                    'createdAt': now.toIso8601String(),
+                    'isRead': false,
+                  },
+                ],
+              }),
+            ),
+            200,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final api = CivicBackendApiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      final localAiAlert = AlertItem(
+        id: 'alert-ai-reject-1',
+        reportId: '#SC-LOCAL1',
+        khmerTitle: 'បដិសេធ',
+        englishTitle: 'Local AI rejection',
+        khmerSubtitle: 'សូមលុប',
+        englishSubtitle: 'Delete',
+        createdAt: now.subtract(const Duration(minutes: 1)),
+        isRead: false,
+      );
+      final staleAlert = AlertItem(
+        id: 'alert-seeded-stale',
+        reportId: '#SC-OLD',
+        khmerTitle: 'ចាស់',
+        englishTitle: 'Stale alert',
+        khmerSubtitle: '',
+        englishSubtitle: '',
+        createdAt: now.subtract(const Duration(hours: 1)),
+        isRead: true,
+      );
+      final repo = ReportRepository(
+        initialReports: const [],
+        initialAlerts: [localAiAlert, staleAlert],
+        apiService: api,
+      );
+
+      await repo.refreshFromBackend();
+
+      expect(
+        repo.alerts.map((a) => a.id).toList(),
+        equals(['alert-srv-1', 'alert-ai-reject-1']),
+      );
+      repo.dispose();
+    });
+
+    test('createReportDetailed sends metadata fields and transient 503 degrades online report to pendingSync', () async {
+      Map<String, dynamic>? capturedCreateBody;
+      var failCreate = true;
+      final syncedFromServer = <Map<String, dynamic>>[];
+      final mockClient = MockClient((req) async {
+        if (req.url.path == '/api/v1/auth/guest') {
+          return http.Response(
+            jsonEncode({'access_token': 'tok-sync', 'user_id': 'u-sync'}),
+            200,
+          );
+        }
+        if (req.url.path == '/api/v1/reports' && req.method == 'POST') {
+          capturedCreateBody = jsonDecode(req.body) as Map<String, dynamic>;
+          if (failCreate) {
+            return http.Response('Backend cold start', 503);
+          }
+          final srv = <String, dynamic>{
+            'id': '#SC-SRV99',
+            'category': capturedCreateBody!['category'],
+            'khmerTitle': capturedCreateBody!['khmer_title'],
+            'englishTitle': capturedCreateBody!['english_title'],
+            'description': capturedCreateBody!['description'],
+            'khmerLocation': capturedCreateBody!['khmer_location'],
+            'englishLocation': capturedCreateBody!['english_location'],
+            'lat': capturedCreateBody!['lat'],
+            'lng': capturedCreateBody!['lng'],
+            'provinceCode': capturedCreateBody!['province_code'],
+            'roadClass': capturedCreateBody!['road_class'],
+            'severity': capturedCreateBody!['severity'],
+            'affectedCitizens': 1,
+            'status': 'submitted',
+            'khmerAgency': 'MPWT',
+            'englishAgency': 'MPWT',
+            'locationVerificationTier':
+                capturedCreateBody!['location_verification_tier'],
+            'createdByCurrentUser': true,
+            'isMine': true,
+            'createdAt': DateTime.now().toUtc().toIso8601String(),
+            'timeline': const <Map<String, dynamic>>[],
+            'citizenComments': const <Map<String, dynamic>>[],
+          };
+          syncedFromServer.add(srv);
+          return http.Response.bytes(
+            utf8.encode(jsonEncode(srv)),
+            201,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (req.url.path == '/api/v1/reports' && req.method == 'GET') {
+          return http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'tier': 'single',
+                'zoom': 15.0,
+                'total_matching': syncedFromServer.length,
+                'provinces': const [],
+                'areas': const [],
+                'pins': syncedFromServer
+                    .map((r) => {'tier': 'single', 'report': r})
+                    .toList(),
+              }),
+            ),
+            200,
+            headers: const <String, String>{
+              'content-type': 'application/json; charset=utf-8',
+            },
+          );
+        }
+        if (req.url.path == '/api/v1/alerts') {
+          return http.Response(
+            jsonEncode({'unread_count': 0, 'items': const []}),
+            200,
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final api = CivicBackendApiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+      );
+      final repo = ReportRepository(initialReports: const [], apiService: api);
+      final submitted = repo.submitReport(
+        category: IssueCategory.other,
+        customTitle: 'Broken bridge rail',
+        description: 'Loose guardrail',
+        severity: 4,
+        coordinates: const LatLng(11.5564, 104.9282),
+        isAnonymous: false,
+        locationVerificationTier:
+            ReportLocationVerificationTier.photoExifVerified,
+        forceCreateNew: true,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(capturedCreateBody?['khmer_title'], equals('Broken bridge rail'));
+      expect(
+        capturedCreateBody?['english_title'],
+        equals('Broken bridge rail'),
+      );
+      expect(capturedCreateBody?['province_code'], equals('phnom_penh'));
+      expect(capturedCreateBody?['road_class'], isNotNull);
+      expect(
+        capturedCreateBody?['location_verification_tier'],
+        equals('photoExifVerified'),
+      );
+      expect(capturedCreateBody?['force_create_new'], isTrue);
+
+      // Transient 503 downgraded it to pendingSync instead of losing it.
+      expect(
+        repo.findById(submitted.report.id)?.syncStatus,
+        equals(SyncStatus.pendingSync),
+      );
+      await repo.refreshFromBackend();
+      expect(repo.findById(submitted.report.id), isNotNull);
+
+      // Retry succeeds once server recovers.
+      failCreate = false;
+      await repo.syncPendingWithBackend();
+      expect(
+        repo.findById(submitted.report.id)?.syncStatus,
+        equals(SyncStatus.synced),
+      );
+      expect(repo.findById(submitted.report.id)?.id, equals('#SC-SRV99'));
+      repo.dispose();
+    });
+
+    test('CivicReport.effectiveComments preserves original description alongside backend comments and parses snake_case support tags', () {
+      final report = CivicReport.fromJson(<String, dynamic>{
+        'id': '#SC-CMT1',
+        'category': 'drain',
+        'khmerTitle': 'លូស្ទះ',
+        'englishTitle': 'Clogged drain',
+        'description': 'Original clogged drain near market',
+        'khmerLocation': 'ភ្នំពេញ',
+        'englishLocation': 'Phnom Penh',
+        'lat': 11.55,
+        'lng': 104.92,
+        'severity': 3,
+        'affectedCitizens': 2,
+        'status': 'submitted',
+        'khmerAgency': 'PPCH',
+        'englishAgency': 'PPCH',
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+        'timeline': const <Map<String, dynamic>>[],
+        'citizenComments': [
+          {
+            'id': 'c-2',
+            'text': 'Still flooded today',
+            'created_at': DateTime.now().toUtc().toIso8601String(),
+            'is_original_reporter': false,
+            'is_current_user': false,
+            'is_anonymous': false,
+            'author_name': 'Dara',
+            'verification_tier': 'remoteDistrict',
+            'remote_area': 'Toul Kork',
+          },
+        ],
+      });
+
+      expect(report.effectiveComments.length, equals(2));
+      expect(report.effectiveComments.first.isOriginalReporter, isTrue);
+      expect(
+        report.effectiveComments.first.text,
+        equals('Original clogged drain near market'),
+      );
+      expect(
+        report.effectiveComments.last.supportTier,
+        equals(SupportVerificationTier.remoteDistrict),
+      );
+      expect(
+        report.effectiveComments.last.supportAreaEnglish,
+        equals('Toul Kork'),
+      );
+    });
+
+    test('401 retry persists refreshed guest session and addSupport parses SupportActionResponse with integrity & coordinates', () async {
+      Map<String, dynamic>? supportRequestBody;
+      var supportCalls = 0;
+      final store = _InMemoryLocalStorage(<String, dynamic>{});
+      final mockClient = MockClient((req) async {
+        if (req.url.path == '/api/v1/auth/guest') {
+          return http.Response(
+            jsonEncode({
+              'access_token': 'tok-refreshed',
+              'user_id': 'u-refreshed',
+            }),
+            201,
+          );
+        }
+        if (req.url.path == '/api/v1/reports/%23SC-20519/support' &&
+            req.method == 'POST') {
+          supportCalls++;
+          if (supportCalls == 1) {
+            return http.Response('Expired token', 401);
+          }
+          supportRequestBody = jsonDecode(req.body) as Map<String, dynamic>;
+          return http.Response(
+            jsonEncode({
+              'report_id': '#SC-20519',
+              'affected_citizens': 19,
+              'joined_by_current_user': true,
+            }),
+            200,
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final api = CivicBackendApiService(
+        httpClient: mockClient,
+        baseUrl: 'http://localhost:8000',
+        initialAccessToken: 'tok-expired',
+      );
+      final repo = ReportRepository(storage: store, apiService: api);
+
+      final updated = repo.supportReport(
+        '#SC-20519',
+        tier: SupportVerificationTier.verifiedNearby,
+        distanceMeters: 42,
+        userCoordinates: const LatLng(11.5621, 104.9229),
+        integrityMetadata: const {'risk_level': 'trusted'},
+      );
+      expect(updated, isNotNull);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(supportCalls, equals(2));
+      expect(supportRequestBody?['lat'], closeTo(11.5621, 0.0001));
+      expect(supportRequestBody?['lng'], closeTo(104.9229, 0.0001));
+      expect(
+        (supportRequestBody?['integrity'] as Map?)?['risk_level'],
+        equals('trusted'),
+      );
+      final savedState = await store.readState();
+      expect(savedState?['authAccessToken'], equals('tok-refreshed'));
+      expect(savedState?['authUserId'], equals('u-refreshed'));
+
+      final parsed = await api.addSupport(
+        reportId: '#SC-20519',
+        payload: const {'verification_tier': 'verifiedNearby'},
+      );
+      expect(parsed?.affectedCitizens, equals(19));
+      expect(parsed?.joinedByCurrentUser, isTrue);
+      repo.dispose();
+    });
   });
 }
 

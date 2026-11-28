@@ -781,6 +781,7 @@ class CitizenComment {
   bool get isRemoteSupport => supportTier?.isRemote ?? false;
 
   CitizenComment copyWith({
+    String? id,
     String? text,
     DateTime? createdAt,
     bool? isOriginalReporter,
@@ -795,7 +796,7 @@ class CitizenComment {
     SupportReasonCategory? supportReasonCategory,
   }) {
     return CitizenComment(
-      id: id,
+      id: id ?? this.id,
       text: text ?? this.text,
       createdAt: createdAt ?? this.createdAt,
       isOriginalReporter: isOriginalReporter ?? this.isOriginalReporter,
@@ -862,14 +863,17 @@ class CitizenComment {
           (json['voiceTranscript'] as String?) ??
           (json['voice_transcript'] as String?),
       supportTier: SupportVerificationTier.fromName(
-        (json['supportTier'] as String?) ?? (json['support_tier'] as String?),
+        (json['supportTier'] as String?) ??
+            (json['support_tier'] as String?) ??
+            (json['verification_tier'] as String?),
       ),
       supportAreaKhmer:
           (json['supportAreaKhmer'] as String?) ??
           (json['support_area_khmer'] as String?),
       supportAreaEnglish:
           (json['supportAreaEnglish'] as String?) ??
-          (json['support_area_english'] as String?),
+          (json['support_area_english'] as String?) ??
+          (json['remote_area'] as String?),
       supportReasonCategory: SupportReasonCategory.fromName(
         (json['supportReasonCategory'] as String?) ??
             (json['support_reason_category'] as String?),
@@ -982,19 +986,22 @@ class CivicReport {
   /// Synthesizes the original reporter's entry for legacy persisted reports
   /// that predate [citizenComments].
   List<CitizenComment> get effectiveComments {
-    if (citizenComments.isNotEmpty) return citizenComments;
-    return [
-      CitizenComment(
-        id: 'c-orig-$id',
-        text: description.trim(),
-        createdAt: createdAt,
-        isOriginalReporter: true,
-        isCurrentUser: createdByCurrentUser || (isMine && !joinedByCurrentUser),
-        isAnonymous: isAnonymous,
-        severity: severity,
-        voiceTranscript: voiceTranscript,
-      ),
-    ];
+    if (citizenComments.any((c) => c.isOriginalReporter)) {
+      return citizenComments;
+    }
+    final synthesized = CitizenComment(
+      id: 'c-orig-$id',
+      text: description.trim(),
+      createdAt: createdAt,
+      isOriginalReporter: true,
+      isCurrentUser: createdByCurrentUser || (isMine && !joinedByCurrentUser),
+      isAnonymous: isAnonymous,
+      severity: severity,
+      voiceTranscript: voiceTranscript,
+    );
+    return citizenComments.isEmpty
+        ? [synthesized]
+        : [synthesized, ...citizenComments];
   }
 
   /// Additional citizen comments beyond the primary entry (for "+N more" pills).

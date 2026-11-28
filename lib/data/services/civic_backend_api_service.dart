@@ -47,6 +47,18 @@ class CreateReportOutcome {
   final String? englishReason;
 }
 
+class SupportApiResult {
+  const SupportApiResult({
+    this.affectedCitizens,
+    this.joinedByCurrentUser,
+    this.report,
+  });
+
+  final int? affectedCitizens;
+  final bool? joinedByCurrentUser;
+  final CivicReport? report;
+}
+
 class CivicBackendApiService {
   CivicBackendApiService({
     this.httpClient,
@@ -61,6 +73,8 @@ class CivicBackendApiService {
   final http.Client? httpClient;
   final String _baseUrl;
   String? _accessToken;
+  void Function(GuestAuthSession session)? onSessionUpdated;
+  String? Function()? deviceIdProvider;
 
   String get normalizedBaseUrl => _baseUrl;
   bool get isConfigured => _baseUrl.isNotEmpty;
@@ -102,7 +116,9 @@ class CivicBackendApiService {
       return null;
     }
     _accessToken = token;
-    return GuestAuthSession(accessToken: token, userId: userId);
+    final session = GuestAuthSession(accessToken: token, userId: userId);
+    onSessionUpdated?.call(session);
+    return session;
   }
 
   Future<bool> requestPhoneOtp(String phoneNumber) async {
@@ -140,7 +156,9 @@ class CivicBackendApiService {
       return null;
     }
     _accessToken = token;
-    return GuestAuthSession(accessToken: token, userId: userId);
+    final session = GuestAuthSession(accessToken: token, userId: userId);
+    onSessionUpdated?.call(session);
+    return session;
   }
 
   Future<List<CivicReport>?> fetchReportsViewport({
@@ -181,10 +199,12 @@ class CivicBackendApiService {
   Future<CivicReport?> createReport(
     CivicReport report, {
     String? photoVerificationToken,
+    bool forceCreateNew = false,
   }) async {
     final outcome = await createReportDetailed(
       report,
       photoVerificationToken: photoVerificationToken,
+      forceCreateNew: forceCreateNew,
     );
     return outcome.report;
   }
@@ -192,6 +212,7 @@ class CivicBackendApiService {
   Future<CreateReportOutcome> createReportDetailed(
     CivicReport report, {
     String? photoVerificationToken,
+    bool forceCreateNew = false,
   }) async {
     if (!isConfigured) return const CreateReportOutcome();
     String? photoBase64;
@@ -211,17 +232,23 @@ class CivicBackendApiService {
         uri: _uri('/api/v1/reports'),
         body: <String, dynamic>{
           'category': report.category.name,
+          'khmer_title': report.khmerTitle,
+          'english_title': report.englishTitle,
           'description': report.description,
           'lat': report.coordinates.latitude,
           'lng': report.coordinates.longitude,
+          'province_code': report.provinceCode,
+          'road_class': report.roadClass.name,
           'severity': report.severity,
           'is_anonymous': report.isAnonymous,
           'khmer_location': report.khmerLocation,
           'english_location': report.englishLocation,
+          'location_verification_tier': ?report.locationVerificationTier?.name,
           'voice_transcript': ?report.voiceTranscript,
           'photo_base64': ?photoBase64,
           'photo_verification_token': ?photoVerificationToken,
           'exif_stripped': report.exifStripped,
+          'force_create_new': forceCreateNew,
         },
       );
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -302,7 +329,7 @@ class CivicBackendApiService {
     return CivicReport.fromJson(decoded);
   }
 
-  Future<CivicReport?> addSupport({
+  Future<SupportApiResult?> addSupport({
     required String reportId,
     required Map<String, dynamic> payload,
   }) async {
@@ -313,25 +340,29 @@ class CivicBackendApiService {
       uri: _uri('/api/v1/reports/$encodedId/support'),
       body: payload,
     );
-    final rawReport = decoded?['report'];
-    if (rawReport is Map<String, dynamic>) {
-      return CivicReport.fromJson(rawReport);
-    }
-    return null;
+    return _parseSupportResult(decoded);
   }
 
-  Future<CivicReport?> removeSupport(String reportId) async {
+  Future<SupportApiResult?> removeSupport(String reportId) async {
     if (!isConfigured) return null;
     final encodedId = Uri.encodeComponent(reportId);
     final decoded = await _sendJson(
       method: 'DELETE',
       uri: _uri('/api/v1/reports/$encodedId/support'),
     );
-    final rawReport = decoded?['report'];
-    if (rawReport is Map<String, dynamic>) {
-      return CivicReport.fromJson(rawReport);
-    }
-    return null;
+    return _parseSupportResult(decoded);
+  }
+
+  SupportApiResult? _parseSupportResult(Map<String, dynamic>? decoded) {
+    if (decoded == null) return null;
+    final rawReport = decoded['report'];
+    return SupportApiResult(
+      affectedCitizens: (decoded['affected_citizens'] as num?)?.toInt(),
+      joinedByCurrentUser: decoded['joined_by_current_user'] as bool?,
+      report: rawReport is Map<String, dynamic>
+          ? CivicReport.fromJson(rawReport)
+          : null,
+    );
   }
 
   Future<CitizenComment?> addComment({
@@ -365,7 +396,7 @@ class CivicBackendApiService {
   Future<List<AlertItem>?> fetchAlerts() async {
     if (!isConfigured) return null;
     final decoded = await _sendJson(method: 'GET', uri: _uri('/api/v1/alerts'));
-    final rawAlerts = decoded?['alerts'];
+    final rawAlerts = decoded?['items'] ?? decoded?['alerts'];
     if (rawAlerts is! List) return null;
     return rawAlerts
         .whereType<Map<String, dynamic>>()
@@ -429,7 +460,9 @@ class CivicBackendApiService {
     ).timeout(requestTimeout);
     if (response.statusCode == 401 && includeAuth) {
       _accessToken = null;
-      final refreshed = await ensureGuestSession();
+      final refreshed = await ensureGuestSession(
+        deviceId: deviceIdProvider?.call(),
+      );
       if (refreshed != null) {
         response = await _dispatch(
           client: client,

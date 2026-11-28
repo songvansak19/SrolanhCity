@@ -141,19 +141,14 @@ abstract final class SupportActionCoordinator {
           report.id,
           tier: tier,
           distanceMeters: distanceMeters,
-        );
-        if (updated == null) {
-          return const SupportActionOutcome(succeeded: false);
-        }
-        repository.buildSupportApiPayload(
-          reportId: report.id,
-          tier: tier,
-          distanceMeters: distanceMeters,
           userCoordinates: userPoint,
           integrityMetadata: repository.buildIntegrityApiPayload(
             assessment: gpsAssessment,
           ),
         );
+        if (updated == null) {
+          return const SupportActionOutcome(succeeded: false);
+        }
         final distLabel = distanceMeters != null
             ? ' (${SupportEligibilityService.formatDistance(distanceMeters, englishFirst: englishFirst)})'
             : '';
@@ -212,10 +207,14 @@ abstract final class SupportActionCoordinator {
           report.id,
           tier: tier,
           distanceMeters: distanceMeters,
+          userCoordinates: userPoint,
           supportAreaKhmer: userAreaKhmer,
           supportAreaEnglish: userAreaEnglish,
           reasonCategory: reasonSubmission.category,
           reasonNote: reasonSubmission.note,
+          integrityMetadata: repository.buildIntegrityApiPayload(
+            assessment: gpsAssessment,
+          ),
         );
         if (updated == null) {
           return _buildDeniedOutcome(
@@ -230,18 +229,6 @@ abstract final class SupportActionCoordinator {
             bilingual: bilingual,
           );
         }
-        repository.buildSupportApiPayload(
-          reportId: report.id,
-          tier: tier,
-          distanceMeters: distanceMeters,
-          userCoordinates: userPoint,
-          supportAreaEnglish: userAreaEnglish,
-          reasonCategory: reasonSubmission.category,
-          reasonNote: reasonSubmission.note,
-          integrityMetadata: repository.buildIntegrityApiPayload(
-            assessment: gpsAssessment,
-          ),
-        );
         final tag = tier.formatTransparentTag(
           englishFirst: englishFirst,
           areaKhmer: userAreaKhmer,

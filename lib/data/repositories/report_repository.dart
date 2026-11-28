@@ -60,7 +60,10 @@ class ReportRepository extends ChangeNotifier {
        _profile = initialProfile ?? const UserProfile(),
        _drafts = initialDraft != null ? [initialDraft] : <ReportDraft>[],
        apiService = apiService ?? CivicBackendApiService(),
-       civicAiService = civicAiService ?? BackendCivicAiService();
+       civicAiService = civicAiService ?? BackendCivicAiService() {
+    this.apiService.deviceIdProvider = () => _authUserId;
+    this.apiService.onSessionUpdated = _handleBackendSessionUpdated;
+  }
 
   static const int maxSavedDrafts = 20;
 
@@ -69,6 +72,7 @@ class ReportRepository extends ChangeNotifier {
   final List<DateTime> _supportVoteTimestamps = <DateTime>[];
   final List<DateTime> _remoteProvinceSupportTimestamps = <DateTime>[];
   final Map<String, String> _localToServerIdMap = <String, String>{};
+  final Set<String> _inFlightCreationIds = <String>{};
   final LocalStorageService? storage;
   final CivicBackendApiService apiService;
   final CivicAiService civicAiService;
@@ -1012,10 +1016,12 @@ class ReportRepository extends ChangeNotifier {
     _persist();
     notifyListeners();
     if (_isOnline && apiService.isConfigured) {
+      _inFlightCreationIds.add(created.id);
       unawaited(
         _syncCreatedReport(
           created,
           photoVerificationToken: photoVerificationToken,
+          forceCreateNew: forceCreateNew,
         ),
       );
     }
@@ -1099,7 +1105,10 @@ class ReportRepository extends ChangeNotifier {
     _reports[index] = updated;
     _persist();
     notifyListeners();
-    if (_isOnline && apiService.isConfigured) {
+    final isLocalOnly =
+        existing.syncStatus == SyncStatus.pendingSync ||
+        existing.syncStatus == SyncStatus.rejectedByAi;
+    if (!isLocalOnly && _isOnline && apiService.isConfigured) {
       unawaited(
         _syncWithSession(
           () => apiService.quickEditReport(
@@ -1286,10 +1295,12 @@ class ReportRepository extends ChangeNotifier {
     String reportId, {
     SupportVerificationTier? tier,
     double? distanceMeters,
+    LatLng? userCoordinates,
     String? supportAreaKhmer,
     String? supportAreaEnglish,
     SupportReasonCategory? reasonCategory,
     String? reasonNote,
+    Map<String, dynamic>? integrityMetadata,
     DateTime? now,
   }) {
     final resolvedId = _resolveReportId(reportId);
@@ -1371,9 +1382,11 @@ class ReportRepository extends ChangeNotifier {
         reportId: resolvedId,
         tier: tier ?? SupportVerificationTier.verifiedNearby,
         distanceMeters: distanceMeters,
+        userCoordinates: userCoordinates,
         supportAreaEnglish: supportAreaEnglish,
         reasonCategory: reasonCategory,
         reasonNote: reasonNote,
+        integrityMetadata: integrityMetadata,
       );
       unawaited(
         _syncWithSession(
@@ -1538,10 +1551,11 @@ class ReportRepository extends ChangeNotifier {
   void markAlertRead(String alertId) {
     final index = _alerts.indexWhere((a) => a.id == alertId);
     if (index == -1 || _alerts[index].isRead) return;
-    _alerts[index] = _alerts[index].copyWith(isRead: true);
+    final updated = _alerts[index].copyWith(isRead: true);
+    _alerts[index] = updated;
     _persist();
     notifyListeners();
-    if (_isOnline && apiService.isConfigured) {
+    if (!_isLocalOnlyAlert(updated) && _isOnline && apiService.isConfigured) {
       unawaited(_syncWithSession(() => apiService.markAlertRead(alertId)));
     }
   }
@@ -1570,7 +1584,7 @@ class ReportRepository extends ChangeNotifier {
     final removed = _alerts.removeAt(index);
     _persist();
     notifyListeners();
-    if (_isOnline && apiService.isConfigured) {
+    if (!_isLocalOnlyAlert(removed) && _isOnline && apiService.isConfigured) {
       unawaited(_syncWithSession(() => apiService.deleteAlert(alertId)));
     }
     return (alert: removed, index: index);
@@ -1583,7 +1597,7 @@ class ReportRepository extends ChangeNotifier {
     _alerts.insert(targetIndex, alert);
     _persist();
     notifyListeners();
-    if (_isOnline && apiService.isConfigured) {
+    if (!_isLocalOnlyAlert(alert) && _isOnline && apiService.isConfigured) {
       unawaited(_syncWithSession(() => apiService.restoreAlerts([alert.id])));
     }
   }
@@ -1634,6 +1648,45 @@ class ReportRepository extends ChangeNotifier {
         ),
       );
     }
+  }
+
+  void _handleBackendSessionUpdated(GuestAuthSession session) {
+    final changed =
+        _authAccessToken != session.accessToken ||
+        _authUserId != session.userId;
+    _authAccessToken = session.accessToken;
+    _authUserId = session.userId;
+    if (changed) {
+      _persist();
+    }
+  }
+
+  bool _isLocalOnlyAlert(AlertItem alert) {
+    if (alert.id.startsWith('alert-ai-reject-') ||
+        alert.id.startsWith('alert-sync-') ||
+        alert.id.startsWith('alert-join-')) {
+      return true;
+    }
+    return _reports.any(
+      (r) =>
+          r.id == alert.reportId &&
+          (r.syncStatus == SyncStatus.pendingSync ||
+              r.syncStatus == SyncStatus.rejectedByAi ||
+              _inFlightCreationIds.contains(r.id)),
+    );
+  }
+
+  void _markReportPendingSync(String reportId) {
+    final idx = _reports.indexWhere((r) => r.id == reportId);
+    if (idx == -1) return;
+    final existing = _reports[idx];
+    if (existing.syncStatus == SyncStatus.pendingSync ||
+        existing.syncStatus == SyncStatus.rejectedByAi) {
+      return;
+    }
+    _reports[idx] = existing.copyWith(syncStatus: SyncStatus.pendingSync);
+    _persist();
+    notifyListeners();
   }
 
   Future<bool> _ensureBackendSession() async {
@@ -1703,51 +1756,70 @@ class ReportRepository extends ChangeNotifier {
   Future<CivicReport?> _syncCreatedReport(
     CivicReport created, {
     String? photoVerificationToken,
+    bool forceCreateNew = false,
   }) async {
-    if (!await _ensureBackendSession()) return null;
-    final outcome = await apiService.createReportDetailed(
-      created,
-      photoVerificationToken: photoVerificationToken,
-    );
-    if (outcome.rejectedByAi || outcome.duplicatePhoto) {
-      _markReportRejectedByAi(
-        created.id,
-        isDuplicatePhoto: outcome.duplicatePhoto,
-        khmerReason: outcome.khmerReason,
-        englishReason: outcome.englishReason,
+    try {
+      if (!await _ensureBackendSession()) {
+        _markReportPendingSync(created.id);
+        return null;
+      }
+      final outcome = await apiService.createReportDetailed(
+        created,
+        photoVerificationToken: photoVerificationToken,
+        forceCreateNew: forceCreateNew,
       );
-      return null;
-    }
-    final serverReport = outcome.report;
-    if (serverReport == null) return null;
-    if (serverReport.id != created.id) {
-      _localToServerIdMap[created.id] = serverReport.id;
-    }
-    final idx = _reports.indexWhere((r) => r.id == created.id);
-    if (idx != -1) {
-      _reports[idx] = serverReport.copyWith(
-        localPhotoPath: serverReport.localPhotoPath ?? created.localPhotoPath,
-        syncStatus: SyncStatus.synced,
-      );
-    }
-    for (var i = 0; i < _alerts.length; i++) {
-      if (_alerts[i].reportId == created.id) {
-        final a = _alerts[i];
-        _alerts[i] = AlertItem(
-          id: a.id,
-          reportId: serverReport.id,
-          khmerTitle: a.khmerTitle.replaceAll(created.id, serverReport.id),
-          englishTitle: a.englishTitle.replaceAll(created.id, serverReport.id),
-          khmerSubtitle: a.khmerSubtitle,
-          englishSubtitle: a.englishSubtitle,
-          createdAt: a.createdAt,
-          isRead: a.isRead,
+      if (outcome.rejectedByAi || outcome.duplicatePhoto) {
+        _markReportRejectedByAi(
+          created.id,
+          isDuplicatePhoto: outcome.duplicatePhoto,
+          khmerReason: outcome.khmerReason,
+          englishReason: outcome.englishReason,
+        );
+        return null;
+      }
+      final serverReport = outcome.report;
+      if (serverReport == null) {
+        _markReportPendingSync(created.id);
+        return null;
+      }
+      if (serverReport.id != created.id) {
+        _localToServerIdMap[created.id] = serverReport.id;
+      }
+      final idx = _reports.indexWhere((r) => r.id == created.id);
+      if (idx != -1) {
+        _reports[idx] = serverReport.copyWith(
+          localPhotoPath: serverReport.localPhotoPath ?? created.localPhotoPath,
+          additionalLocalPhotoPaths:
+              serverReport.additionalLocalPhotoPaths.isNotEmpty
+              ? serverReport.additionalLocalPhotoPaths
+              : created.additionalLocalPhotoPaths,
+          syncStatus: SyncStatus.synced,
         );
       }
+      for (var i = 0; i < _alerts.length; i++) {
+        if (_alerts[i].reportId == created.id) {
+          final a = _alerts[i];
+          _alerts[i] = AlertItem(
+            id: a.id,
+            reportId: serverReport.id,
+            khmerTitle: a.khmerTitle.replaceAll(created.id, serverReport.id),
+            englishTitle: a.englishTitle.replaceAll(
+              created.id,
+              serverReport.id,
+            ),
+            khmerSubtitle: a.khmerSubtitle,
+            englishSubtitle: a.englishSubtitle,
+            createdAt: a.createdAt,
+            isRead: a.isRead,
+          );
+        }
+      }
+      _persist();
+      notifyListeners();
+      return serverReport;
+    } finally {
+      _inFlightCreationIds.remove(created.id);
     }
-    _persist();
-    notifyListeners();
-    return serverReport;
   }
 
   Future<void> _syncAndRefreshFromBackend() async {
@@ -1837,7 +1909,8 @@ class ReportRepository extends ChangeNotifier {
           .where(
             (r) =>
                 r.syncStatus == SyncStatus.pendingSync ||
-                r.syncStatus == SyncStatus.rejectedByAi,
+                r.syncStatus == SyncStatus.rejectedByAi ||
+                _inFlightCreationIds.contains(r.id),
           )
           .toList(growable: false);
       final localOnlyIds = localOnly.map((r) => r.id).toSet();
@@ -1848,9 +1921,18 @@ class ReportRepository extends ChangeNotifier {
       changed = true;
     }
     if (remoteAlerts != null) {
+      final preservedLocal = _alerts
+          .where(_isLocalOnlyAlert)
+          .toList(growable: false);
+      final seenIds = <String>{for (final a in preservedLocal) a.id};
+      final merged = <AlertItem>[
+        ...preservedLocal,
+        for (final a in remoteAlerts)
+          if (seenIds.add(a.id)) a,
+      ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
       _alerts
         ..clear()
-        ..addAll(remoteAlerts);
+        ..addAll(merged);
       changed = true;
     }
     if (changed) {
